@@ -3,6 +3,7 @@
 import Image from 'next/image'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { useEffect, useRef } from 'react'
 import type { ReactNode } from 'react'
 
 type AdminSidebarProps = {
@@ -63,6 +64,7 @@ function initials(name?: string | null, email?: string | null) {
 
 export default function AdminSidebar({ locale, user, signOutSlot }: AdminSidebarProps) {
   const pathname = usePathname()
+  const desktopNavRef = useRef<HTMLElement | null>(null)
   const adminBase = `/${locale}/admin`
 
   const isActive = (href: string) => {
@@ -70,6 +72,54 @@ export default function AdminSidebar({ locale, user, signOutSlot }: AdminSidebar
     if (href === '') return pathname === adminBase
     return pathname === target || pathname.startsWith(`${target}/`)
   }
+
+  useEffect(() => {
+    if (process.env.NODE_ENV === 'production') return
+
+    const nav = desktopNavRef.current
+    if (!nav) return
+
+    let cleanupWheelCheck: (() => void) | undefined
+
+    const runScrollCheck = () => {
+      const originalScrollTop = nav.scrollTop
+      const canOverflow = nav.scrollHeight > nav.clientHeight
+
+      nav.scrollTop = originalScrollTop + 24
+      const canSetScrollTop = nav.scrollTop !== originalScrollTop
+      nav.scrollTop = originalScrollTop
+
+      const onWheel = () => {
+        const beforeWheelScrollTop = nav.scrollTop
+        window.setTimeout(() => {
+          const wheelChangedScrollTop = nav.scrollTop !== beforeWheelScrollTop
+          console.debug('[AdminSidebar] scroll diagnostic', {
+            canOverflow,
+            canSetScrollTop,
+            wheelChangedScrollTop,
+            scrollHeight: nav.scrollHeight,
+            clientHeight: nav.clientHeight,
+          })
+        }, 80)
+      }
+
+      console.debug('[AdminSidebar] scroll diagnostic', {
+        canOverflow,
+        canSetScrollTop,
+        scrollHeight: nav.scrollHeight,
+        clientHeight: nav.clientHeight,
+      })
+
+      nav.addEventListener('wheel', onWheel, { passive: true, once: true })
+      cleanupWheelCheck = () => nav.removeEventListener('wheel', onWheel)
+    }
+
+    const frame = window.requestAnimationFrame(runScrollCheck)
+    return () => {
+      window.cancelAnimationFrame(frame)
+      cleanupWheelCheck?.()
+    }
+  }, [])
 
   return (
     <>
@@ -100,7 +150,12 @@ export default function AdminSidebar({ locale, user, signOutSlot }: AdminSidebar
             </div>
           </div>
 
-          <nav className="admin-sidebar-scroll min-h-0 flex-1 space-y-4 overflow-y-scroll overscroll-contain px-3 py-3">
+          <nav
+            ref={desktopNavRef}
+            aria-label="Admin navigation"
+            tabIndex={0}
+            className="admin-sidebar-scroll min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-3 py-3"
+          >
             {NAV_GROUPS.map((group) => (
               <section key={group.label}>
                 <p className="mb-2 px-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-gray-400">{group.label}</p>
