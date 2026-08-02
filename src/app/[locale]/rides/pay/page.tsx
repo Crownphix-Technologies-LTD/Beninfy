@@ -17,7 +17,7 @@ import CountUp from 'react-countup'
 import { getFleetVehicleDisplayLabel } from '@/lib/fleetDisplay'
 import type { VehicleId, RouteId } from '@/types'
 
-type PaymentMethod = 'card' | 'mobile-money' | 'bank-transfer'
+type PaymentProvider = 'paystack' | 'payonus'
 
 type PayOnUsPaymentMethod = 'card' | 'bank' | 'palmpay' | 'opay'
 
@@ -32,6 +32,13 @@ type PayOnUsCheckoutResult = {
 type PayOnUsCheckoutError = {
   error?: string
   code?: string
+}
+
+type AppliedCoupon = {
+  code: string
+  description: string | null
+  discountNGN: number
+  finalAmountNGN: number
 }
 
 type PayOnUsCheckoutConfig = {
@@ -133,11 +140,45 @@ function PaymentContent() {
   const borderFee = matchedRoute ? getRouteBorderFee(matchedRoute.id as RouteId, tripType) : 0
   const total = rideFare + borderFee
 
-  const [method, setMethod] = useState<PaymentMethod>('card')
+  const [provider, setProvider] = useState<PaymentProvider>('paystack')
+  const [couponCode, setCouponCode] = useState('')
+  const [appliedCoupon, setAppliedCoupon] = useState<AppliedCoupon | null>(null)
+  const [couponMsg, setCouponMsg] = useState<string | null>(null)
+  const [validatingCoupon, setValidatingCoupon] = useState(false)
   const [processing, setProcessing] = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
 
-  const displayTotal = formatNGN(total)
+  const normalizedCouponInput = couponCode.trim().toUpperCase().replace(/\s+/g, '')
+  const activeCoupon = appliedCoupon?.code === normalizedCouponInput ? appliedCoupon : null
+  const discountNGN = activeCoupon?.discountNGN ?? 0
+  const finalTotal = Math.max(0, total - discountNGN)
+  const displayTotal = formatNGN(finalTotal)
+
+  const handleValidateCoupon = async () => {
+    setValidatingCoupon(true)
+    setCouponMsg(null)
+    setAppliedCoupon(null)
+    try {
+      const res = await fetch('/api/coupons/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: couponCode, amountNGN: total }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error ?? 'Coupon could not be applied')
+      setAppliedCoupon({
+        code: data.coupon.code,
+        description: data.coupon.description ?? null,
+        discountNGN: data.discountNGN,
+        finalAmountNGN: data.finalAmountNGN,
+      })
+      setCouponMsg(`${data.coupon.code} applied`)
+    } catch (err) {
+      setCouponMsg(err instanceof Error ? err.message : 'Coupon could not be applied')
+    } finally {
+      setValidatingCoupon(false)
+    }
+  }
 
   const handlePay = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -156,7 +197,7 @@ function PaymentContent() {
           vehicleId,
           fleetVehicleId: fleetVehicle?.id,
           passengers,
-          priceNGN: total,
+          priceNGN: finalTotal,
           passengerName,
           passengerEmail,
           passengerPhone,
@@ -166,6 +207,7 @@ function PaymentContent() {
           dropoffAddress,
           specialRequirements,
           pickupArea,
+          couponCode: couponCode.trim() || undefined,
         }),
       })
       if (bookingRes.status === 401) {
@@ -188,10 +230,16 @@ function PaymentContent() {
           passengerName,
           passengerPhone,
           currencyCode: 'NGN',
+          provider,
         }),
       })
       const payData = await payRes.json().catch(() => ({}))
       if (!payRes.ok) throw new Error(payData.error ?? 'Payment init failed')
+
+      if (payData.mode === 'paystack_redirect' && payData.authorizationUrl) {
+        window.location.assign(payData.authorizationUrl)
+        return
+      }
 
       if (payData.mode === 'payonus_checkout' && payData.checkout) {
         await loadPayOnUsCheckoutScript()
@@ -200,10 +248,6 @@ function PaymentContent() {
         window.OnUsCheckout.init()
         window.OnUsCheckout.checkout({
           ...(payData.checkout as Omit<PayOnUsCheckoutConfig, 'onSuccess' | 'onError' | 'onClose'>),
-          paymentMethods:
-            method === 'card' ? ['card'] :
-            method === 'bank-transfer' ? ['bank', 'palmpay', 'opay'] :
-            ['palmpay', 'opay'],
           onSuccess: async (response) => {
             try {
               const reference = response.reference || payData.reference
@@ -257,10 +301,21 @@ function PaymentContent() {
     }
   }
 
-  const methods: { id: PaymentMethod; label: string; desc: string; icon: string }[] = [
-    { id: 'card', label: 'Card', desc: 'Pay securely with Visa, Mastercard, or Verve through PayOnUs.', icon: 'credit_card' },
-    { id: 'bank-transfer', label: 'Bank transfer', desc: 'Pay into a generated Naira virtual account.', icon: 'account_balance' },
-    { id: 'mobile-money', label: 'PalmPay / Opay', desc: 'Complete payment through PalmPay or Opay from PayOnUs checkout.', icon: 'smartphone' },
+  const paymentProviders: { id: PaymentProvider; label: string; desc: string; icon: string; details: string }[] = [
+    {
+      id: 'paystack',
+      label: 'Pay with Paystack',
+      desc: 'Open Paystack checkout and choose any available Paystack collection method.',
+      icon: 'payments',
+      details: 'Paystack may show cards, bank transfer, bank account, USSD, and other channels enabled on your Paystack dashboard.',
+    },
+    {
+      id: 'payonus',
+      label: 'Pay via PayOnUs',
+      desc: 'Open PayOnUs checkout and choose any available PayOnUs collection method.',
+      icon: 'account_balance_wallet',
+      details: 'PayOnUs may show its configured wallet, bank, card, PalmPay, Opay, and local checkout options.',
+    },
   ]
 
   return (
@@ -311,47 +366,29 @@ function PaymentContent() {
 
                 <div className="space-y-4">
                   <div className="rounded-xl border border-gray-200 bg-gray-50 p-3.5 md:p-4">
-                    <p className="text-xs font-semibold text-gray-900">Naira collection via PayOnUs</p>
-                    <p className="mt-1 text-xs text-gray-500">Supports card, bank transfer, PalmPay, and Opay checkout options in NGN.</p>
+                    <p className="text-xs font-semibold text-gray-900">Naira collection via Paystack and PayOnUs</p>
+                    <p className="mt-1 text-xs text-gray-500">Choose a provider, then use any collection method available inside that provider&apos;s secure checkout.</p>
                   </div>
 
-                  {methods.map((m) => (
+                  {paymentProviders.map((p) => (
                     <div
-                      key={m.id}
-                      onClick={() => setMethod(m.id)}
-                      className={`rounded-xl border-2 p-3.5 md:p-4 cursor-pointer transition-all ${method === m.id ? 'border-primary bg-primary/5' : 'border-gray-200 bg-gray-50 hover:border-primary/40'}`}
+                      key={p.id}
+                      onClick={() => setProvider(p.id)}
+                      className={`rounded-xl border-2 p-3.5 md:p-4 cursor-pointer transition-all ${provider === p.id ? 'border-primary bg-primary/5' : 'border-gray-200 bg-gray-50 hover:border-primary/40'}`}
                     >
                       <div className="flex items-start gap-3 md:gap-4">
-                          <span className={`material-symbols-outlined text-[22px] mt-0.5 ${method === m.id ? 'text-primary' : 'text-gray-300'}`}>
-                            {method === m.id ? 'radio_button_checked' : 'radio_button_unchecked'}
+                          <span className={`material-symbols-outlined text-[22px] mt-0.5 ${provider === p.id ? 'text-primary' : 'text-gray-300'}`}>
+                            {provider === p.id ? 'radio_button_checked' : 'radio_button_unchecked'}
                           </span>
                           <div className="flex-1">
                             <div className="flex justify-between items-center gap-3 mb-1">
-                              <span className="text-sm font-semibold text-gray-900">{m.label}</span>
-                              <span className="material-symbols-outlined text-gray-400 text-[20px]">{m.icon}</span>
+                              <span className="text-sm font-semibold text-gray-900">{p.label}</span>
+                              <span className="material-symbols-outlined text-gray-400 text-[20px]">{p.icon}</span>
                             </div>
-                            <p className="text-xs text-gray-500">{m.desc}</p>
-                          {/* Card form */}
-                          {m.id === 'card' && method === 'card' && (
+                            <p className="text-xs text-gray-500">{p.desc}</p>
+                          {provider === p.id && (
                             <div className="mt-4 p-4 bg-gray-50 rounded-xl">
-                              <p className="text-xs text-gray-500">Card details are entered inside PayOnUs&apos; secure hosted checkout.</p>
-                            </div>
-                          )}
-
-                          {/* Mobile money info */}
-                          {m.id === 'mobile-money' && method === 'mobile-money' && (
-                            <div className="mt-4 p-4 bg-gray-50 rounded-xl">
-                              <p className="text-xs text-gray-500">PayOnUs will open PalmPay and Opay options inside checkout.</p>
-                            </div>
-                          )}
-
-                          {/* Bank transfer info */}
-                          {m.id === 'bank-transfer' && method === 'bank-transfer' && (
-                            <div className="mt-4 p-4 bg-gray-50 rounded-xl">
-                              <p className="text-xs font-semibold text-gray-900">{t('bankTitle')}</p>
-                              <p className="text-xs mt-2 text-gray-500">
-                                PayOnUs will generate secure bank transfer instructions inside checkout.
-                              </p>
+                              <p className="text-xs text-gray-500">{p.details}</p>
                             </div>
                           )}
                         </div>
@@ -420,12 +457,44 @@ function PaymentContent() {
                       <span className="text-gray-500">{t('borderFee')}</span>
                       <span className="font-medium text-gray-900">₦<CountUp end={borderFee} separator="," duration={1.2} /></span>
                     </div>
+                    {discountNGN > 0 && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-500">Coupon discount</span>
+                        <span className="font-medium text-emerald-700">-₦<CountUp end={discountNGN} separator="," duration={1.2} /></span>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="rounded-xl border border-gray-100 bg-gray-50 p-3">
+                    <label className="mb-2 block text-xs font-semibold text-gray-700">Coupon code</label>
+                    <div className="flex gap-2">
+                      <input
+                        value={couponCode}
+                        onChange={(event) => {
+                          setCouponCode(event.target.value)
+                          setCouponMsg(null)
+                        }}
+                        placeholder="Enter code"
+                        className="min-w-0 flex-1 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm uppercase outline-none focus:border-primary focus:ring-2 focus:ring-primary/10"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleValidateCoupon}
+                        disabled={validatingCoupon || !couponCode.trim()}
+                        className="rounded-lg bg-[#3e004c] px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {validatingCoupon ? 'Checking...' : 'Apply'}
+                      </button>
+                    </div>
+                    {couponMsg && (
+                      <p className={`mt-2 text-xs ${activeCoupon ? 'text-emerald-700' : 'text-red-500'}`}>{couponMsg}</p>
+                    )}
                   </div>
 
                   <div className="flex justify-between items-center">
                     <span className="font-bold text-gray-900">{t('totalAmount')}</span>
                     <span className="font-bold text-base" style={{ color: '#735c00' }}>
-                      ₦<CountUp end={total} separator="," duration={1.5} />
+                      ₦<CountUp end={finalTotal} separator="," duration={1.5} />
                     </span>
                   </div>
 

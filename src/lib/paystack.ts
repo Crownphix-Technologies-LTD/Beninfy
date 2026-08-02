@@ -1,3 +1,4 @@
+import { createHmac, timingSafeEqual } from 'crypto'
 import { prisma } from '@/lib/prisma'
 
 const PAYSTACK_BASE_URL = 'https://api.paystack.co'
@@ -27,11 +28,32 @@ export type PaystackVerifyResponse = {
 }
 
 export type PaymentSettlement =
-  | { ok: true; status: 'paid'; bookingId: string; reference: string }
+  | { ok: true; status: 'paid'; bookingId: string; reference: string; providerReference?: string }
   | { ok: false; status: 'pending' | 'failed' | 'amount_mismatch' | 'not_found'; message: string }
+
+export function paystackEnabled() {
+  return process.env.PAYMENTS_ENABLED === 'true'
+}
 
 export function getPaystackSecret() {
   return process.env.PAYSTACK_SECRET_KEY?.trim()
+}
+
+export function getPaystackPublicKey() {
+  return process.env.PAYSTACK_PUBLIC_KEY?.trim()
+}
+
+export function getPaystackWebhookAllowedIps() {
+  return (process.env.PAYSTACK_WEBHOOK_ALLOWED_IPS ?? '')
+    .split(',')
+    .map((ip) => ip.trim())
+    .filter(Boolean)
+}
+
+export function getPaystackConfigurationError() {
+  if (!paystackEnabled()) return 'Payments are temporarily unavailable'
+  if (!getPaystackSecret()) return 'Paystack secret key is not configured'
+  return null
 }
 
 export async function initializePaystackTransaction({
@@ -41,6 +63,7 @@ export async function initializePaystackTransaction({
   reference,
   callbackUrl,
   metadata,
+  channels,
 }: {
   secret: string
   email: string
@@ -48,6 +71,7 @@ export async function initializePaystackTransaction({
   reference: string
   callbackUrl: string
   metadata: Record<string, string>
+  channels?: string[]
 }) {
   const res = await fetch(`${PAYSTACK_BASE_URL}/transaction/initialize`, {
     method: 'POST',
@@ -62,6 +86,7 @@ export async function initializePaystackTransaction({
       currency: 'NGN',
       callback_url: callbackUrl,
       metadata,
+      ...(channels?.length ? { channels } : {}),
     }),
   })
 
@@ -90,6 +115,22 @@ export async function verifyPaystackTransaction(secret: string, reference: strin
   return json
 }
 
+export function verifyPaystackWebhookSignature(rawBody: string, signature: string | null) {
+  const secret = getPaystackSecret()
+  if (!secret || !signature) return false
+
+  const expected = createHmac('sha512', secret).update(rawBody).digest('hex')
+  const a = Buffer.from(expected, 'utf8')
+  const b = Buffer.from(signature, 'utf8')
+  return a.length === b.length && timingSafeEqual(a, b)
+}
+
+export function verifyPaystackWebhookIp(requestIp: string) {
+  const allowedIps = getPaystackWebhookAllowedIps()
+  if (allowedIps.length === 0) return true
+  return allowedIps.includes(requestIp)
+}
+
 export async function settlePaymentFromPaystack(reference: string, verified: PaystackVerifyResponse): Promise<PaymentSettlement> {
   const payment = await prisma.payment.findUnique({
     where: { reference },
@@ -113,12 +154,21 @@ export async function settlePaymentFromPaystack(reference: string, verified: Pay
   }
 
   await prisma.$transaction([
-    prisma.payment.update({ where: { reference }, data: { status: 'paid' } }),
+    prisma.payment.update({
+      where: { reference },
+      data: {
+        status: 'paid',
+        provider: 'paystack',
+        providerReference: transaction.reference ?? payment.providerReference,
+        currencyCode: 'NGN',
+        checkoutAmount: payment.amountNGN,
+      },
+    }),
     prisma.booking.update({
       where: { id: payment.bookingId },
       data: { status: 'confirmed', paymentId: payment.id },
     }),
   ])
 
-  return { ok: true, status: 'paid', bookingId: payment.bookingId, reference }
+  return { ok: true, status: 'paid', bookingId: payment.bookingId, reference, providerReference: transaction.reference }
 }

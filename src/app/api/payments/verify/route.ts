@@ -3,10 +3,15 @@ import { z } from 'zod'
 import { requireCustomer } from '@/lib/customer'
 import { prisma } from '@/lib/prisma'
 import {
-  getPaymentConfigurationError,
   settlePaymentFromPayOnUs,
   verifyPayOnUsPayment,
 } from '@/lib/payonus'
+import {
+  getPaystackConfigurationError,
+  getPaystackSecret,
+  settlePaymentFromPaystack,
+  verifyPaystackTransaction,
+} from '@/lib/paystack'
 import { checkRateLimit, requestIp } from '@/lib/rateLimit'
 
 const verifySchema = z.object({
@@ -15,11 +20,6 @@ const verifySchema = z.object({
 })
 
 async function verify(req: Request, reference: string, providerReference?: string) {
-  const configurationError = getPaymentConfigurationError()
-  if (configurationError) {
-    return NextResponse.json({ error: configurationError }, { status: 503 })
-  }
-
   const customer = await requireCustomer()
   if (!customer.ok) return customer.response
   const { session } = customer
@@ -43,6 +43,27 @@ async function verify(req: Request, reference: string, providerReference?: strin
   })
   if (!payment || payment.booking.userId !== user.id) {
     return NextResponse.json({ error: 'Payment not found' }, { status: 404 })
+  }
+
+  if (payment.provider === 'paystack') {
+    const configurationError = getPaystackConfigurationError()
+    if (configurationError) {
+      return NextResponse.json({ error: configurationError }, { status: 503 })
+    }
+
+    const secret = getPaystackSecret()
+    if (!secret) return NextResponse.json({ error: 'Paystack secret key is not configured' }, { status: 503 })
+
+    try {
+      const verified = await verifyPaystackTransaction(secret, reference)
+      const settlement = await settlePaymentFromPaystack(reference, verified)
+      return NextResponse.json({ payment: settlement, transaction: verified.data })
+    } catch (err) {
+      return NextResponse.json(
+        { error: err instanceof Error ? err.message : 'Payment verification failed' },
+        { status: 502 }
+      )
+    }
   }
 
   const onusReference = providerReference || payment.providerReference

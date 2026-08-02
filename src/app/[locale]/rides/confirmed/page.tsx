@@ -10,6 +10,12 @@ import { getTranslations, setRequestLocale } from 'next-intl/server'
 import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { getPaymentConfigurationError, settlePaymentFromPayOnUs, verifyPayOnUsPayment } from '@/lib/payonus'
+import {
+  getPaystackConfigurationError,
+  getPaystackSecret,
+  settlePaymentFromPaystack,
+  verifyPaystackTransaction,
+} from '@/lib/paystack'
 import { getRoutePriceOverrides } from '@/lib/routePriceOverrides'
 import { getFleetVehicleDisplayLabel } from '@/lib/fleetDisplay'
 import { isAdminRole } from '@/lib/roles'
@@ -53,7 +59,17 @@ export default async function BookingConfirmedPage({ params, searchParams }: Pro
     })
     if (payment?.booking.userId === customerUserId) {
       const onusReference = providerReference || payment.providerReference
-      if (!getPaymentConfigurationError() && onusReference && payment.status !== 'paid') {
+      if (payment.provider === 'paystack' && payment.status !== 'paid') {
+        const secret = getPaystackSecret()
+        if (!getPaystackConfigurationError() && secret) {
+          try {
+            const verified = await verifyPaystackTransaction(secret, paymentReference)
+            await settlePaymentFromPaystack(paymentReference, verified)
+          } catch {
+            // Keep the page renderable; dashboard/webhook can still reflect final status.
+          }
+        }
+      } else if (!getPaymentConfigurationError() && onusReference && payment.status !== 'paid') {
         try {
           const verified = await verifyPayOnUsPayment(onusReference)
           await settlePaymentFromPayOnUs(paymentReference, onusReference, verified)

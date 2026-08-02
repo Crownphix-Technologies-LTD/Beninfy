@@ -23,6 +23,7 @@ const NAV_GROUPS = [
       { href: '', label: 'Overview', icon: 'dashboard', hint: 'Daily pulse' },
       { href: '/bookings', label: 'Bookings', icon: 'event', hint: 'Trips & assignments' },
       { href: '/payments', label: 'Payments', icon: 'payments', hint: 'Collections' },
+      { href: '/coupons', label: 'Coupons', icon: 'confirmation_number', hint: 'Discount codes' },
       { href: '/route-prices', label: 'Prices', icon: 'sell', hint: 'Route fares' },
       { href: '/users', label: 'Users', icon: 'group', hint: 'Accounts' },
     ],

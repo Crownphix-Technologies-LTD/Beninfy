@@ -24,6 +24,8 @@ export async function propagateCategoryRoutePrice(
     select: { id: true },
   })
 
+  let propagated = 0
+
   for (const unit of fleetUnits) {
     const existing = await tx.routePrice.findFirst({
       where: {
@@ -35,10 +37,6 @@ export async function propagateCategoryRoutePrice(
     })
 
     if (existing) {
-      await tx.routePrice.update({
-        where: { id: existing.id },
-        data: { amountNGN, notes },
-      })
       continue
     }
 
@@ -51,7 +49,8 @@ export async function propagateCategoryRoutePrice(
         notes,
       },
     })
+    propagated += 1
   }
 
-  return { propagated: fleetUnits.length }
+  return { propagated }
 }

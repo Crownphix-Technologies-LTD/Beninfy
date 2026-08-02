@@ -7,7 +7,9 @@ import { useSearchParams } from 'next/navigation'
 import { bookingCities, findRoute } from '@/data/routes'
 import { formatPriceRange, getRoutePrice } from '@/data/pricing'
 import { useVehicles } from '@/hooks/useVehicles'
+import { useFleetVehicles } from '@/hooks/useFleetVehicles'
 import { useRoutePriceOverrides } from '@/hooks/useRoutePriceOverrides'
+import { getFleetVehicleDisplayLabel } from '@/lib/fleetDisplay'
 import type { VehicleId, RouteId } from '@/types'
 import CatalogImage from '@/components/shared/CatalogImage'
 
@@ -17,6 +19,24 @@ const VEHICLE_BADGES: Partial<Record<VehicleId, { text: string; cls: string }>> 
   sienna: { text: 'Best for Families', cls: 'bg-secondary-container text-on-secondary-container' },
   prado: { text: 'VIP Security', cls: 'bg-primary/90 text-white' },
   sprinter: { text: 'Corporate', cls: 'bg-primary/90 text-white' },
+}
+
+type RideOption = {
+  id: string
+  categoryId: VehicleId
+  priceTargetId: VehicleId
+  name: string
+  pricingLabel: string
+  description: string
+  image: string
+  capacity: number
+  luggageCapacity: number
+  features: string[]
+  fleetVehicleId: string | null
+  categoryName?: string
+  color?: string | null
+  currentCity?: string | null
+  isFleetUnit: boolean
 }
 
 export default function RidesPage() {
@@ -51,6 +71,14 @@ function RidesContent() {
 
   const matchedRoute = findRoute(from, to)
   const { overrides } = useRoutePriceOverrides(matchedRoute?.id)
+  const canCheckFleetAvailability = Boolean(
+    matchedRoute && date && (tripType === 'one-way' || returnDate)
+  )
+  const { fleetVehicles, loading: fleetLoading } = useFleetVehicles({
+    date,
+    returnDate: tripType === 'round-trip' ? returnDate : undefined,
+    enabled: canCheckFleetAvailability,
+  })
 
   const toggleVehicle = (id: VehicleId) =>
     setSelectedVehicles((prev) =>
@@ -58,7 +86,7 @@ function RidesContent() {
     )
 
   const selectedCategoryIds = new Set(selectedVehicles)
-  const rideOptions = vehicles.map((vehicle) => ({
+  const categoryOptions: RideOption[] = vehicles.map((vehicle) => ({
     id: vehicle.id,
     categoryId: vehicle.id,
     priceTargetId: vehicle.id,
@@ -70,7 +98,37 @@ function RidesContent() {
     luggageCapacity: vehicle.luggageCapacity,
     features: vehicle.features,
     fleetVehicleId: null as string | null,
+    isFleetUnit: false,
   }))
+  const fleetOptions: RideOption[] = canCheckFleetAvailability
+    ? fleetVehicles.flatMap((unit) => {
+        const category = vehicles.find((vehicle) => vehicle.id === unit.vehicleId)
+        if (!category) return []
+
+        const displayLabel = unit.displayLabel || getFleetVehicleDisplayLabel(unit.label)
+
+        return [
+          {
+            id: unit.id,
+            categoryId: unit.vehicleId,
+            priceTargetId: unit.id,
+            name: displayLabel,
+            pricingLabel: unit.label,
+            description: unit.vehicle?.description ?? category.description,
+            image: unit.vehicle?.image ?? category.image,
+            capacity: unit.vehicle?.capacity ?? category.capacity,
+            luggageCapacity: unit.vehicle?.luggageCapacity ?? category.luggageCapacity,
+            features: unit.vehicle?.features?.length ? unit.vehicle.features : category.features,
+            fleetVehicleId: unit.id,
+            categoryName: unit.vehicle?.name ?? category.name,
+            color: unit.color,
+            currentCity: unit.currentCity,
+            isFleetUnit: true,
+          },
+        ]
+      })
+    : []
+  const rideOptions = canCheckFleetAvailability ? fleetOptions : categoryOptions
 
   const displayVehicles = rideOptions.filter((v) => {
     if (selectedVehicles.length === 0) return true
@@ -263,6 +321,23 @@ function RidesContent() {
               </div>
             )}
 
+            {canCheckFleetAvailability && fleetLoading && (
+              <div className="bg-surface-container-low rounded-2xl p-6 flex items-center gap-3 text-on-surface-variant">
+                <span className="material-symbols-outlined animate-spin text-primary text-[24px]">progress_activity</span>
+                <span className="text-body-md">Checking available fleet units for your trip dates...</span>
+              </div>
+            )}
+
+            {canCheckFleetAvailability && !fleetLoading && displayVehicles.length === 0 && (
+              <div className="bg-surface-container-low rounded-2xl p-8 text-center">
+                <span className="material-symbols-outlined text-primary text-[48px] mb-4 block">directions_car</span>
+                <h3 className="text-headline-sm mb-2">No fleet units available</h3>
+                <p className="text-on-surface-variant text-body-md">
+                  Every selected vehicle in this category is already booked or blocked for the chosen date.
+                </p>
+              </div>
+            )}
+
             {displayVehicles.map((vehicle) => {
               const price = getPriceForVehicle(vehicle.priceTargetId, vehicle.categoryId, vehicle.pricingLabel)
               if (matchedRoute && !price) return null
@@ -292,11 +367,22 @@ function RidesContent() {
                   <div className="md:w-3/5 p-4 md:p-6 flex flex-col justify-between">
                     <div>
                       <div className="flex flex-col gap-1 sm:flex-row sm:justify-between sm:items-start mb-2">
-                        <h2 className="text-headline-sm text-primary">{vehicle.name}</h2>
+                        <div>
+                          <h2 className="text-headline-sm text-primary">{vehicle.name}</h2>
+                          {vehicle.isFleetUnit && vehicle.categoryName && (
+                            <p className="text-label-sm text-on-surface-variant">
+                              {vehicle.categoryName}
+                              {vehicle.color ? ` • ${vehicle.color}` : ''}
+                              {vehicle.currentCity ? ` • ${vehicle.currentCity}` : ''}
+                            </p>
+                          )}
+                        </div>
                         {price ? (
                           <div className="sm:text-right">
                             <span className="text-headline-sm text-secondary">{price}</span>
-                            <span className="block text-label-sm text-on-surface-variant">Drop-off fare</span>
+                            <span className="block text-label-sm text-on-surface-variant">
+                              {vehicle.isFleetUnit ? 'Fleet unit fare' : 'Drop-off fare'}
+                            </span>
                           </div>
                         ) : (
                           <span className="text-label-sm text-on-surface-variant">{t('priceSelect')}</span>

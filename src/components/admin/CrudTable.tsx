@@ -79,6 +79,7 @@ export function CrudTable<T extends { id: string } & Record<string, unknown>>({
     collectionKey === 'vehicles' ? 'category' :
     collectionKey === 'routes' ? 'route' :
     collectionKey === 'routePrices' ? 'sell' :
+    collectionKey === 'coupons' ? 'confirmation_number' :
     collectionKey === 'drivers' ? 'badge' :
     collectionKey === 'tours' ? 'travel_explore' :
     collectionKey === 'borderFees' ? 'currency_exchange' :
@@ -121,7 +122,12 @@ export function CrudTable<T extends { id: string } & Record<string, unknown>>({
     }
   }, [fetchUrl, collectionKey])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    const fetchData = async () => {
+      await load()
+    }
+    void fetchData()
+  }, [load])
 
   const openCreate = () => {
     const initial: Record<string, unknown> = { ...defaultValues }

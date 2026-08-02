@@ -8,6 +8,7 @@ import { getRouteDropoffPrice, requiresLagosPickupArea } from '@/data/pricing'
 import { getRouteBorderFee } from '@/data/borderFees'
 import { vehicles as catalogVehicles } from '@/data/vehicles'
 import { assertFleetVehicleAvailable, assertVehicleTypeAvailable, findAvailableFleetVehicle } from '@/lib/availability'
+import { normalizeCouponCode, validateCouponCode } from '@/lib/coupons'
 import { getRoutePriceOverrides } from '@/lib/routePriceOverrides'
 import type { RouteId, VehicleId } from '@/types'
 
@@ -30,6 +31,7 @@ const createSchema = z.object({
   dropoffAddress: z.string().trim().max(240).optional(),
   specialRequirements: z.string().trim().max(1000).optional(),
   pickupArea: z.enum(['mainland', 'island']).optional(),
+  couponCode: z.string().trim().max(60).optional(),
 })
 
 class BookingAvailabilityError extends Error {
@@ -121,7 +123,8 @@ export async function POST(req: Request) {
   const legCount = data.tripType === 'round-trip' ? 2 : 1
   const rideFare = dropoffFare * legCount
   const borderFee = getRouteBorderFee(matchedRoute.id as RouteId, data.tripType)
-  const priceNGN = rideFare + borderFee
+  const subtotalNGN = rideFare + borderFee
+  const normalizedCouponCode = data.couponCode ? normalizeCouponCode(data.couponCode) : ''
 
   try {
     const booking = await prisma.$transaction(async (tx) => {
@@ -156,6 +159,24 @@ export async function POST(req: Request) {
         }
         reservedFleetVehicles.set(key, fleetVehicle)
       }
+      const couponValidation = normalizedCouponCode
+        ? await validateCouponCode(normalizedCouponCode, subtotalNGN, tx)
+        : null
+
+      if (couponValidation && !couponValidation.ok) {
+        throw new BookingAvailabilityError(couponValidation.error, 400)
+      }
+
+      const appliedCoupon = couponValidation?.ok ? couponValidation : null
+      const discountNGN = appliedCoupon?.discountNGN ?? 0
+      const priceNGN = Math.max(0, subtotalNGN - discountNGN)
+
+      if (appliedCoupon) {
+        await tx.coupon.update({
+          where: { id: appliedCoupon.coupon.id },
+          data: { redeemedCount: { increment: 1 } },
+        })
+      }
 
       return tx.booking.create({
         data: {
@@ -176,6 +197,9 @@ export async function POST(req: Request) {
           vehicleId: vehicle.id,
           passengers: data.passengers,
           priceNGN,
+          discountNGN,
+          couponId: appliedCoupon?.coupon.id,
+          couponCode: appliedCoupon?.coupon.code,
           legs: {
             create: [
               {
