@@ -228,6 +228,7 @@ function PaymentContent() {
           bookingId: booking.id,
           locale,
           passengerName,
+          passengerEmail,
           passengerPhone,
           currencyCode: 'NGN',
           provider,

@@ -23,6 +23,7 @@ const initSchema = z.object({
   bookingId: z.string().min(1),
   locale: z.enum(['en', 'fr']).default('en'),
   passengerName: z.string().trim().max(100).optional(),
+  passengerEmail: z.string().trim().email().optional().or(z.literal('')),
   passengerPhone: z.string().trim().max(40).optional(),
   currencyCode: z.literal('NGN').default('NGN'),
   provider: z.enum(['paystack', 'payonus']).default('paystack'),
@@ -62,9 +63,9 @@ export async function POST(req: Request) {
   }
 
   const reference = `BFY-${booking.id.slice(-6).toUpperCase()}-${randomBytes(3).toString('hex').toUpperCase()}`
-  const email = user.email ?? `user-${user.id}@beninfy.com`
+  const email = parsed.data.passengerEmail || booking.passengerEmail || user.email || `user-${user.id}@beninfy.com`
   const origin = new URL(req.url).origin
-  const customerName = parsed.data.passengerName || user.name || 'Beninfy Customer'
+  const customerName = parsed.data.passengerName || booking.passengerName || user.name || 'Beninfy Customer'
 
   if (provider === 'paystack') {
     const configurationError = getPaystackConfigurationError()
