@@ -13,6 +13,8 @@ import {
 } from '@/lib/paystack'
 import { checkRateLimit, requestIp } from '@/lib/rateLimit'
 
+export const runtime = 'nodejs'
+
 type PaystackWebhookPayload = {
   event?: string
   data?: PaystackVerifyResponse['data']

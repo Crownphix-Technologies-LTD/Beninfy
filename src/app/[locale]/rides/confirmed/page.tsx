@@ -21,6 +21,8 @@ import { getFleetVehicleDisplayLabel } from '@/lib/fleetDisplay'
 import { isAdminRole } from '@/lib/roles'
 import type { VehicleId, RouteId } from '@/types'
 
+export const runtime = 'nodejs'
+
 interface Props {
   params: Promise<{ locale: string }>
   searchParams: Promise<{

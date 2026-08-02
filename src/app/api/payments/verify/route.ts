@@ -14,6 +14,8 @@ import {
 } from '@/lib/paystack'
 import { checkRateLimit, requestIp } from '@/lib/rateLimit'
 
+export const runtime = 'nodejs'
+
 const verifySchema = z.object({
   reference: z.string().trim().min(1).max(100),
   providerReference: z.string().trim().min(1).max(160).optional(),

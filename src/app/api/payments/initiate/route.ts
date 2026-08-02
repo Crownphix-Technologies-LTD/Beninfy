@@ -17,6 +17,8 @@ import {
 } from '@/lib/paystack'
 import { checkRateLimit, requestIp } from '@/lib/rateLimit'
 
+export const runtime = 'nodejs'
+
 const initSchema = z.object({
   bookingId: z.string().min(1),
   locale: z.enum(['en', 'fr']).default('en'),
