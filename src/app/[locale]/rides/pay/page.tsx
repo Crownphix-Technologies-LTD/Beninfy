@@ -41,6 +41,16 @@ type AppliedCoupon = {
   finalAmountNGN: number
 }
 
+function parseTravelersParam(value: string) {
+  if (!value) return undefined
+  try {
+    const parsed = JSON.parse(value)
+    return Array.isArray(parsed) ? parsed : undefined
+  } catch {
+    return undefined
+  }
+}
+
 type PayOnUsCheckoutConfig = {
   businessId: string
   amount: number
@@ -119,10 +129,14 @@ function PaymentContent() {
   const pickupAreaParam = params.get('pickupArea')
   const pickupArea = (pickupAreaParam === 'mainland' || pickupAreaParam === 'island' ? pickupAreaParam : undefined) as LagosPickupArea | undefined
   const passengers = Math.max(1, parseInt(params.get('passengers') ?? '1', 10) || 1)
+  const travelersParam = params.get('travelers') ?? ''
+  const travelers = parseTravelersParam(travelersParam)
 
   const vehicle = vehicles.find((v) => v.id === vehicleId)
   const fleetVehicle = fleetVehicles.find((unit) => unit.id === fleetVehicleId && unit.vehicleId === vehicleId)
   const vehicleDisplayName = fleetVehicle ? getFleetVehicleDisplayLabel(fleetVehicle.label) : vehicle?.name
+  const vehicleCapacity = vehicle?.capacity ?? passengers
+  const overCapacity = passengers > vehicleCapacity
   const matchedRoute = findRoute(from, to)
   const { overrides } = useRoutePriceOverrides(matchedRoute?.id)
   const dropoffFare = matchedRoute
@@ -185,6 +199,9 @@ function PaymentContent() {
     setProcessing(true)
     setErrorMsg(null)
     try {
+      if (overCapacity) {
+        throw new Error(`${vehicleDisplayName ?? 'This vehicle'} can only carry ${vehicleCapacity} passengers`)
+      }
       const bookingRes = await fetch('/api/bookings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -203,6 +220,7 @@ function PaymentContent() {
           passengerPhone,
           passportId,
           nationality,
+          travelers,
           pickupAddress,
           dropoffAddress,
           specialRequirements,
@@ -339,6 +357,7 @@ function PaymentContent() {
             phone: passengerPhone,
             passportId,
             nationality,
+            ...(travelersParam ? { travelers: travelersParam } : {}),
             pickupAddress,
             dropoffAddress,
             specialRequirements,
@@ -430,6 +449,9 @@ function PaymentContent() {
                     <div>
                       <p className="text-sm font-semibold text-gray-900">{vehicleDisplayName ?? vehicleId}</p>
                       <p className="text-xs text-gray-500">{from} → {to}</p>
+                      <p className={`text-xs ${overCapacity ? 'text-red-500' : 'text-gray-500'}`}>
+                        {passengers} passenger{passengers === 1 ? '' : 's'} • capacity {vehicleCapacity}
+                      </p>
                       {tripType === 'round-trip' && <p className="text-xs text-gray-500">{to} → {from}</p>}
                       {date && (
                         <p className="text-xs text-gray-400 mt-0.5">{new Date(date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</p>
@@ -516,9 +538,15 @@ function PaymentContent() {
                     </div>
                   </div>
 
+                  {overCapacity && (
+                    <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-600">
+                      {vehicleDisplayName ?? 'This vehicle'} can only carry {vehicleCapacity} passengers. Go back and choose a larger vehicle or reduce the group size.
+                    </div>
+                  )}
+
                   <button
                     type="submit"
-                    disabled={processing}
+                    disabled={processing || overCapacity}
                     className="w-full py-4 rounded-xl text-sm font-semibold text-white flex items-center justify-center gap-2 hover:opacity-90 active:scale-[0.98] transition-all shadow-md disabled:opacity-60 disabled:cursor-wait"
                     style={{ background: '#3e004c' }}
                   >

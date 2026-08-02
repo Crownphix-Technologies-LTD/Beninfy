@@ -27,6 +27,15 @@ const createSchema = z.object({
   passengerPhone: z.string().trim().max(40).optional(),
   passportId: z.string().trim().max(80).optional(),
   nationality: z.string().trim().max(80).optional(),
+  travelers: z.array(z.object({
+    fullName: z.string().trim().min(1).max(100),
+    email: z.string().trim().email().optional().or(z.literal('')),
+    phone: z.string().trim().max(40).optional().or(z.literal('')),
+    passportId: z.string().trim().min(1).max(80),
+    nationality: z.string().trim().min(1).max(80),
+    lead: z.boolean().optional(),
+    sequence: z.number().int().positive().optional(),
+  })).max(50).optional(),
   pickupAddress: z.string().trim().max(240).optional(),
   dropoffAddress: z.string().trim().max(240).optional(),
   specialRequirements: z.string().trim().max(1000).optional(),
@@ -87,6 +96,19 @@ export async function POST(req: Request) {
         available: fromCatalog.available,
       },
     })
+  }
+
+  if (data.passengers > vehicle.capacity) {
+    return NextResponse.json(
+      { error: `${vehicle.name} can only carry ${vehicle.capacity} passengers` },
+      { status: 400 }
+    )
+  }
+  if (data.travelers && data.travelers.length !== data.passengers) {
+    return NextResponse.json(
+      { error: 'Traveller manifest must match the passenger count' },
+      { status: 400 }
+    )
   }
 
   const matchedRoute = findRoute(data.from, data.to)
@@ -191,6 +213,7 @@ export async function POST(req: Request) {
           passengerPhone: data.passengerPhone || null,
           passportId: data.passportId || null,
           nationality: data.nationality || null,
+          travelers: data.travelers?.length ? data.travelers : undefined,
           pickupAddress: data.pickupAddress || null,
           dropoffAddress: data.dropoffAddress || null,
           specialRequirements: data.specialRequirements || null,

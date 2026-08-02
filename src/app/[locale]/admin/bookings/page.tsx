@@ -18,10 +18,21 @@ interface BookingRow {
   passengerName: string | null
   passengerEmail: string | null
   passengerPhone: string | null
+  travelers?: TravelerRow[] | null
   user: { id: string; name: string | null; email: string | null; phone: string | null } | null
   vehicle: { id: string; name: string } | null
   payments: { id: string; status: string; amountNGN: number; reference: string }[]
   legs: BookingLegRow[]
+}
+
+interface TravelerRow {
+  fullName?: string
+  email?: string
+  phone?: string
+  passportId?: string
+  nationality?: string
+  lead?: boolean
+  sequence?: number
 }
 
 interface BookingLegRow {
@@ -205,6 +216,26 @@ export default function AdminBookingsPage() {
                   <p className="font-medium text-gray-800">{b.passengerName ?? b.user?.name ?? '—'}</p>
                   <p className="text-xs text-gray-400">{b.passengerEmail ?? b.user?.email ?? 'guest'}</p>
                   {(b.passengerPhone ?? b.user?.phone) && <p className="text-xs text-gray-400">{b.passengerPhone ?? b.user?.phone}</p>}
+                  {Array.isArray(b.travelers) && b.travelers.length > 0 && (
+                    <details className="mt-2">
+                      <summary className="cursor-pointer text-xs font-semibold text-[#3e004c]">
+                        Traveller manifest
+                      </summary>
+                      <div className="mt-2 space-y-2">
+                        {b.travelers.map((traveler, index) => (
+                          <div key={`${traveler.fullName ?? 'traveler'}-${index}`} className="rounded-lg border border-[#eaddec] bg-[#fbf7fc] p-2 text-xs text-gray-600">
+                            <p className="font-semibold text-gray-900">
+                              {traveler.lead ? 'Lead: ' : `${traveler.sequence ?? index + 1}. `}
+                              {traveler.fullName || 'Unnamed traveller'}
+                            </p>
+                            {traveler.phone && <p>{traveler.phone}</p>}
+                            {traveler.nationality && <p>{traveler.nationality}</p>}
+                            {traveler.passportId && <p>ID: {traveler.passportId}</p>}
+                          </div>
+                        ))}
+                      </div>
+                    </details>
+                  )}
                 </td>
                 <td className="px-5 py-4 text-gray-700">
                   <p className="font-medium text-gray-900">{b.from} → {b.to}</p>

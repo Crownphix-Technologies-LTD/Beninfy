@@ -76,6 +76,7 @@ model Booking {
   passengerPhone String?
   passportId     String?
   nationality    String?
+  travelers      Json?
   pickupAddress  String?
   dropoffAddress String?
   specialRequirements String?

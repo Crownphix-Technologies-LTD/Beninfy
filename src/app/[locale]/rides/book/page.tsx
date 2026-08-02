@@ -20,6 +20,13 @@ import { getFleetVehicleDisplayLabel } from '@/lib/fleetDisplay'
 import { getPlaceCoordinates, type LatLngLiteral, type GooglePlaceResult } from '@/lib/googleMaps'
 import type { VehicleId, RouteId } from '@/types'
 
+type TravelerDetails = {
+  fullName: string
+  phone: string
+  passportId: string
+  nationality: string
+}
+
 const INPUT_BASE =
   'w-full bg-white border rounded-xl px-4 py-3.5 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 transition-all'
 const INPUT_OK = INPUT_BASE + ' border-gray-200 focus:border-primary focus:ring-primary/20'
@@ -67,6 +74,34 @@ function inferLagosPickupArea(address: string): LagosPickupArea | null {
   return null
 }
 
+function emptyTraveler(): TravelerDetails {
+  return { fullName: '', phone: '', passportId: '', nationality: '' }
+}
+
+function parsePositiveInt(value: string | null, fallback = 1) {
+  const parsed = parseInt(value ?? '', 10)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback
+}
+
+function parseInitialTravelers(value: string | null, passengerCount: number): TravelerDetails[] {
+  if (!value) return Array.from({ length: Math.max(0, passengerCount - 1) }, emptyTraveler)
+  try {
+    const parsed = JSON.parse(value)
+    if (!Array.isArray(parsed)) return Array.from({ length: Math.max(0, passengerCount - 1) }, emptyTraveler)
+    const extras = parsed.slice(1).map((traveler) => ({
+      fullName: typeof traveler?.fullName === 'string' ? traveler.fullName : '',
+      phone: typeof traveler?.phone === 'string' ? traveler.phone : '',
+      passportId: typeof traveler?.passportId === 'string' ? traveler.passportId : '',
+      nationality: typeof traveler?.nationality === 'string' ? traveler.nationality : '',
+    }))
+    const expected = Math.max(0, passengerCount - 1)
+    if (extras.length >= expected) return extras.slice(0, expected)
+    return [...extras, ...Array.from({ length: expected - extras.length }, emptyTraveler)]
+  } catch {
+    return Array.from({ length: Math.max(0, passengerCount - 1) }, emptyTraveler)
+  }
+}
+
 function PassengerDetailsContent() {
   const locale = useLocale()
   const t = useTranslations('bookPage')
@@ -83,10 +118,12 @@ function PassengerDetailsContent() {
   const returnDate = params.get('returnDate') ?? ''
   const tripType = params.get('tripType') === 'round-trip' ? 'round-trip' : 'one-way'
   const initialPickupArea = params.get('pickupArea')
+  const initialPassengerCount = parsePositiveInt(params.get('passengers'))
 
   const vehicle = vehicles.find((v) => v.id === vehicleId)
   const fleetVehicle = fleetVehicles.find((unit) => unit.id === fleetVehicleId && unit.vehicleId === vehicleId)
   const vehicleDisplayName = fleetVehicle ? getFleetVehicleDisplayLabel(fleetVehicle.label) : vehicle?.name
+  const vehicleCapacity = vehicle?.capacity ?? Math.max(initialPassengerCount, 1)
   const matchedRoute = findRoute(from, to)
 
   const [form, setForm] = useState({
@@ -100,6 +137,11 @@ function PassengerDetailsContent() {
     dropoffAddress: params.get('dropoffAddress') ?? '',
   })
   const [errors, setErrors] = useState<Partial<typeof form>>({})
+  const [passengerCount, setPassengerCount] = useState(initialPassengerCount)
+  const [travelers, setTravelers] = useState<TravelerDetails[]>(() =>
+    parseInitialTravelers(params.get('travelers'), initialPassengerCount)
+  )
+  const [travelerErrors, setTravelerErrors] = useState<Array<Partial<TravelerDetails>>>([])
   const [pickupArea, setPickupArea] = useState<LagosPickupArea | ''>(
     initialPickupArea === 'mainland' || initialPickupArea === 'island' ? initialPickupArea : ''
   )
@@ -140,6 +182,26 @@ function PassengerDetailsContent() {
     setDropoffCoordinates(null)
   }
 
+  const updatePassengerCount = (nextCount: number) => {
+    const clamped = Math.max(1, Math.min(vehicleCapacity, nextCount || 1))
+    setPassengerCount(clamped)
+    setTravelers((prev) => {
+      const nextExtraCount = Math.max(0, clamped - 1)
+      if (prev.length === nextExtraCount) return prev
+      if (prev.length > nextExtraCount) return prev.slice(0, nextExtraCount)
+      return [...prev, ...Array.from({ length: nextExtraCount - prev.length }, emptyTraveler)]
+    })
+    setTravelerErrors([])
+  }
+
+  const updateTraveler = (index: number, field: keyof TravelerDetails, value: string) => {
+    setTravelers((prev) =>
+      prev.map((traveler, travelerIndex) =>
+        travelerIndex === index ? { ...traveler, [field]: value } : traveler
+      )
+    )
+  }
+
   const handlePickupPlaceSelected = (address: string, place: GooglePlaceResult) => {
     setPickupCoordinates(getPlaceCoordinates(place))
     if (needsPickupArea) {
@@ -161,24 +223,54 @@ function PassengerDetailsContent() {
     if (!form.email.includes('@')) e.email = 'Valid email required'
     if (!form.phone.trim()) e.phone = 'Phone number is required'
     if (!form.passportId.trim()) e.passportId = 'Required for border crossing'
+    if (!form.nationality.trim()) e.nationality = 'Nationality is required'
     if (!form.pickupAddress.trim()) e.pickupAddress = 'Pickup address is required'
     if (!form.dropoffAddress.trim()) e.dropoffAddress = 'Drop-off address is required'
+    const extraErrors = travelers.map((traveler) => {
+      const travelerError: Partial<TravelerDetails> = {}
+      if (!traveler.fullName.trim()) travelerError.fullName = 'Full name is required'
+      if (!traveler.passportId.trim()) travelerError.passportId = 'Required for border crossing'
+      if (!traveler.nationality.trim()) travelerError.nationality = 'Nationality is required'
+      return travelerError
+    })
+    const hasTravelerErrors = extraErrors.some((travelerError) => Object.keys(travelerError).length > 0)
     setPickupAreaError(needsPickupArea && !pickupArea)
     setErrors(e)
-    return Object.keys(e).length === 0 && (!needsPickupArea || !!pickupArea)
+    setTravelerErrors(extraErrors)
+    return (
+      passengerCount <= vehicleCapacity &&
+      Object.keys(e).length === 0 &&
+      !hasTravelerErrors &&
+      (!needsPickupArea || !!pickupArea)
+    )
   }
 
   const handleContinue = (e: React.FormEvent) => {
     e.preventDefault()
     if (!validate()) return
     if (tripType === 'round-trip' && !returnDate) return
-    const passengers = params.get('passengers') ?? '1'
+    const travelerManifest = [
+      {
+        fullName: form.fullName,
+        email: form.email,
+        phone: form.phone,
+        passportId: form.passportId,
+        nationality: form.nationality,
+        lead: true,
+      },
+      ...travelers.map((traveler, index) => ({
+        ...traveler,
+        lead: false,
+        sequence: index + 2,
+      })),
+    ]
     const search = new URLSearchParams({
-      vehicle: vehicleId, from, to, date, returnDate, tripType, passengers,
+      vehicle: vehicleId, from, to, date, returnDate, tripType, passengers: String(passengerCount),
       price: String(total),
       name: form.fullName, email: form.email, phone: form.phone,
       passportId: form.passportId,
       nationality: form.nationality,
+      travelers: JSON.stringify(travelerManifest),
       pickupAddress: form.pickupAddress,
       dropoffAddress: form.dropoffAddress,
       specialRequirements: form.specialRequirements,
@@ -192,6 +284,13 @@ function PassengerDetailsContent() {
   const rideFare = (dropoffFare ?? 0) * legCount
   const borderFee = matchedRoute ? getRouteBorderFee(matchedRoute.id as RouteId, tripType) : 0
   const total = rideFare + borderFee
+  const nationalityOptions = [
+    t('nationalityNigerian'),
+    t('nationalityBeninese'),
+    t('nationalityTogolese'),
+    t('nationalityGhanaian'),
+    t('nationalityOther'),
+  ]
 
   const formattedDate = date
     ? new Date(date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
@@ -250,6 +349,51 @@ function PassengerDetailsContent() {
                   </div>
                   <h2 className="font-semibold text-gray-900">{t('passengerInfo')}</h2>
                 </div>
+
+                <div className="mb-5 rounded-2xl border border-[#ead5f5] bg-[#fdf5ff] p-3.5 md:p-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-[0.14em] text-primary">Passenger manifest</p>
+                      <p className="mt-1 text-xs text-gray-500">
+                        {vehicleDisplayName ?? 'Selected vehicle'} can carry up to {vehicleCapacity} passengers.
+                      </p>
+                    </div>
+                    <div className="flex w-full items-center gap-2 sm:w-auto">
+                      <button
+                        type="button"
+                        onClick={() => updatePassengerCount(passengerCount - 1)}
+                        disabled={passengerCount <= 1}
+                        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-gray-200 bg-white text-primary disabled:cursor-not-allowed disabled:opacity-40"
+                        aria-label="Reduce passenger count"
+                      >
+                        <span className="material-symbols-outlined text-[18px]">remove</span>
+                      </button>
+                      <input
+                        type="number"
+                        min={1}
+                        max={vehicleCapacity}
+                        value={passengerCount}
+                        onChange={(event) => updatePassengerCount(parseInt(event.target.value, 10))}
+                        className="h-10 min-w-0 flex-1 rounded-xl border border-gray-200 bg-white px-3 text-center text-sm font-semibold text-gray-900 outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 sm:w-24"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => updatePassengerCount(passengerCount + 1)}
+                        disabled={passengerCount >= vehicleCapacity}
+                        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-gray-200 bg-white text-primary disabled:cursor-not-allowed disabled:opacity-40"
+                        aria-label="Increase passenger count"
+                      >
+                        <span className="material-symbols-outlined text-[18px]">add</span>
+                      </button>
+                    </div>
+                  </div>
+                  {passengerCount > vehicleCapacity && (
+                    <p className="mt-2 text-xs text-red-500">
+                      This vehicle can only carry {vehicleCapacity} passengers. Choose a larger vehicle or reduce the group size.
+                    </p>
+                  )}
+                </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {[
                     { id: 'fullName', label: t('fieldName'), placeholder: t('fieldNamePlaceholder'), type: 'text' },
@@ -274,18 +418,15 @@ function PassengerDetailsContent() {
 
                   <div>
                     <label className="block text-xs font-medium text-gray-600 mb-1.5">{t('fieldNationality')}</label>
-                    <select value={form.nationality} onChange={set('nationality')} className={INPUT_OK}>
+                    <select value={form.nationality} onChange={set('nationality')} className={errors.nationality ? INPUT_ERR : INPUT_OK}>
                       <option value="">{t('fieldNationalityPlaceholder')}</option>
-                      {[
-                        t('nationalityNigerian'),
-                        t('nationalityBeninese'),
-                        t('nationalityTogolese'),
-                        t('nationalityGhanaian'),
-                        t('nationalityOther'),
-                      ].map((n) => (
+                      {nationalityOptions.map((n) => (
                         <option key={n} value={n}>{n}</option>
                       ))}
                     </select>
+                    {errors.nationality && (
+                      <p className="text-xs text-red-500 mt-1">{errors.nationality}</p>
+                    )}
                   </div>
 
                   <div className="md:col-span-2">
@@ -301,6 +442,81 @@ function PassengerDetailsContent() {
                     />
                   </div>
                 </div>
+
+                {travelers.length > 0 && (
+                  <div className="mt-5 space-y-3 border-t border-gray-100 pt-5">
+                    <div>
+                      <p className="text-sm font-semibold text-gray-900">Additional travellers</p>
+                      <p className="mt-1 text-xs text-gray-500">
+                        Add each traveller&apos;s border details so operations can prepare the trip manifest.
+                      </p>
+                    </div>
+                    {travelers.map((traveler, index) => {
+                      const travelerError = travelerErrors[index] ?? {}
+                      return (
+                        <div key={index} className="rounded-2xl border border-gray-100 bg-gray-50 p-3.5 md:p-4">
+                          <div className="mb-3 flex items-center gap-2">
+                            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-primary text-xs font-bold text-white">
+                              {index + 2}
+                            </span>
+                            <p className="text-sm font-semibold text-gray-900">Traveller {index + 2}</p>
+                          </div>
+                          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                            <div>
+                              <label className="block text-xs font-medium text-gray-600 mb-1.5">Full name *</label>
+                              <input
+                                value={traveler.fullName}
+                                onChange={(event) => updateTraveler(index, 'fullName', event.target.value)}
+                                placeholder="Name as shown on passport or ID"
+                                className={travelerError.fullName ? INPUT_ERR : INPUT_OK}
+                              />
+                              {travelerError.fullName && (
+                                <p className="text-xs text-red-500 mt-1">{travelerError.fullName}</p>
+                              )}
+                            </div>
+                            <div>
+                              <label className="block text-xs font-medium text-gray-600 mb-1.5">Phone <span className="text-gray-400 font-normal">(optional)</span></label>
+                              <input
+                                value={traveler.phone}
+                                onChange={(event) => updateTraveler(index, 'phone', event.target.value)}
+                                placeholder="Traveller phone number"
+                                className={INPUT_OK}
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-medium text-gray-600 mb-1.5">Passport / ID *</label>
+                              <input
+                                value={traveler.passportId}
+                                onChange={(event) => updateTraveler(index, 'passportId', event.target.value)}
+                                placeholder="Passport or ID reference"
+                                className={travelerError.passportId ? INPUT_ERR : INPUT_OK}
+                              />
+                              {travelerError.passportId && (
+                                <p className="text-xs text-red-500 mt-1">{travelerError.passportId}</p>
+                              )}
+                            </div>
+                            <div>
+                              <label className="block text-xs font-medium text-gray-600 mb-1.5">Nationality *</label>
+                              <select
+                                value={traveler.nationality}
+                                onChange={(event) => updateTraveler(index, 'nationality', event.target.value)}
+                                className={travelerError.nationality ? INPUT_ERR : INPUT_OK}
+                              >
+                                <option value="">{t('fieldNationalityPlaceholder')}</option>
+                                {nationalityOptions.map((n) => (
+                                  <option key={n} value={n}>{n}</option>
+                                ))}
+                              </select>
+                              {travelerError.nationality && (
+                                <p className="text-xs text-red-500 mt-1">{travelerError.nationality}</p>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
               </div>
 
               {/* Pickup & drop-off card */}
@@ -507,7 +723,9 @@ function PassengerDetailsContent() {
                       </div>
                       <div>
                         <p className="text-sm font-medium text-gray-900">{vehicleDisplayName ?? vehicleId}</p>
-                        <p className="text-xs text-gray-500">{vehicle?.capacity ?? '—'} passengers • {tripType}</p>
+                        <p className="text-xs text-gray-500">
+                          {passengerCount} of {vehicleCapacity} passengers • {tripType}
+                        </p>
                       </div>
                     </div>
 

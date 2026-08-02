@@ -85,6 +85,10 @@ function RidesContent() {
       prev.includes(id) ? prev.filter((v) => v !== id) : [...prev, id]
     )
 
+  const updatePassengerCount = (value: number) => {
+    setPassengers(Math.max(1, Math.min(30, value || 1)))
+  }
+
   const selectedCategoryIds = new Set(selectedVehicles)
   const categoryOptions: RideOption[] = vehicles.map((vehicle) => ({
     id: vehicle.id,
@@ -271,12 +275,15 @@ function RidesContent() {
                     <input
                       type="number"
                       min={1}
-                      max={20}
+                      max={30}
                       value={passengers}
-                      onChange={(e) => setPassengers(Math.max(1, Math.min(20, parseInt(e.target.value, 10) || 1)))}
+                      onChange={(e) => updatePassengerCount(parseInt(e.target.value, 10))}
                       className="bg-transparent border-none p-0 focus:ring-0 w-full text-body-sm outline-none"
                     />
                   </div>
+                  <p className="mt-1 text-xs text-on-surface-variant">
+                    Vehicle cards below will show whether they can carry this group.
+                  </p>
                 </div>
               </div>
             </div>
@@ -342,6 +349,7 @@ function RidesContent() {
               const price = getPriceForVehicle(vehicle.priceTargetId, vehicle.categoryId, vehicle.pricingLabel)
               if (matchedRoute && !price) return null
               const badge = VEHICLE_BADGES[vehicle.categoryId]
+              const overCapacity = passengers > vehicle.capacity
 
               return (
                 <div
@@ -392,7 +400,9 @@ function RidesContent() {
                       <div className="grid grid-cols-2 gap-y-3 mb-4">
                         <div className="flex items-center gap-2">
                           <span className="material-symbols-outlined text-primary text-[20px]">person</span>
-                          <span className="text-label-md">{vehicle.capacity} {t('passengers')}</span>
+                          <span className={`text-label-md ${overCapacity ? 'text-error' : ''}`}>
+                            {vehicle.capacity} {t('passengers')}
+                          </span>
                         </div>
                         <div className="flex items-center gap-2">
                           <span className="material-symbols-outlined text-primary text-[20px]">luggage</span>
@@ -409,12 +419,22 @@ function RidesContent() {
                       </div>
                     </div>
                     <div className="flex gap-3">
-                      <Link
-                        href={`/${locale}/rides/book?vehicle=${vehicle.categoryId}&fleetVehicle=${vehicle.fleetVehicleId ?? ''}&from=${from}&to=${to}&date=${date}&returnDate=${returnDate}&tripType=${tripType}&passengers=${passengers}`}
-                        className="flex-1 bg-primary text-on-primary py-3 rounded-xl text-label-md text-center hover:opacity-95 active:scale-[0.98] transition-all"
-                      >
-                        {t('bookNow')}
-                      </Link>
+                      {overCapacity ? (
+                        <button
+                          type="button"
+                          disabled
+                          className="flex-1 cursor-not-allowed rounded-xl bg-surface-container-high py-3 text-center text-label-md text-on-surface-variant"
+                        >
+                          Max {vehicle.capacity} passengers
+                        </button>
+                      ) : (
+                        <Link
+                          href={`/${locale}/rides/book?vehicle=${vehicle.categoryId}&fleetVehicle=${vehicle.fleetVehicleId ?? ''}&from=${from}&to=${to}&date=${date}&returnDate=${returnDate}&tripType=${tripType}&passengers=${passengers}`}
+                          className="flex-1 bg-primary text-on-primary py-3 rounded-xl text-label-md text-center hover:opacity-95 active:scale-[0.98] transition-all"
+                        >
+                          {t('bookNow')}
+                        </Link>
+                      )}
                       <Link
                         href={`/${locale}/fleet#${vehicle.categoryId}`}
                         className="px-4 border border-outline-variant rounded-xl hover:bg-surface-container transition-colors flex items-center"
