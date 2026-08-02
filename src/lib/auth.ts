@@ -6,6 +6,7 @@ import bcrypt from 'bcryptjs'
 import { z } from 'zod'
 import { prisma } from '@/lib/prisma'
 import { checkRateLimit, requestIp } from '@/lib/rateLimit'
+import { isAdminRole } from '@/lib/roles'
 
 const credentialsSchema = z.object({
   email: z.string().email(),
@@ -14,10 +15,22 @@ const credentialsSchema = z.object({
 
 const googleClientId = process.env.GOOGLE_CLIENT_ID
 const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET
+const customerSessionMaxAgeSeconds = Number(process.env.AUTH_SESSION_MAX_AGE_SECONDS ?? 24 * 60 * 60)
+const adminSessionMaxAgeSeconds = Number(process.env.AUTH_ADMIN_SESSION_MAX_AGE_SECONDS ?? 8 * 60 * 60)
+
+function tokenExpiredForRole(issuedAt: unknown, role: string) {
+  if (typeof issuedAt !== 'number') return true
+  const maxAgeSeconds = isAdminRole(role) ? adminSessionMaxAgeSeconds : customerSessionMaxAgeSeconds
+  return Math.floor(Date.now() / 1000) - issuedAt > maxAgeSeconds
+}
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter: PrismaAdapter(prisma),
-  session: { strategy: 'jwt' },
+  session: {
+    strategy: 'jwt',
+    maxAge: customerSessionMaxAgeSeconds,
+    updateAge: 60 * 60,
+  },
   trustHost: true,
   pages: { signIn: '/login' },
   providers: [
@@ -114,7 +127,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             : null
         const tokenVersion = typeof token.sessionVersion === 'number' ? token.sessionVersion : null
 
-        if (!dbUser || (!isFreshSignIn && tokenVersion !== null && tokenVersion !== dbUser.sessionVersion)) {
+        if (
+          !dbUser ||
+          (!isFreshSignIn && tokenVersion !== dbUser.sessionVersion) ||
+          (!isFreshSignIn && tokenExpiredForRole(token.iat, dbUser.role))
+        ) {
           delete token.id
           delete token.role
           delete token.sessionVersion

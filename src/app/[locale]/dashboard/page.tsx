@@ -100,7 +100,8 @@ function sectionTitle(title: string, subtitle?: string) {
 export default function DashboardPage() {
   const locale = useLocale()
   const { data: session, status } = useSession()
-  const sessionRole = (session?.user as { role?: string } | undefined)?.role
+  const sessionUser = session?.user as { id?: string; role?: string } | undefined
+  const sessionRole = sessionUser?.role
   const [activeNav, setActiveNav] = useState<NavItem>('dashboard')
   const [trips, setTrips] = useState<Trip[]>([])
   const [loading, setLoading] = useState(true)
@@ -119,6 +120,10 @@ export default function DashboardPage() {
       return
     }
     if (status !== 'authenticated') return
+    if (!sessionUser?.id) {
+      window.location.href = `/${locale}/login`
+      return
+    }
     if (isAdminRole(sessionRole)) {
       window.location.href = `/${locale}/admin`
       return
@@ -151,10 +156,10 @@ export default function DashboardPage() {
     return () => {
       cancelled = true
     }
-  }, [status, locale, sessionRole])
+  }, [status, locale, sessionRole, sessionUser?.id])
 
   useEffect(() => {
-    if (activeNav !== 'payments' || status !== 'authenticated' || isAdminRole(sessionRole)) return
+    if (activeNav !== 'payments' || status !== 'authenticated' || !sessionUser?.id || isAdminRole(sessionRole)) return
 
     let cancelled = false
     void Promise.resolve()
@@ -171,10 +176,10 @@ export default function DashboardPage() {
     return () => {
       cancelled = true
     }
-  }, [activeNav, status, sessionRole])
+  }, [activeNav, status, sessionRole, sessionUser?.id])
 
   useEffect(() => {
-    if (status !== 'authenticated' || isAdminRole(sessionRole)) return
+    if (status !== 'authenticated' || !sessionUser?.id || isAdminRole(sessionRole)) return
 
     let cancelled = false
     void fetch('/api/profile')
@@ -191,7 +196,7 @@ export default function DashboardPage() {
     return () => {
       cancelled = true
     }
-  }, [status, sessionRole])
+  }, [status, sessionRole, sessionUser?.id])
 
   const upcoming = trips.filter((t) => new Date(t.date).getTime() >= now && t.status !== 'completed')
   const history = trips.filter((t) => new Date(t.date).getTime() < now || t.status === 'completed')
