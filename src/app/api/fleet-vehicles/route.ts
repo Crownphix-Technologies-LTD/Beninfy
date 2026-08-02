@@ -3,7 +3,7 @@ import type { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { getFleetVehicleDisplayLabel } from '@/lib/fleetDisplay'
 
-const ACTIVE_LEG_STATUSES = ['cancelled', 'completed']
+const NON_BLOCKING_LEG_STATUSES = ['payment_pending', 'cancelled', 'completed']
 
 function parseTripDate(value: string | null) {
   if (!value) return null
@@ -32,7 +32,7 @@ function availabilityFilter(date: Date): Prisma.FleetVehicleWhereInput {
     bookingLegs: {
       none: {
         departureDate: { gte: startsAt, lte: endsAt },
-        status: { notIn: ACTIVE_LEG_STATUSES },
+        status: { notIn: NON_BLOCKING_LEG_STATUSES },
       },
     },
   }
@@ -98,7 +98,7 @@ export async function GET(req: Request) {
         where: {
           fleetVehicleId: null,
           departureDate: { gte: startsAt, lte: endsAt },
-          status: { notIn: ACTIVE_LEG_STATUSES },
+          status: { notIn: NON_BLOCKING_LEG_STATUSES },
           ...(vehicleId ? { vehicleId } : {}),
         },
         _count: { _all: true },

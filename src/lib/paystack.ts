@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from 'crypto'
 import { prisma } from '@/lib/prisma'
+import { reserveBookingAfterPayment } from '@/lib/paymentSettlement'
 
 const PAYSTACK_BASE_URL = 'https://api.paystack.co'
 
@@ -164,10 +165,7 @@ export async function settlePaymentFromPaystack(reference: string, verified: Pay
         checkoutAmount: payment.amountNGN,
       },
     }),
-    prisma.booking.update({
-      where: { id: payment.bookingId },
-      data: { status: 'confirmed', paymentId: payment.id },
-    }),
+    reserveBookingAfterPayment(payment.bookingId, payment.id),
   ])
 
   return { ok: true, status: 'paid', bookingId: payment.bookingId, reference, providerReference: transaction.reference }

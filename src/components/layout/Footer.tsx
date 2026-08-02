@@ -20,7 +20,7 @@ export default function Footer() {
     RESTRICTED.has(href) && !signedIn ? 'hidden sm:list-item' : ''
 
   return (
-    <footer className="bg-surface-dim border-t border-outline-variant py-8 md:py-16">
+    <footer className="border-t border-outline-variant bg-surface-dim pb-[calc(2rem+env(safe-area-inset-bottom))] pt-8 md:py-16">
       <div className="mx-auto max-w-[1280px] px-4 md:px-10 grid grid-cols-1 gap-6 sm:grid-cols-2 md:grid-cols-4 md:gap-6">
         {/* Brand */}
         <div className="rounded-2xl bg-surface-container-lowest/70 p-5 sm:col-span-2 md:col-span-1 md:bg-transparent md:p-0">

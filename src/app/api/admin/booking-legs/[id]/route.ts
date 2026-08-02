@@ -6,7 +6,7 @@ import { prisma } from '@/lib/prisma'
 const patchSchema = z.object({
   fleetVehicleId: z.string().nullable().optional(),
   driverId: z.string().nullable().optional(),
-  status: z.enum(['unassigned', 'assigned', 'dispatched', 'completed', 'cancelled']).optional(),
+  status: z.enum(['payment_pending', 'reserved', 'unassigned', 'assigned', 'dispatched', 'completed', 'cancelled']).optional(),
   notes: z.string().nullable().optional(),
 })
 
@@ -45,7 +45,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         id: { not: id },
         fleetVehicleId: data.fleetVehicleId,
         departureDate: { gte: startsAt, lte: endsAt },
-        status: { notIn: ['cancelled', 'completed'] },
+        status: { notIn: ['payment_pending', 'cancelled', 'completed'] },
       },
     })
     if (conflict) return NextResponse.json({ error: 'Fleet vehicle is already assigned on this date' }, { status: 409 })
@@ -61,7 +61,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         id: { not: id },
         driverId: data.driverId,
         departureDate: { gte: startsAt, lte: endsAt },
-        status: { notIn: ['cancelled', 'completed'] },
+        status: { notIn: ['payment_pending', 'cancelled', 'completed'] },
       },
     })
     if (conflict) return NextResponse.json({ error: 'Driver is already assigned on this date' }, { status: 409 })

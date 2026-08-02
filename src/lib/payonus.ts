@@ -1,5 +1,6 @@
 import { createHash, timingSafeEqual } from 'crypto'
 import { prisma } from '@/lib/prisma'
+import { reserveBookingAfterPayment } from '@/lib/paymentSettlement'
 
 type PayOnUsEnvironment = 'test' | 'production'
 
@@ -210,10 +211,7 @@ export async function settlePaymentFromPayOnUs(
       where: { id: payment.id },
       data: { status: 'paid', provider: 'payonus', providerReference, currencyCode: 'NGN', checkoutAmount: payment.amountNGN },
     }),
-    prisma.booking.update({
-      where: { id: payment.bookingId },
-      data: { status: 'confirmed', paymentId: payment.id },
-    }),
+    reserveBookingAfterPayment(payment.bookingId, payment.id),
   ])
 
   return { ok: true, status: 'paid', bookingId: payment.bookingId, reference: payment.reference, providerReference }
@@ -267,10 +265,7 @@ export async function settlePaymentFromPayOnUsWebhook(payload: PayOnUsWebhookPay
         checkoutAmount: payment.amountNGN,
       },
     }),
-    prisma.booking.update({
-      where: { id: payment.bookingId },
-      data: { status: 'confirmed', paymentId: payment.id },
-    }),
+    reserveBookingAfterPayment(payment.bookingId, payment.id),
   ])
 
   return { ok: true, status: 'paid', bookingId: payment.bookingId, reference: payment.reference, providerReference: onusReference }

@@ -7,6 +7,13 @@ const patchSchema = z.object({
   status: z.enum(['pending', 'confirmed', 'cancelled', 'completed']),
 })
 
+function legStatusForBookingStatus(status: z.infer<typeof patchSchema>['status']) {
+  if (status === 'confirmed') return 'reserved'
+  if (status === 'cancelled') return 'cancelled'
+  if (status === 'completed') return 'completed'
+  return 'payment_pending'
+}
+
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const guard = await requireAdmin()
   if (!guard.ok) return guard.response
@@ -14,7 +21,18 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const body = await req.json().catch(() => null)
   const parsed = patchSchema.safeParse(body)
   if (!parsed.success) return NextResponse.json({ error: 'Invalid input' }, { status: 400 })
-  const booking = await prisma.booking.update({ where: { id }, data: { status: parsed.data.status } })
+  const booking = await prisma.booking.update({
+    where: { id },
+    data: {
+      status: parsed.data.status,
+      legs: {
+        updateMany: {
+          where: {},
+          data: { status: legStatusForBookingStatus(parsed.data.status) },
+        },
+      },
+    },
+  })
   return NextResponse.json({ booking })
 }
 

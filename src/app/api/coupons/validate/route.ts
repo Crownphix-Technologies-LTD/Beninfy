@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
-import { requireCustomer } from '@/lib/customer'
 import { validateCouponCode } from '@/lib/coupons'
 import { checkRateLimit, requestIp } from '@/lib/rateLimit'
 
@@ -10,12 +9,9 @@ const schema = z.object({
 })
 
 export async function POST(req: Request) {
-  const customer = await requireCustomer()
-  if (!customer.ok) return customer.response
-  const user = customer.session.user!
   const rateLimit = await checkRateLimit({
     scope: 'coupon-validate',
-    identifier: `${user.id}:${requestIp(req)}`,
+    identifier: requestIp(req),
     limit: 20,
     windowMs: 15 * 60 * 1000,
   })

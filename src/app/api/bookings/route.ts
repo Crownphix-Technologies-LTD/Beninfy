@@ -268,7 +268,7 @@ export async function POST(req: Request) {
                 departureDate,
                 vehicleId: vehicle.id,
                 fleetVehicleId: reservedFleetVehicles.get(dateKey(departureDate))?.id,
-                status: 'reserved',
+                status: 'payment_pending',
               },
               ...(data.tripType === 'round-trip' && returnDate
                 ? [{
@@ -278,7 +278,7 @@ export async function POST(req: Request) {
                     departureDate: returnDate,
                     vehicleId: vehicle.id,
                     fleetVehicleId: reservedFleetVehicles.get(dateKey(returnDate))?.id,
-                    status: 'reserved',
+                    status: 'payment_pending',
                   }]
                 : []),
             ],

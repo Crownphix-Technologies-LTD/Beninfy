@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
-import { requireCustomer } from '@/lib/customer'
+import type { Session } from 'next-auth'
+import { auth } from '@/lib/auth'
+import { isAdminRole } from '@/lib/roles'
 import { prisma } from '@/lib/prisma'
 import {
   settlePaymentFromPayOnUs,
@@ -22,13 +24,15 @@ const verifySchema = z.object({
 })
 
 async function verify(req: Request, reference: string, providerReference?: string) {
-  const customer = await requireCustomer()
-  if (!customer.ok) return customer.response
-  const { session } = customer
-  const user = session.user!
+  const session = (await auth()) as Session | null
+  const sessionRole = (session?.user as { role?: string } | undefined)?.role
+  if (isAdminRole(sessionRole)) {
+    return NextResponse.json({ error: 'Use the backoffice for admin accounts' }, { status: 403 })
+  }
+
   const rateLimit = await checkRateLimit({
     scope: 'payment-verify',
-    identifier: `${user.id}:${requestIp(req)}`,
+    identifier: `${reference}:${requestIp(req)}`,
     limit: 30,
     windowMs: 15 * 60 * 1000,
   })
@@ -41,9 +45,14 @@ async function verify(req: Request, reference: string, providerReference?: strin
 
   const payment = await prisma.payment.findUnique({
     where: { reference },
-    include: { booking: { select: { userId: true } } },
+    include: { booking: { select: { userId: true, passengerEmail: true } } },
   })
-  if (!payment || payment.booking.userId !== user.id) {
+  if (!payment) {
+    return NextResponse.json({ error: 'Payment not found' }, { status: 404 })
+  }
+  const sessionOwnsPayment = Boolean(session?.user?.id && payment.booking.userId === session.user.id)
+  const providerReferenceMatches = Boolean(providerReference && providerReference === payment.providerReference)
+  if (!sessionOwnsPayment && !providerReferenceMatches) {
     return NextResponse.json({ error: 'Payment not found' }, { status: 404 })
   }
 

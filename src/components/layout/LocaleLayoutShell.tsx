@@ -20,7 +20,7 @@ export default function LocaleLayoutShell({ children }: { children: React.ReactN
 
   if (isAuthPage) {
     return (
-      <div className="flex min-h-screen flex-col">
+      <div className="flex min-h-dvh flex-col bg-surface">
         <PageTransition>{children}</PageTransition>
       </div>
     )
@@ -31,7 +31,7 @@ export default function LocaleLayoutShell({ children }: { children: React.ReactN
   }
 
   return (
-    <div className="flex min-h-screen flex-col">
+    <div className="flex min-h-dvh flex-col bg-surface">
       <Navbar />
       <main className={cn('flex-1', showBottomNav && 'pb-16 md:pb-0')}>
         <PageTransition>{children}</PageTransition>

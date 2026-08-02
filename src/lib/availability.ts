@@ -11,7 +11,7 @@ function dayWindow(date: Date) {
   return { startsAt, endsAt }
 }
 
-const ACTIVE_LEG_STATUSES = ['cancelled', 'completed']
+const NON_BLOCKING_LEG_STATUSES = ['payment_pending', 'cancelled', 'completed']
 
 export async function getAvailableFleetVehicleCount(
   vehicleId: string,
@@ -38,7 +38,7 @@ export async function getAvailableFleetVehicleCount(
       bookingLegs: {
         none: {
           departureDate: { gte: startsAt, lte: endsAt },
-          status: { notIn: ACTIVE_LEG_STATUSES },
+          status: { notIn: NON_BLOCKING_LEG_STATUSES },
         },
       },
     },
@@ -49,7 +49,7 @@ export async function getAvailableFleetVehicleCount(
       vehicleId,
       fleetVehicleId: null,
       departureDate: { gte: startsAt, lte: endsAt },
-      status: { notIn: ACTIVE_LEG_STATUSES },
+      status: { notIn: NON_BLOCKING_LEG_STATUSES },
     },
   })
   const availableCount = Math.max(0, availableAssignedUnitCount - unassignedActiveBookingCount)
@@ -79,7 +79,7 @@ export async function findAvailableFleetVehicle(
       bookingLegs: {
         none: {
           departureDate: { gte: startsAt, lte: endsAt },
-          status: { notIn: ACTIVE_LEG_STATUSES },
+          status: { notIn: NON_BLOCKING_LEG_STATUSES },
         },
       },
     },
@@ -124,7 +124,7 @@ export async function assertFleetVehicleAvailable(
       where: {
         fleetVehicleId,
         departureDate: { gte: startsAt, lte: endsAt },
-        status: { notIn: ACTIVE_LEG_STATUSES },
+        status: { notIn: NON_BLOCKING_LEG_STATUSES },
       },
     })
     if (booked > 0) {
