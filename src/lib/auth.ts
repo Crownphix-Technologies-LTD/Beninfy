@@ -15,8 +15,8 @@ const credentialsSchema = z.object({
 
 const googleClientId = process.env.GOOGLE_CLIENT_ID
 const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET
-const customerSessionMaxAgeSeconds = Number(process.env.AUTH_SESSION_MAX_AGE_SECONDS ?? 24 * 60 * 60)
-const adminSessionMaxAgeSeconds = Number(process.env.AUTH_ADMIN_SESSION_MAX_AGE_SECONDS ?? 8 * 60 * 60)
+const customerSessionMaxAgeSeconds = Number(process.env.AUTH_SESSION_MAX_AGE_SECONDS ?? 5 * 60)
+const adminSessionMaxAgeSeconds = Number(process.env.AUTH_ADMIN_SESSION_MAX_AGE_SECONDS ?? 5 * 60)
 
 function tokenExpiredForRole(issuedAt: unknown, role: string) {
   if (typeof issuedAt !== 'number') return true
@@ -29,7 +29,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   session: {
     strategy: 'jwt',
     maxAge: customerSessionMaxAgeSeconds,
-    updateAge: 60 * 60,
+    updateAge: 60,
   },
   trustHost: true,
   pages: { signIn: '/login' },
