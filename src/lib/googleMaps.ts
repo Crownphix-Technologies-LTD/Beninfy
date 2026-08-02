@@ -130,7 +130,7 @@ export function loadGoogleMaps(apiKey: string) {
 
     const script = document.createElement('script')
     script.id = 'google-maps-places-sdk'
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&libraries=places&auth_referrer_policy=origin`
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&libraries=places&loading=async`
     script.async = true
     script.defer = true
     script.addEventListener('load', () => {

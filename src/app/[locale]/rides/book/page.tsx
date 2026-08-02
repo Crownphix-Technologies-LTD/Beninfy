@@ -592,13 +592,6 @@ function PassengerDetailsContent() {
                     </div>
                   </div>
 
-                  <AddressMapPreview
-                    pickup={pickupCoordinates}
-                    dropoff={dropoffCoordinates}
-                    from={from}
-                    to={to}
-                  />
-
                   {needsPickupArea && (
                     <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-3.5 md:p-4">
                       <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
@@ -638,6 +631,13 @@ function PassengerDetailsContent() {
                       )}
                     </div>
                   )}
+
+                  <AddressMapPreview
+                    pickup={pickupCoordinates}
+                    dropoff={dropoffCoordinates}
+                    from={from}
+                    to={to}
+                  />
 
                   <div className="mt-4 grid gap-3 rounded-2xl border border-[#ead5f5] bg-[#fdf5ff] p-3.5 text-xs text-gray-600 md:grid-cols-3">
                     <div className="flex items-center gap-2">

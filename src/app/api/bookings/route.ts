@@ -1,7 +1,10 @@
 import { NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { z } from 'zod'
+import type { Session } from 'next-auth'
+import { auth } from '@/lib/auth'
 import { requireCustomer } from '@/lib/customer'
+import { isAdminRole } from '@/lib/roles'
 import { prisma } from '@/lib/prisma'
 import { findRoute } from '@/data/routes'
 import { getRouteDropoffPrice, requiresLagosPickupArea } from '@/data/pricing'
@@ -57,19 +60,32 @@ function dateKey(date: Date) {
 }
 
 export async function POST(req: Request) {
-  const customer = await requireCustomer()
-  if (!customer.ok) return customer.response
-  const { session } = customer
-  const user = session.user!
-  const userId = user.id!
-  const userName = user.name ?? null
-  const userEmail = user.email ?? null
+  const session = (await auth()) as Session | null
+  const sessionRole = (session?.user as { role?: string } | undefined)?.role
+  if (isAdminRole(sessionRole)) {
+    return NextResponse.json({ error: 'Use the backoffice for admin accounts' }, { status: 403 })
+  }
+
   const body = await req.json().catch(() => null)
   const parsed = createSchema.safeParse(body)
   if (!parsed.success) {
     return NextResponse.json({ error: 'Invalid input', issues: parsed.error.flatten() }, { status: 400 })
   }
   const data = parsed.data
+  const leadPassengerEmail = (data.passengerEmail || session?.user?.email || '').trim().toLowerCase()
+  if (!leadPassengerEmail) {
+    return NextResponse.json({ error: 'Lead passenger email is required' }, { status: 400 })
+  }
+  const leadPassengerName = data.passengerName || session?.user?.name || null
+  if (!session?.user?.id) {
+    const existingLeadUser = await prisma.user.findUnique({
+      where: { email: leadPassengerEmail },
+      select: { role: true },
+    })
+    if (existingLeadUser && isAdminRole(existingLeadUser.role)) {
+      return NextResponse.json({ error: 'Use a customer email address for booking checkout' }, { status: 403 })
+    }
+  }
   const departureDate = new Date(data.date)
   const returnDate = data.returnDate ? new Date(data.returnDate) : null
 
@@ -150,6 +166,26 @@ export async function POST(req: Request) {
 
   try {
     const booking = await prisma.$transaction(async (tx) => {
+      const bookingUser = session?.user?.id
+        ? await tx.user.update({
+            where: { id: session.user.id },
+            data: {
+              name: session.user.name || leadPassengerName || undefined,
+              phone: data.passengerPhone || undefined,
+            },
+          })
+        : await tx.user.upsert({
+            where: { email: leadPassengerEmail },
+            update: {
+              name: leadPassengerName || undefined,
+              phone: data.passengerPhone || undefined,
+            },
+            create: {
+              email: leadPassengerEmail,
+              name: leadPassengerName,
+              phone: data.passengerPhone || null,
+            },
+          })
       const datesToCheck = data.tripType === 'round-trip' && returnDate ? [departureDate, returnDate] : [departureDate]
       const availability = await assertVehicleTypeAvailable(vehicle.id, datesToCheck, tx)
       if (!availability.ok) {
@@ -202,14 +238,14 @@ export async function POST(req: Request) {
 
       return tx.booking.create({
         data: {
-          userId,
+          userId: bookingUser.id,
           from: data.from,
           to: data.to,
           date: departureDate,
           returnDate,
           tripType: data.tripType === 'round-trip' ? 'round_trip' : 'one_way',
-          passengerName: data.passengerName || userName,
-          passengerEmail: data.passengerEmail || userEmail,
+          passengerName: leadPassengerName,
+          passengerEmail: leadPassengerEmail,
           passengerPhone: data.passengerPhone || null,
           passportId: data.passportId || null,
           nationality: data.nationality || null,
