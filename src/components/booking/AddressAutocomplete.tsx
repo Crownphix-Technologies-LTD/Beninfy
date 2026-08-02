@@ -1,7 +1,13 @@
 'use client'
 
 import { useEffect, useId, useRef, useState } from 'react'
-import { getGoogleMaps, loadGoogleMaps, type GooglePlaceResult } from '@/lib/googleMaps'
+import {
+  getGoogleMaps,
+  GOOGLE_MAPS_AUTH_FAILURE_EVENT,
+  hasGoogleMapsAuthFailed,
+  loadGoogleMaps,
+  type GooglePlaceResult,
+} from '@/lib/googleMaps'
 
 type AddressAutocompleteProps = {
   value: string
@@ -39,6 +45,12 @@ export default function AddressAutocomplete({
   }, [onChange, onPlaceSelected])
 
   useEffect(() => {
+    const handleAuthFailure = () => setLoadStatus('failed')
+    window.addEventListener(GOOGLE_MAPS_AUTH_FAILURE_EVENT, handleAuthFailure)
+    return () => window.removeEventListener(GOOGLE_MAPS_AUTH_FAILURE_EVENT, handleAuthFailure)
+  }, [])
+
+  useEffect(() => {
     if (!apiKey || disabled) {
       return
     }
@@ -49,6 +61,10 @@ export default function AddressAutocomplete({
     loadGoogleMaps(apiKey)
       .then(() => {
         if (!active || !inputRef.current) return
+        if (hasGoogleMapsAuthFailed()) {
+          setLoadStatus('failed')
+          return
+        }
         const Autocomplete = getGoogleMaps()?.places?.Autocomplete
         if (!Autocomplete) {
           setLoadStatus('failed')

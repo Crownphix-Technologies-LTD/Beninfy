@@ -1,7 +1,13 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { getGoogleMaps, loadGoogleMaps, type LatLngLiteral } from '@/lib/googleMaps'
+import {
+  getGoogleMaps,
+  GOOGLE_MAPS_AUTH_FAILURE_EVENT,
+  hasGoogleMapsAuthFailed,
+  loadGoogleMaps,
+  type LatLngLiteral,
+} from '@/lib/googleMaps'
 
 type AddressMapPreviewProps = {
   pickup?: LatLngLiteral | null
@@ -20,6 +26,17 @@ export default function AddressMapPreview({ pickup, dropoff, from, to }: Address
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
 
   useEffect(() => {
+    const handleAuthFailure = () => {
+      markersRef.current.forEach((marker) => marker.setMap(null))
+      markersRef.current = []
+      mapInstanceRef.current = null
+      setLoadStatus('failed')
+    }
+    window.addEventListener(GOOGLE_MAPS_AUTH_FAILURE_EVENT, handleAuthFailure)
+    return () => window.removeEventListener(GOOGLE_MAPS_AUTH_FAILURE_EVENT, handleAuthFailure)
+  }, [])
+
+  useEffect(() => {
     if (!apiKey) {
       return
     }
@@ -29,6 +46,10 @@ export default function AddressMapPreview({ pickup, dropoff, from, to }: Address
     loadGoogleMaps(apiKey)
       .then(() => {
         if (!active || !mapRef.current) return
+        if (hasGoogleMapsAuthFailed()) {
+          setLoadStatus('failed')
+          return
+        }
         const maps = getGoogleMaps()
         if (!maps) {
           setLoadStatus('failed')
@@ -149,7 +170,7 @@ export default function AddressMapPreview({ pickup, dropoff, from, to }: Address
             </div>
             <p className="text-sm font-semibold text-gray-900">Google Maps preview is not active yet</p>
             <p className="mt-1 max-w-sm text-xs leading-relaxed text-gray-500">
-              Add `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` in Vercel to enable live address pins and map preview.
+              Check the Maps JavaScript API, Places API, billing, and website referrer restrictions for the configured Google key.
             </p>
           </div>
         )}

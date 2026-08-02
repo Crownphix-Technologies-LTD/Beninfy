@@ -23,6 +23,7 @@ export type MapsAutocomplete = {
 }
 
 export type GoogleMapsWindow = Window & {
+  gm_authFailure?: () => void
   google?: {
     maps?: {
       LatLngBounds: new () => {
@@ -75,7 +76,10 @@ export type GoogleMapsWindow = Window & {
   }
 }
 
+export const GOOGLE_MAPS_AUTH_FAILURE_EVENT = 'beninfy:google-maps-auth-failure'
+
 let googleMapsLoader: Promise<void> | null = null
+let googleMapsAuthFailed = false
 
 export function getGoogleMaps() {
   return (window as GoogleMapsWindow).google?.maps
@@ -90,8 +94,25 @@ export function getPlaceCoordinates(place: GooglePlaceResult): LatLngLiteral | n
   }
 }
 
+export function hasGoogleMapsAuthFailed() {
+  return googleMapsAuthFailed
+}
+
+function installGoogleMapsAuthFailureHandler() {
+  const googleWindow = window as GoogleMapsWindow
+  if (googleWindow.gm_authFailure) return
+
+  googleWindow.gm_authFailure = () => {
+    googleMapsAuthFailed = true
+    googleMapsLoader = null
+    window.dispatchEvent(new CustomEvent(GOOGLE_MAPS_AUTH_FAILURE_EVENT))
+  }
+}
+
 export function loadGoogleMaps(apiKey: string) {
   const googleWindow = window as GoogleMapsWindow
+  installGoogleMapsAuthFailureHandler()
+  if (googleMapsAuthFailed) return Promise.reject(new Error('Google Maps API key was rejected'))
   if (googleWindow.google?.maps?.Map && googleWindow.google.maps.places?.Autocomplete) return Promise.resolve()
   if (googleMapsLoader) return googleMapsLoader
 
@@ -99,17 +120,23 @@ export function loadGoogleMaps(apiKey: string) {
     const existing = document.getElementById('google-maps-places-sdk') as HTMLScriptElement | null
 
     if (existing) {
-      existing.addEventListener('load', () => resolve(), { once: true })
+      existing.addEventListener('load', () => {
+        if (googleMapsAuthFailed) reject(new Error('Google Maps API key was rejected'))
+        else resolve()
+      }, { once: true })
       existing.addEventListener('error', () => reject(new Error('Google Maps failed to load')), { once: true })
       return
     }
 
     const script = document.createElement('script')
     script.id = 'google-maps-places-sdk'
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&libraries=places`
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&libraries=places&auth_referrer_policy=origin`
     script.async = true
     script.defer = true
-    script.addEventListener('load', () => resolve(), { once: true })
+    script.addEventListener('load', () => {
+      if (googleMapsAuthFailed) reject(new Error('Google Maps API key was rejected'))
+      else resolve()
+    }, { once: true })
     script.addEventListener('error', () => reject(new Error('Google Maps failed to load')), { once: true })
     document.head.appendChild(script)
   })
