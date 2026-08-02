@@ -11,16 +11,61 @@ import { getRouteBorderFee } from '@/data/borderFees'
 import { useVehicles } from '@/hooks/useVehicles'
 import { useFleetVehicles } from '@/hooks/useFleetVehicles'
 import { useRoutePriceOverrides } from '@/hooks/useRoutePriceOverrides'
+import AddressAutocomplete from '@/components/booking/AddressAutocomplete'
+import AddressMapPreview from '@/components/booking/AddressMapPreview'
 import JourneyTracker from '@/components/booking/JourneyTracker'
 import RouteMapSVG from '@/components/shared/RouteMapSVG'
 import CountUp from 'react-countup'
 import { getFleetVehicleDisplayLabel } from '@/lib/fleetDisplay'
+import { getPlaceCoordinates, type LatLngLiteral, type GooglePlaceResult } from '@/lib/googleMaps'
 import type { VehicleId, RouteId } from '@/types'
 
 const INPUT_BASE =
   'w-full bg-white border rounded-xl px-4 py-3.5 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 transition-all'
 const INPUT_OK = INPUT_BASE + ' border-gray-200 focus:border-primary focus:ring-primary/20'
 const INPUT_ERR = INPUT_BASE + ' border-red-400 focus:border-red-500 focus:ring-red-200'
+
+const LAGOS_ISLAND_AREAS = [
+  'lagos island',
+  'victoria island',
+  'ikoyi',
+  'lekki',
+  'ajah',
+  'banana island',
+  'oniru',
+  'eko atlantic',
+  'marina',
+  'obalende',
+]
+
+const LAGOS_MAINLAND_AREAS = [
+  'ikeja',
+  'yaba',
+  'surulere',
+  'gbagada',
+  'maryland',
+  'ojota',
+  'magodo',
+  'ogba',
+  'agege',
+  'oshodi',
+  'mushin',
+  'festac',
+  'apapa',
+  'alimosho',
+  'ikorodu',
+  'ketu',
+  'berger',
+  'akoka',
+  'ilupeju',
+]
+
+function inferLagosPickupArea(address: string): LagosPickupArea | null {
+  const normalized = address.toLowerCase()
+  if (LAGOS_ISLAND_AREAS.some((area) => normalized.includes(area))) return 'island'
+  if (LAGOS_MAINLAND_AREAS.some((area) => normalized.includes(area))) return 'mainland'
+  return null
+}
 
 function PassengerDetailsContent() {
   const locale = useLocale()
@@ -58,6 +103,8 @@ function PassengerDetailsContent() {
   const [pickupArea, setPickupArea] = useState<LagosPickupArea | ''>(
     initialPickupArea === 'mainland' || initialPickupArea === 'island' ? initialPickupArea : ''
   )
+  const [pickupCoordinates, setPickupCoordinates] = useState<LatLngLiteral | null>(null)
+  const [dropoffCoordinates, setDropoffCoordinates] = useState<LatLngLiteral | null>(null)
   const [pickupAreaError, setPickupAreaError] = useState(false)
 
   const needsPickupArea = matchedRoute
@@ -74,10 +121,39 @@ function PassengerDetailsContent() {
       )
     : null
 
+  const updateFormField = (field: keyof typeof form, value: string) => {
+    setForm((prev) => ({ ...prev, [field]: value }))
+  }
+
   const set =
     (field: keyof typeof form) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
-      setForm((prev) => ({ ...prev, [field]: e.target.value }))
+      updateFormField(field, e.target.value)
+
+  const updatePickupAddress = (value: string) => {
+    updateFormField('pickupAddress', value)
+    setPickupCoordinates(null)
+  }
+
+  const updateDropoffAddress = (value: string) => {
+    updateFormField('dropoffAddress', value)
+    setDropoffCoordinates(null)
+  }
+
+  const handlePickupPlaceSelected = (address: string, place: GooglePlaceResult) => {
+    setPickupCoordinates(getPlaceCoordinates(place))
+    if (needsPickupArea) {
+      const inferred = inferLagosPickupArea(address)
+      if (inferred) {
+        setPickupArea(inferred)
+        setPickupAreaError(false)
+      }
+    }
+  }
+
+  const handleDropoffPlaceSelected = (_address: string, place: GooglePlaceResult) => {
+    setDropoffCoordinates(getPlaceCoordinates(place))
+  }
 
   const validate = () => {
     const e: Partial<typeof form> = {}
@@ -85,6 +161,8 @@ function PassengerDetailsContent() {
     if (!form.email.includes('@')) e.email = 'Valid email required'
     if (!form.phone.trim()) e.phone = 'Phone number is required'
     if (!form.passportId.trim()) e.passportId = 'Required for border crossing'
+    if (!form.pickupAddress.trim()) e.pickupAddress = 'Pickup address is required'
+    if (!form.dropoffAddress.trim()) e.dropoffAddress = 'Drop-off address is required'
     setPickupAreaError(needsPickupArea && !pickupArea)
     setErrors(e)
     return Object.keys(e).length === 0 && (!needsPickupArea || !!pickupArea)
@@ -226,38 +304,99 @@ function PassengerDetailsContent() {
               </div>
 
               {/* Pickup & drop-off card */}
-              <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 md:p-6">
-                <div className="flex items-center gap-3 mb-5 pb-4 border-b border-gray-100">
-                  <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ background: '#f3e8f8' }}>
-                    <span className="material-symbols-outlined" style={{ fontSize: 20, color: '#3e004c' }}>location_on</span>
+              <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
+                <div className="border-b border-gray-100 bg-[#fbf8fc] p-4 md:p-6">
+                  <div className="flex items-start gap-3">
+                    <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ background: '#f3e8f8' }}>
+                      <span className="material-symbols-outlined" style={{ fontSize: 20, color: '#3e004c' }}>location_on</span>
+                    </div>
+                    <div>
+                      <h2 className="font-semibold text-gray-900">{t('pickupDropoff')}</h2>
+                      <p className="mt-1 text-xs leading-relaxed text-gray-500">
+                        Add exact pickup and drop-off points so dispatch can assign the right driver, route, and border timing.
+                      </p>
+                    </div>
                   </div>
-                  <h2 className="font-semibold text-gray-900">{t('pickupDropoff')}</h2>
                 </div>
 
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1.5">
-                      {t('pickupLabel')} <span className="text-primary font-semibold">{from}</span>
-                    </label>
-                    <div className="relative">
-                      <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ fontSize: 18, color: '#3e004c' }}>radio_button_checked</span>
-                      <input
-                        type="text"
+                <div className="p-4 md:p-6">
+                  <div className="grid gap-4 md:grid-cols-[1fr_auto_1fr] md:items-start">
+                    <div className="rounded-2xl border border-gray-100 bg-white p-3.5 shadow-[0_12px_35px_rgba(62,0,76,0.06)]">
+                      <div className="mb-3 flex items-center justify-between gap-3">
+                        <label className="block text-xs font-semibold uppercase tracking-[0.14em] text-gray-500">
+                          {t('pickupLabel')} <span className="text-primary">{from}</span>
+                        </label>
+                        <span className="material-symbols-outlined text-[18px] text-primary">my_location</span>
+                      </div>
+                      <AddressAutocomplete
                         value={form.pickupAddress}
-                        onChange={set('pickupAddress')}
-                        placeholder={t('addressPlaceholder')}
-                        className={INPUT_OK + ' pl-10'}
+                        onChange={updatePickupAddress}
+                        onPlaceSelected={handlePickupPlaceSelected}
+                        placeholder={`${t('addressPlaceholder')} in ${from}`}
+                        inputClassName={errors.pickupAddress ? INPUT_ERR : INPUT_OK}
+                        icon="radio_button_checked"
+                        iconColor="#3e004c"
+                        helperText={
+                          needsPickupArea
+                            ? 'Google suggestions can help identify Mainland or Island pickup, but you can still choose the fare zone below.'
+                            : 'Search a hotel, landmark, terminal, office, or full street address.'
+                        }
                       />
+                      {errors.pickupAddress && (
+                        <p className="mt-2 text-xs text-red-500">{errors.pickupAddress}</p>
+                      )}
+                    </div>
+
+                    <div className="hidden h-full min-h-[104px] flex-col items-center justify-center md:flex" aria-hidden="true">
+                      <div className="h-2 w-2 rounded-full bg-[#3e004c]" />
+                      <div className="h-full w-px bg-gradient-to-b from-[#3e004c] via-gray-200 to-[#735c00]" />
+                      <div className="h-2 w-2 rounded-full bg-[#735c00]" />
+                    </div>
+
+                    <div className="rounded-2xl border border-gray-100 bg-white p-3.5 shadow-[0_12px_35px_rgba(115,92,0,0.06)]">
+                      <div className="mb-3 flex items-center justify-between gap-3">
+                        <label className="block text-xs font-semibold uppercase tracking-[0.14em] text-gray-500">
+                          {t('dropoffLabel')} <span style={{ color: '#735c00' }}>{to}</span>
+                        </label>
+                        <span className="material-symbols-outlined text-[18px]" style={{ color: '#735c00' }}>flag</span>
+                      </div>
+                      <AddressAutocomplete
+                        value={form.dropoffAddress}
+                        onChange={updateDropoffAddress}
+                        onPlaceSelected={handleDropoffPlaceSelected}
+                        placeholder={`${t('dropoffPlaceholder')} in ${to}`}
+                        inputClassName={errors.dropoffAddress ? INPUT_ERR : INPUT_OK}
+                        icon="location_on"
+                        iconColor="#735c00"
+                        helperText="Use the final address if known, or the closest hotel, landmark, airport, or meeting point."
+                      />
+                      {errors.dropoffAddress && (
+                        <p className="mt-2 text-xs text-red-500">{errors.dropoffAddress}</p>
+                      )}
                     </div>
                   </div>
 
+                  <AddressMapPreview
+                    pickup={pickupCoordinates}
+                    dropoff={dropoffCoordinates}
+                    from={from}
+                    to={to}
+                  />
+
                   {needsPickupArea && (
-                    <div className="rounded-xl border border-amber-200 bg-amber-50 p-3.5">
-                      <p className="mb-2 text-xs font-semibold text-amber-900">Lagos pickup zone for saloon pricing</p>
+                    <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-3.5 md:p-4">
+                      <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                        <p className="text-xs font-bold uppercase tracking-[0.14em] text-amber-900">Lagos pickup fare zone</p>
+                        {pickupArea && (
+                          <span className="w-fit rounded-full bg-white px-3 py-1 text-xs font-semibold text-amber-900">
+                            {pickupArea === 'mainland' ? 'Mainland selected' : 'Island selected'}
+                          </span>
+                        )}
+                      </div>
                       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                         {([
-                          { id: 'mainland', label: 'Mainland pickup', price: '₦160,000' },
-                          { id: 'island', label: 'Island pickup', price: '₦180,000' },
+                          { id: 'mainland', label: 'Lagos Mainland', price: '₦160,000', hint: 'Ikeja, Yaba, Surulere, Gbagada, Maryland and nearby areas' },
+                          { id: 'island', label: 'Lagos Island', price: '₦180,000', hint: 'VI, Ikoyi, Lekki, Ajah, Oniru, Marina and nearby areas' },
                         ] as const).map((option) => (
                           <button
                             key={option.id}
@@ -266,14 +405,15 @@ function PassengerDetailsContent() {
                               setPickupArea(option.id)
                               setPickupAreaError(false)
                             }}
-                            className={`rounded-lg border px-3 py-2 text-left transition-colors ${
+                            className={`rounded-xl border px-4 py-3 text-left transition-colors ${
                               pickupArea === option.id
-                                ? 'border-primary bg-white text-primary'
+                                ? 'border-primary bg-white text-primary shadow-sm'
                                 : 'border-amber-200 bg-white/70 text-gray-700 hover:border-primary/40'
                             }`}
                           >
                             <span className="block text-sm font-semibold">{option.label}</span>
-                            <span className="block text-xs text-gray-500">{option.price} one-way drop-off fare</span>
+                            <span className="mt-0.5 block text-xs font-medium text-gray-500">{option.price} one-way drop-off fare</span>
+                            <span className="mt-2 block text-xs leading-relaxed text-gray-500">{option.hint}</span>
                           </button>
                         ))}
                       </div>
@@ -283,22 +423,18 @@ function PassengerDetailsContent() {
                     </div>
                   )}
 
-                  {/* Visual connector */}
-                  <div className="ml-4 h-5 w-px bg-gray-200" />
-
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1.5">
-                      {t('dropoffLabel')} <span className="font-semibold" style={{ color: '#735c00' }}>{to}</span>
-                    </label>
-                    <div className="relative">
-                      <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ fontSize: 18, color: '#735c00' }}>location_on</span>
-                      <input
-                        type="text"
-                        value={form.dropoffAddress}
-                        onChange={set('dropoffAddress')}
-                        placeholder={t('dropoffPlaceholder')}
-                        className={INPUT_OK + ' pl-10'}
-                      />
+                  <div className="mt-4 grid gap-3 rounded-2xl border border-[#ead5f5] bg-[#fdf5ff] p-3.5 text-xs text-gray-600 md:grid-cols-3">
+                    <div className="flex items-center gap-2">
+                      <span className="material-symbols-outlined text-[17px] text-primary">route</span>
+                      Route-aware fare
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="material-symbols-outlined text-[17px] text-primary">schedule</span>
+                      Dispatch timing
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="material-symbols-outlined text-[17px] text-primary">verified</span>
+                      Border assistance
                     </div>
                   </div>
                 </div>
