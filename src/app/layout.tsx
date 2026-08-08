@@ -72,6 +72,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <head>
         <meta name="theme-color" content="#3e004c" />
         <meta name="google-site-verification" content="eBSYR23muXIiOSfL8vm_MCM_kgEBF7VtseXK8zeGKhw" />
+        <meta name="google-site-verification" content="1nRvxrVPYWF7BtOe3yUkA2Vj_1HQ2wIL4g6X4jMd104" />
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="default" />
