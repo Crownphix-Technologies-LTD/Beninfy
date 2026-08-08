@@ -2,10 +2,16 @@ import Link from 'next/link'
 import { setRequestLocale } from 'next-intl/server'
 import type { Metadata } from 'next'
 import type { ReactNode } from 'react'
+import { pageMetadata } from '@/lib/seo'
 
-export const metadata: Metadata = {
-  title: 'Terms of Service | Beninfy Rides',
-  description: 'Beninfy Rides partner agency transportation policy, payment terms, discounts, and cancellation rules.',
+export async function generateMetadata({ params }: { params: Promise<{ locale: string }> }): Promise<Metadata> {
+  const { locale } = await params
+  return pageMetadata({
+    title: 'Terms of Service | Beninfy Rides',
+    description: 'Beninfy Rides partner agency transportation policy, payment terms, discounts, and cancellation rules.',
+    path: 'terms',
+    locale,
+  })
 }
 
 export default async function TermsPage({ params }: { params: Promise<{ locale: string }> }) {

@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { Inter } from 'next/font/google'
 import './globals.css'
 import { siteConfig } from '@/lib/config'
+import { absoluteUrl, seoImages } from '@/lib/seo'
 import PWAUpdater from '@/components/shared/PWAUpdater'
 
 const inter = Inter({
@@ -12,7 +13,7 @@ const inter = Inter({
 
 export const metadata: Metadata = {
   title: {
-    default: siteConfig.name,
+    default: 'Beninfy | Private Cross-Border Rides in West Africa',
     template: `%s | ${siteConfig.name}`,
   },
   description: siteConfig.description,
@@ -23,24 +24,38 @@ export const metadata: Metadata = {
     'Nigeria Benin Togo Ghana',
     'airport pickup',
     'VIP transport',
+    'Lagos to Cotonou private car',
+    'Cotonou to Lome transport',
+    'Lome to Accra private ride',
+    'Benin Republic transport',
   ],
+  applicationName: siteConfig.name,
+  referrer: 'origin-when-cross-origin',
   authors: [{ name: 'Beninfy' }],
+  publisher: 'Beninfy Logistics',
   creator: 'Beninfy',
   metadataBase: new URL(siteConfig.url),
+  alternates: {
+    canonical: '/en',
+    languages: {
+      en: '/en',
+      fr: '/fr',
+    },
+  },
   openGraph: {
     type: 'website',
     locale: 'en_US',
     url: siteConfig.url,
-    title: siteConfig.name,
+    title: 'Beninfy | Private Cross-Border Rides in West Africa',
     description: siteConfig.description,
     siteName: siteConfig.name,
-    images: [{ url: siteConfig.ogImage, width: 1200, height: 630, alt: siteConfig.name }],
+    images: [{ url: absoluteUrl(seoImages.default), width: 1200, height: 630, alt: siteConfig.name }],
   },
   twitter: {
     card: 'summary_large_image',
-    title: siteConfig.name,
+    title: 'Beninfy | Private Cross-Border Rides in West Africa',
     description: siteConfig.description,
-    images: [siteConfig.ogImage],
+    images: [absoluteUrl(seoImages.default)],
     creator: '@beninfy',
   },
   manifest: '/manifest.json',
@@ -56,6 +71,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html suppressHydrationWarning>
       <head>
         <meta name="theme-color" content="#3e004c" />
+        <meta name="google-site-verification" content="eBSYR23muXIiOSfL8vm_MCM_kgEBF7VtseXK8zeGKhw" />
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="default" />

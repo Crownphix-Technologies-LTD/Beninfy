@@ -1,11 +1,27 @@
 import { isEmailConfigured, sendEmail } from '@/lib/email'
 import { prisma } from '@/lib/prisma'
+import { siteConfig } from '@/lib/config'
 
 const DEFAULT_ADMIN_EMAILS = ['info@beninfy.com', 'operations@beninfy.com']
+const SUPPORT_EMAIL = 'support@beninfy.com'
+const SUPPORT_WHATSAPP_DISPLAY = '+229 51 01 91 34'
+const SUPPORT_WHATSAPP_URL = 'https://wa.me/22951019134'
+const BRAND_PURPLE = '#3e004c'
+const BRAND_PURPLE_SOFT = '#5b136b'
+const BRAND_GOLD = '#d4af37'
+const INK = '#24112b'
+const MUTED = '#6f6277'
+const BORDER = '#eaddec'
+const SURFACE = '#fbf7fc'
 
 type EmailTarget = string | Array<string>
 
 type BookingEmailData = Awaited<ReturnType<typeof getBookingEmailData>>
+type EmailShellOptions = {
+  eyebrow?: string
+  ctaLabel?: string
+  ctaHref?: string
+}
 
 function adminEmails() {
   const configured = process.env.ADMIN_NOTIFICATION_EMAILS
@@ -42,37 +58,191 @@ function escapeHtml(value: unknown) {
     .replace(/'/g, '&#039;')
 }
 
+function siteUrl(path = '') {
+  return `${siteConfig.url}${path}`
+}
+
 function rows(items: Array<[string, unknown]>) {
   return items
     .map(
       ([label, value]) => `
         <tr>
-          <td style="padding:8px 0;color:#6b5f70;font-size:13px;">${escapeHtml(label)}</td>
-          <td style="padding:8px 0;color:#24112b;font-size:13px;font-weight:700;text-align:right;">${escapeHtml(value)}</td>
+          <td style="padding:13px 0;border-bottom:1px solid #f0e7f2;color:${MUTED};font-size:13px;line-height:18px;vertical-align:top;">${escapeHtml(label)}</td>
+          <td style="padding:13px 0;border-bottom:1px solid #f0e7f2;color:${INK};font-size:13px;font-weight:700;line-height:18px;text-align:right;vertical-align:top;">${escapeHtml(value)}</td>
         </tr>
       `
     )
     .join('')
 }
 
-function emailShell(title: string, intro: string, body: string) {
+function detailsCard(items: Array<[string, unknown]>) {
   return `
-    <div style="margin:0;padding:24px;background:#f8f3fa;font-family:Arial,sans-serif;color:#24112b;">
-      <div style="max-width:640px;margin:0 auto;background:#ffffff;border:1px solid #eaddec;border-radius:14px;overflow:hidden;">
-        <div style="padding:22px 24px;background:#3e004c;color:#ffffff;">
-          <div style="font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#f4d66c;font-weight:700;">Beninfy Rides</div>
-          <h1 style="margin:8px 0 0;font-size:22px;line-height:1.25;">${escapeHtml(title)}</h1>
-        </div>
-        <div style="padding:24px;">
-          <p style="margin:0 0 18px;color:#4e4055;font-size:15px;line-height:1.6;">${escapeHtml(intro)}</p>
-          ${body}
-          <p style="margin:24px 0 0;color:#6b5f70;font-size:13px;line-height:1.6;">
-            Need help? Contact Beninfy support at support@beninfy.com or WhatsApp +229 51 01 91 34.
-          </p>
-        </div>
-      </div>
-    </div>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:separate;border-spacing:0;background:#ffffff;border:1px solid ${BORDER};border-radius:14px;">
+      <tr>
+        <td style="padding:8px 18px 4px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+            ${rows(items)}
+          </table>
+        </td>
+      </tr>
+    </table>
   `
+}
+
+function statusPill(label: string) {
+  return `
+    <span style="display:inline-block;padding:7px 11px;border-radius:999px;background:#fff8dd;color:#6b5000;border:1px solid #f1dda1;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;">
+      ${escapeHtml(label)}
+    </span>
+  `
+}
+
+function ctaButton(label: string, href: string) {
+  return `
+    <table role="presentation" cellpadding="0" cellspacing="0" style="margin-top:22px;">
+      <tr>
+        <td style="border-radius:999px;background:${BRAND_GOLD};">
+          <a href="${escapeHtml(href)}" style="display:inline-block;padding:13px 20px;color:${INK};font-size:13px;font-weight:800;text-decoration:none;border-radius:999px;">
+            ${escapeHtml(label)}
+          </a>
+        </td>
+      </tr>
+    </table>
+  `
+}
+
+function emailShell(title: string, intro: string, body: string, options: EmailShellOptions = {}) {
+  const eyebrow = options.eyebrow ?? 'Beninfy Logistics'
+  const logoUrl = siteUrl('/logo.png')
+  const preview = `${title} - ${intro}`.slice(0, 150)
+
+  return `
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">${escapeHtml(preview)}</div>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0;padding:0;background:#f6f1f7;">
+      <tr>
+        <td align="center" style="padding:28px 12px;font-family:Arial,Helvetica,sans-serif;color:${INK};">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:680px;border-collapse:separate;border-spacing:0;">
+            <tr>
+              <td style="padding:0 0 12px;">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                  <tr>
+                    <td align="left" style="vertical-align:middle;">
+                      <img src="${escapeHtml(logoUrl)}" width="96" alt="Beninfy" style="display:block;width:96px;height:auto;border:0;outline:none;text-decoration:none;">
+                    </td>
+                    <td align="right" style="vertical-align:middle;color:${MUTED};font-size:12px;line-height:18px;">
+                      Premium West African Transport<br>
+                      <a href="mailto:${SUPPORT_EMAIL}" style="color:${BRAND_PURPLE_SOFT};font-weight:700;text-decoration:none;">${SUPPORT_EMAIL}</a>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+            <tr>
+              <td style="background:#ffffff;border:1px solid ${BORDER};border-radius:20px;overflow:hidden;box-shadow:0 18px 42px rgba(62,0,76,.08);">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                  <tr>
+                    <td style="padding:28px 28px 30px;background:${BRAND_PURPLE};color:#ffffff;">
+                      ${statusPill(eyebrow)}
+                      <h1 style="margin:18px 0 0;color:#ffffff;font-size:27px;line-height:34px;font-weight:800;letter-spacing:0;">${escapeHtml(title)}</h1>
+                      <p style="margin:12px 0 0;color:#eaddec;font-size:15px;line-height:23px;max-width:560px;">${escapeHtml(intro)}</p>
+                      ${options.ctaLabel && options.ctaHref ? ctaButton(options.ctaLabel, options.ctaHref) : ''}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style="padding:26px 28px 8px;background:${SURFACE};">
+                      ${body}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style="padding:0 28px 26px;background:${SURFACE};">
+                      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:18px;background:#ffffff;border:1px solid ${BORDER};border-radius:14px;">
+                        <tr>
+                          <td style="padding:18px 18px 16px;">
+                            <p style="margin:0;color:${INK};font-size:14px;font-weight:800;line-height:20px;">Beninfy Support</p>
+                            <p style="margin:6px 0 0;color:${MUTED};font-size:13px;line-height:20px;">
+                              For route changes, border coordination, refunds, or urgent travel support, contact
+                              <a href="mailto:${SUPPORT_EMAIL}" style="color:${BRAND_PURPLE_SOFT};font-weight:700;text-decoration:none;">${SUPPORT_EMAIL}</a>
+                              or WhatsApp
+                              <a href="${SUPPORT_WHATSAPP_URL}" style="color:${BRAND_PURPLE_SOFT};font-weight:700;text-decoration:none;">${SUPPORT_WHATSAPP_DISPLAY}</a>.
+                            </p>
+                          </td>
+                        </tr>
+                      </table>
+                      <p style="margin:18px 0 0;color:#8a7d91;font-size:11px;line-height:17px;">
+                        This is a transactional email for Beninfy Rides. One-way trips require full payment before confirmation. Return trips may require a minimum deposit before dispatch, based on the agreed booking policy.
+                      </p>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+            <tr>
+              <td align="center" style="padding:18px 20px 0;color:#8a7d91;font-size:11px;line-height:18px;">
+                Beninfy Logistics &bull; Nigeria, Benin Republic, Togo and Ghana<br>
+                <a href="${siteUrl('/en/terms')}" style="color:${BRAND_PURPLE_SOFT};text-decoration:none;">Terms</a>
+                &nbsp;&bull;&nbsp;
+                <a href="${siteUrl('/en/privacy')}" style="color:${BRAND_PURPLE_SOFT};text-decoration:none;">Privacy</a>
+                &nbsp;&bull;&nbsp;
+                <a href="${SUPPORT_WHATSAPP_URL}" style="color:${BRAND_PURPLE_SOFT};text-decoration:none;">WhatsApp support</a>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  `
+}
+
+function noticeCard(title: string, copy: string) {
+  return `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:18px;background:#fffdf5;border:1px solid #f0dfa3;border-radius:14px;">
+      <tr>
+        <td style="padding:16px 18px;">
+          <p style="margin:0;color:${INK};font-size:13px;font-weight:800;line-height:18px;">${escapeHtml(title)}</p>
+          <p style="margin:6px 0 0;color:#6c5b20;font-size:12px;line-height:19px;">${escapeHtml(copy)}</p>
+        </td>
+      </tr>
+    </table>
+  `
+}
+
+function detailBody(items: Array<[string, unknown]>, notice?: { title: string; copy: string }) {
+  return `
+    ${detailsCard(items)}
+    ${notice ? noticeCard(notice.title, notice.copy) : ''}
+  `
+}
+
+function adminEmailShell(title: string, intro: string, items: Array<[string, unknown]>) {
+  return emailShell(title, intro, detailBody(items), {
+    eyebrow: 'Operations Notice',
+    ctaLabel: 'Open backoffice',
+    ctaHref: siteUrl('/en/admin'),
+  })
+}
+
+function customerEmailShell(title: string, intro: string, items: Array<[string, unknown]>, notice?: { title: string; copy: string }) {
+  return emailShell(title, intro, detailBody(items, notice), {
+    eyebrow: 'Customer Update',
+    ctaLabel: 'Open dashboard',
+    ctaHref: siteUrl('/en/dashboard'),
+  })
+}
+
+function accountEmailShell(title: string, intro: string, items: Array<[string, unknown]>) {
+  return emailShell(title, intro, detailBody(items), {
+    eyebrow: 'Account Security',
+    ctaLabel: 'Sign in',
+    ctaHref: siteUrl('/en/login'),
+  })
+}
+
+function systemEmailShell(title: string, intro: string, items: Array<[string, unknown]>) {
+  return emailShell(title, intro, detailBody(items), {
+    eyebrow: 'System Alert',
+    ctaLabel: 'Open backoffice',
+    ctaHref: siteUrl('/en/admin'),
+  })
 }
 
 function textFromPairs(title: string, intro: string, items: Array<[string, unknown]>) {
@@ -109,7 +279,7 @@ async function sendAdminEmail(subject: string, title: string, intro: string, ite
   await safeSendEmail({
     to: adminEmails(),
     subject,
-    html: emailShell(title, intro, `<table style="width:100%;border-collapse:collapse;">${rows(items)}</table>`),
+    html: adminEmailShell(title, intro, items),
     text: textFromPairs(title, intro, items),
   })
 }
@@ -186,10 +356,10 @@ export async function notifyAutoAccountCreated(userId: string, bookingId?: strin
   await safeSendEmail({
     to: user.email,
     subject: 'Your Beninfy account is ready',
-    html: emailShell(
+    html: accountEmailShell(
       'Your Beninfy Account Is Ready',
       'We created a Beninfy customer account with your booking email so you can manage your trip details.',
-      `<table style="width:100%;border-collapse:collapse;">${rows(items)}</table>`
+      items
     ),
     text: textFromPairs('Your Beninfy Account Is Ready', 'We created a Beninfy customer account with your booking email so you can manage your trip details.', items),
   })
@@ -207,10 +377,14 @@ export async function notifyPaymentSuccess(bookingId: string, paymentId: string)
     await safeSendEmail({
       to: customerEmail,
       subject: `Booking confirmed: ${booking.from} to ${booking.to}`,
-      html: emailShell(
+      html: customerEmailShell(
         'Booking Confirmed',
         'Your payment was received and your Beninfy ride is now confirmed. Our operations team will coordinate the trip details with you.',
-        `<table style="width:100%;border-collapse:collapse;">${rows(items)}</table>`
+        items,
+        {
+          title: 'Travel policy reminder',
+          copy: 'Please keep your travel documents ready before departure. Late cancellations under 24 hours may attract the full one-way trip cost as a cancellation fee.',
+        }
       ),
       text: textFromPairs('Booking Confirmed', 'Your payment was received and your Beninfy ride is now confirmed.', items),
     })
@@ -271,7 +445,7 @@ export async function notifyBookingStatusChanged(bookingId: string, status: stri
     await safeSendEmail({
       to: customerEmail,
       subject: `Beninfy booking ${status}`,
-      html: emailShell(title, intro, `<table style="width:100%;border-collapse:collapse;">${rows(items)}</table>`),
+      html: customerEmailShell(title, intro, items),
       text: textFromPairs(title, intro, items),
     })
   }
@@ -317,10 +491,14 @@ export async function notifyBookingAssignmentChanged(bookingLegId: string) {
     await safeSendEmail({
       to: customerEmail,
       subject: 'Your Beninfy trip assignment was updated',
-      html: emailShell(
+      html: customerEmailShell(
         'Trip Assignment Updated',
         'Your trip assignment has been updated by Beninfy operations.',
-        `<table style="width:100%;border-collapse:collapse;">${rows(items)}</table>`
+        items,
+        {
+          title: 'Before departure',
+          copy: 'Our operations team may still contact you by phone or WhatsApp to confirm pickup timing, documents, and border coordination.',
+        }
       ),
       text: textFromPairs('Trip Assignment Updated', 'Your trip assignment has been updated by Beninfy operations.', items),
     })
@@ -330,10 +508,10 @@ export async function notifyBookingAssignmentChanged(bookingLegId: string) {
     await safeSendEmail({
       to: leg.driver.email,
       subject: `Beninfy dispatch: ${leg.from} to ${leg.to}`,
-      html: emailShell(
+      html: systemEmailShell(
         'New Driver Assignment',
         'You have been assigned to a Beninfy trip. Please review the trip details and coordinate with operations.',
-        `<table style="width:100%;border-collapse:collapse;">${rows(items)}</table>`
+        items
       ),
       text: textFromPairs('New Driver Assignment', 'You have been assigned to a Beninfy trip.', items),
     })
@@ -353,10 +531,10 @@ export async function notifyUserRegistered(userId: string) {
   await safeSendEmail({
     to: user.email,
     subject: 'Welcome to Beninfy',
-    html: emailShell(
+    html: accountEmailShell(
       'Welcome To Beninfy',
       'Your Beninfy account has been created. You can now book private cross-border rides and manage your trips from your dashboard.',
-      `<table style="width:100%;border-collapse:collapse;">${rows(items)}</table>`
+      items
     ),
     text: textFromPairs('Welcome To Beninfy', 'Your Beninfy account has been created.', items),
   })
@@ -376,10 +554,10 @@ export async function notifyAdminUserCreated(userId: string) {
   await safeSendEmail({
     to: user.email,
     subject: 'Your Beninfy backoffice account was created',
-    html: emailShell(
+    html: accountEmailShell(
       'Backoffice Account Created',
       'A Beninfy backoffice account has been created for you. Please sign in and change your password if required by operations.',
-      `<table style="width:100%;border-collapse:collapse;">${rows(items)}</table>`
+      items
     ),
     text: textFromPairs('Backoffice Account Created', 'A Beninfy backoffice account has been created for you.', items),
   })
@@ -400,10 +578,10 @@ export async function notifyPasswordChanged(userId: string, mode: 'self' | 'admi
   await safeSendEmail({
     to: user.email,
     subject: 'Your Beninfy password was changed',
-    html: emailShell(
+    html: accountEmailShell(
       'Password Changed',
       'Your Beninfy account password was changed. If you did not request this, contact operations immediately.',
-      `<table style="width:100%;border-collapse:collapse;">${rows(items)}</table>`
+      items
     ),
     text: textFromPairs('Password Changed', 'Your Beninfy account password was changed.', items),
   })

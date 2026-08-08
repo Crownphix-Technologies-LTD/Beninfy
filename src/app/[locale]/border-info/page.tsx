@@ -2,6 +2,20 @@ import Link from 'next/link'
 import { borderFees } from '@/data/borderFees'
 import { formatNGN } from '@/lib/utils'
 import { getTranslations, setRequestLocale } from 'next-intl/server'
+import { pageMetadata } from '@/lib/seo'
+import type { Metadata } from 'next'
+
+export async function generateMetadata({ params }: { params: Promise<{ locale: string }> }): Promise<Metadata> {
+  const { locale } = await params
+  return pageMetadata({
+    title: 'West Africa Border Crossing Support and Fees',
+    description:
+      'Understand border assistance, documents and fees for Nigeria-Benin, Benin-Togo and Togo-Ghana private rides with Beninfy.',
+    path: 'border-info',
+    locale,
+    keywords: ['Seme border assistance', 'Hillacondji border', 'Aflao border crossing', 'West Africa border fees'],
+  })
+}
 
 const COUNTRY_FLAGS: Record<string, string> = {
   'nigeria-benin': '🇳🇬→🇧🇯',

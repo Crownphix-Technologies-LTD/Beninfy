@@ -3,6 +3,12 @@ import { auth } from '@/lib/auth'
 import { signOut } from '@/lib/auth'
 import { setRequestLocale } from 'next-intl/server'
 import AdminSidebar from '@/components/admin/AdminSidebar'
+import type { Metadata } from 'next'
+
+export const metadata: Metadata = {
+  title: 'Admin Backoffice',
+  robots: { index: false, follow: false, googleBot: { index: false, follow: false } },
+}
 
 type Props = {
   children: React.ReactNode

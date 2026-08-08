@@ -4,6 +4,21 @@ import { formatNGN } from '@/lib/utils'
 import { getTranslations, setRequestLocale } from 'next-intl/server'
 import { getPublicVehicles } from '@/lib/vehicleCatalog'
 import CatalogImage from '@/components/shared/CatalogImage'
+import { pageMetadata, seoImages } from '@/lib/seo'
+import type { Metadata } from 'next'
+
+export async function generateMetadata({ params }: { params: Promise<{ locale: string }> }): Promise<Metadata> {
+  const { locale } = await params
+  return pageMetadata({
+    title: 'Premium Fleet for Private Cross-Border Travel',
+    description:
+      'Explore Beninfy saloon cars, SUVs, Sienna vans, Prado/GX460 VIP vehicles and Sprinter buses for private rides across West Africa.',
+    path: 'fleet',
+    image: seoImages.fleet,
+    locale,
+    keywords: ['Beninfy fleet', 'private car hire West Africa', 'SUV transport Lagos Cotonou', 'VIP cross-border vehicle'],
+  })
+}
 
 export const dynamic = 'force-dynamic'
 

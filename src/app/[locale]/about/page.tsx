@@ -1,5 +1,18 @@
-import Link from 'next/link'
 import { getTranslations, setRequestLocale } from 'next-intl/server'
+import { pageMetadata } from '@/lib/seo'
+import type { Metadata } from 'next'
+
+export async function generateMetadata({ params }: { params: Promise<{ locale: string }> }): Promise<Metadata> {
+  const { locale } = await params
+  return pageMetadata({
+    title: 'About Beninfy Logistics',
+    description:
+      'Learn about Beninfy Logistics, a premium private transport and border-assistance company serving Nigeria, Benin Republic, Togo and Ghana.',
+    path: 'about',
+    locale,
+    keywords: ['Beninfy Logistics', 'Beninfy Rides', 'West Africa transport company', 'border transport operator'],
+  })
+}
 
 export default async function AboutPage({ params }: { params: Promise<{ locale: string }> }) {
   const { locale } = await params

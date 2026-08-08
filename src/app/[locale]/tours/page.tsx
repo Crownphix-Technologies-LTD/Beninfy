@@ -3,12 +3,27 @@ import { formatNGN } from '@/lib/utils'
 import { getTranslations, setRequestLocale } from 'next-intl/server'
 import { getPublicTours } from '@/lib/tourCatalog'
 import CatalogImage from '@/components/shared/CatalogImage'
+import { pageMetadata, seoImages } from '@/lib/seo'
+import type { Metadata } from 'next'
 
 const TOUR_CATEGORIES: Record<string, string> = {
   'benin-history-lake': 'tagHistory',
   'lome-aneho-beach': 'tagBeach',
   'accra-cape-coast': 'tagGhana',
   'west-africa-grand-tour': 'tagGrand',
+}
+
+export async function generateMetadata({ params }: { params: Promise<{ locale: string }> }): Promise<Metadata> {
+  const { locale } = await params
+  return pageMetadata({
+    title: 'Private Tours in Benin, Togo, Ghana and West Africa',
+    description:
+      'Book curated Beninfy tours to Ganvié, Ouidah, Lomé, Aného Beach, Accra, Cape Coast and multi-country West African destinations.',
+    path: 'tours',
+    image: seoImages.tours,
+    locale,
+    keywords: ['Benin Republic tours', 'Togo private tours', 'Ghana tours', 'West Africa private tour'],
+  })
 }
 
 export const dynamic = 'force-dynamic'

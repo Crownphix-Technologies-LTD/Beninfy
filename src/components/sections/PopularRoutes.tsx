@@ -98,9 +98,9 @@ export default function PopularRoutes() {
             {/* Content */}
             <div className="p-6">
               <div className="flex justify-between items-center mb-2">
-                <h3 className="text-headline-sm">
+                <Link href={`/${locale}/routes/${route.id}`} className="text-headline-sm hover:text-primary">
                   {route.from} → {route.to}
-                </h3>
+                </Link>
                 <span className="text-secondary text-headline-sm">
                   {formatNGN(getRouteBasePrice(route.id))}
                 </span>

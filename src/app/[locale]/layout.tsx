@@ -7,9 +7,12 @@ import AuthProvider from '@/components/shared/AuthProvider'
 import LocaleLayoutShell from '@/components/layout/LocaleLayoutShell'
 import LenisProvider from '@/components/shared/LenisProvider'
 import type { Metadata } from 'next'
+import { organizationJsonLd, websiteJsonLd } from '@/lib/seo'
 
 export const metadata: Metadata = {
-  title: 'Beninfy | Premium West African Travel',
+  title: 'Private Cross-Border Rides Across West Africa',
+  description:
+    'Book private rides, airport pickups, tours and border-assisted transport across Nigeria, Benin Republic, Togo and Ghana.',
 }
 
 export function generateStaticParams() {
@@ -32,6 +35,14 @@ export default async function LocaleLayout({
 
   return (
     <NextIntlClientProvider messages={messages} locale={locale}>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(organizationJsonLd()) }}
+      />
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(websiteJsonLd()) }}
+      />
       <AuthProvider>
         <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false}>
           <LenisProvider />
@@ -41,4 +52,3 @@ export default async function LocaleLayout({
     </NextIntlClientProvider>
   )
 }
-

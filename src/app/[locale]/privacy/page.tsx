@@ -2,11 +2,17 @@ import Link from 'next/link'
 import { setRequestLocale } from 'next-intl/server'
 import type { Metadata } from 'next'
 import type { ReactNode } from 'react'
+import { pageMetadata } from '@/lib/seo'
 
-export const metadata: Metadata = {
-  title: 'Privacy Policy | Beninfy Rides',
-  description:
-    'How Beninfy Rides collects, uses, stores, and protects customer information for ride bookings and support.',
+export async function generateMetadata({ params }: { params: Promise<{ locale: string }> }): Promise<Metadata> {
+  const { locale } = await params
+  return pageMetadata({
+    title: 'Privacy Policy | Beninfy Rides',
+    description:
+      'How Beninfy Rides collects, uses, stores, and protects customer information for ride bookings and support.',
+    path: 'privacy',
+    locale,
+  })
 }
 
 export default async function PrivacyPage({ params }: { params: Promise<{ locale: string }> }) {
