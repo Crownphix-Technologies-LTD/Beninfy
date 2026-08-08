@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { z } from 'zod'
 import { requireAdmin } from '@/lib/admin'
+import { notifyBackofficeRecordChanged } from '@/lib/notifications'
 import { prisma } from '@/lib/prisma'
 
 const patchSchema = z.object({
@@ -29,6 +30,13 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   if (!parsed.success) return NextResponse.json({ error: 'Invalid input', issues: parsed.error.flatten() }, { status: 400 })
   try {
     const vehicle = await prisma.vehicle.update({ where: { id }, data: parsed.data })
+    await notifyBackofficeRecordChanged('Vehicle category', 'updated', [
+      ['ID', vehicle.id],
+      ['Name', vehicle.name],
+      ['Capacity', vehicle.capacity],
+      ['Available', vehicle.available ? 'Yes' : 'No'],
+      ['Base price', vehicle.basePriceNGN ? `NGN ${vehicle.basePriceNGN.toLocaleString()}` : null],
+    ])
     return NextResponse.json({ vehicle })
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
@@ -64,9 +72,15 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
   }
 
   try {
+    const vehicle = await prisma.vehicle.findUnique({ where: { id } })
     await prisma.$transaction([
       prisma.routePrice.deleteMany({ where: { vehicleId: id } }),
       prisma.vehicle.delete({ where: { id } }),
+    ])
+    await notifyBackofficeRecordChanged('Vehicle category', 'deleted', [
+      ['ID', vehicle?.id],
+      ['Name', vehicle?.name],
+      ['Capacity', vehicle?.capacity],
     ])
     return NextResponse.json({ ok: true })
   } catch (error) {

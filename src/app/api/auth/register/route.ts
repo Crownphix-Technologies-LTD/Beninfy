@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs'
 import { z } from 'zod'
 import { prisma } from '@/lib/prisma'
 import { checkRateLimit, requestIp } from '@/lib/rateLimit'
+import { notifyUserRegistered } from '@/lib/notifications'
 
 const schema = z.object({
   name: z.string().min(1).max(100),
@@ -44,6 +45,7 @@ export async function POST(req: Request) {
       data: { name, email, hashedPassword, phone, role: 'user' },
       select: { id: true, name: true, email: true },
     })
+    await notifyUserRegistered(user.id)
     return NextResponse.json({ user }, { status: 201 })
   } catch {
     return NextResponse.json({ error: 'Server error' }, { status: 500 })

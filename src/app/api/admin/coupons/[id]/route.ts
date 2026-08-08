@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client'
 import { z } from 'zod'
 import { requireAdmin } from '@/lib/admin'
 import { normalizeCouponCode } from '@/lib/coupons'
+import { notifyCouponChanged } from '@/lib/notifications'
 import { prisma } from '@/lib/prisma'
 
 const optionalText = z.preprocess(
@@ -58,6 +59,14 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
   try {
     const coupon = await prisma.coupon.update({ where: { id }, data: couponPatchData(parsed.data) })
+    await notifyCouponChanged('updated', [
+      ['Code', coupon.code],
+      ['Discount type', coupon.discountType],
+      ['Amount', coupon.amountNGN ? `NGN ${coupon.amountNGN.toLocaleString()}` : null],
+      ['Percent', coupon.percent ? `${coupon.percent}%` : null],
+      ['Active', coupon.active ? 'Yes' : 'No'],
+      ['Redeemed count', coupon.redeemedCount],
+    ])
     return NextResponse.json({ coupon })
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
@@ -75,6 +84,11 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
   if (bookings > 0) {
     return NextResponse.json({ error: 'Cannot delete: this coupon has already been used. Deactivate it instead.' }, { status: 409 })
   }
+  const coupon = await prisma.coupon.findUnique({ where: { id } })
   await prisma.coupon.delete({ where: { id } })
+  await notifyCouponChanged('deleted', [
+    ['Code', coupon?.code],
+    ['Discount type', coupon?.discountType],
+  ])
   return NextResponse.json({ ok: true })
 }

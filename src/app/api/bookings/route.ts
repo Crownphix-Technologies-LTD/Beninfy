@@ -12,6 +12,7 @@ import { getRouteBorderFee } from '@/data/borderFees'
 import { vehicles as catalogVehicles } from '@/data/vehicles'
 import { assertFleetVehicleAvailable, assertVehicleTypeAvailable, findAvailableFleetVehicle } from '@/lib/availability'
 import { normalizeCouponCode, validateCouponCode } from '@/lib/coupons'
+import { notifyAutoAccountCreated, notifyBookingCreatedPending } from '@/lib/notifications'
 import { getRoutePriceOverrides } from '@/lib/routePriceOverrides'
 import type { RouteId, VehicleId } from '@/types'
 
@@ -77,14 +78,14 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Lead passenger email is required' }, { status: 400 })
   }
   const leadPassengerName = data.passengerName || session?.user?.name || null
-  if (!session?.user?.id) {
-    const existingLeadUser = await prisma.user.findUnique({
-      where: { email: leadPassengerEmail },
-      select: { role: true },
-    })
-    if (existingLeadUser && isAdminRole(existingLeadUser.role)) {
-      return NextResponse.json({ error: 'Use a customer email address for booking checkout' }, { status: 403 })
-    }
+  const existingLeadUser = !session?.user?.id
+    ? await prisma.user.findUnique({
+        where: { email: leadPassengerEmail },
+        select: { id: true, role: true },
+      })
+    : null
+  if (existingLeadUser && isAdminRole(existingLeadUser.role)) {
+    return NextResponse.json({ error: 'Use a customer email address for booking checkout' }, { status: 403 })
   }
   const departureDate = new Date(data.date)
   const returnDate = data.returnDate ? new Date(data.returnDate) : null
@@ -287,6 +288,11 @@ export async function POST(req: Request) {
         include: { legs: true },
       })
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+
+    await notifyBookingCreatedPending(booking.id)
+    if (!session?.user?.id && !existingLeadUser && booking.userId) {
+      await notifyAutoAccountCreated(booking.userId, booking.id)
+    }
 
     return NextResponse.json({ booking }, { status: 201 })
   } catch (error) {

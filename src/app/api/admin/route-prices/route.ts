@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { z } from 'zod'
 import { requireAdmin } from '@/lib/admin'
+import { notifyRoutePriceChanged } from '@/lib/notifications'
 import { prisma } from '@/lib/prisma'
 import { ensureDefaultRoutePrices } from '@/lib/routePriceCatalog'
 import { propagateCategoryRoutePrice } from '@/lib/routePricePropagation'
@@ -41,6 +42,13 @@ export async function POST(req: Request) {
       await propagateCategoryRoutePrice(tx, created)
       return created
     })
+    await notifyRoutePriceChanged('created', [
+      ['Route ID', routePrice.routeId],
+      ['Vehicle/fleet ID', routePrice.vehicleId],
+      ['Pricing scope', routePrice.pricingScope],
+      ['Amount', `NGN ${routePrice.amountNGN.toLocaleString()}`],
+      ['Notes', routePrice.notes],
+    ])
     return NextResponse.json({ routePrice }, { status: 201 })
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError) {

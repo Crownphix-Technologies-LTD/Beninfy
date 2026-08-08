@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { requireAdmin } from '@/lib/admin'
+import { notifyBackofficeRecordChanged } from '@/lib/notifications'
 import { prisma } from '@/lib/prisma'
 import { ensureDefaultTours } from '@/lib/tourCatalog'
 
@@ -36,5 +37,12 @@ export async function POST(req: Request) {
   const parsed = schema.safeParse(body)
   if (!parsed.success) return NextResponse.json({ error: 'Invalid input', issues: parsed.error.flatten() }, { status: 400 })
   const tour = await prisma.tour.create({ data: parsed.data })
+  await notifyBackofficeRecordChanged('Tour', 'created', [
+    ['ID', tour.id],
+    ['Title', tour.title],
+    ['Country', tour.country],
+    ['Duration days', tour.durationDays],
+    ['Starting from', `NGN ${tour.startingFromNGN.toLocaleString()}`],
+  ])
   return NextResponse.json({ tour }, { status: 201 })
 }

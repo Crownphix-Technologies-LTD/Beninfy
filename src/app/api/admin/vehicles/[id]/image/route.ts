@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { requireAdmin } from '@/lib/admin'
+import { notifyBackofficeRecordChanged } from '@/lib/notifications'
 import { prisma } from '@/lib/prisma'
 import { uploadCatalogImage } from '@/lib/supabaseStorage'
 
@@ -39,6 +40,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     data: { image: uploaded.url },
     select: { id: true, image: true },
   })
+
+  await notifyBackofficeRecordChanged('Vehicle image', 'updated', [
+    ['Vehicle ID', vehicle.id],
+    ['Image URL', vehicle.image],
+  ])
 
   return NextResponse.json({ vehicle })
 }

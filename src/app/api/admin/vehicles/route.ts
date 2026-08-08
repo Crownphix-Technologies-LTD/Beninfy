@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { z } from 'zod'
 import { requireAdmin } from '@/lib/admin'
+import { notifyBackofficeRecordChanged } from '@/lib/notifications'
 import { prisma } from '@/lib/prisma'
 import { ensureDefaultVehicles } from '@/lib/vehicleCatalog'
 
@@ -38,6 +39,13 @@ export async function POST(req: Request) {
   if (!parsed.success) return NextResponse.json({ error: 'Invalid input', issues: parsed.error.flatten() }, { status: 400 })
   try {
     const vehicle = await prisma.vehicle.create({ data: parsed.data })
+    await notifyBackofficeRecordChanged('Vehicle category', 'created', [
+      ['ID', vehicle.id],
+      ['Name', vehicle.name],
+      ['Capacity', vehicle.capacity],
+      ['Available', vehicle.available ? 'Yes' : 'No'],
+      ['Base price', vehicle.basePriceNGN ? `NGN ${vehicle.basePriceNGN.toLocaleString()}` : null],
+    ])
     return NextResponse.json({ vehicle }, { status: 201 })
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {

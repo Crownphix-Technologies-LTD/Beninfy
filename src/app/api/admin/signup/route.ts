@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import bcrypt from 'bcryptjs'
 import { z } from 'zod'
 import { checkRateLimit, requestIp } from '@/lib/rateLimit'
+import { notifyAdminUserCreated } from '@/lib/notifications'
 
 const schema = z.object({
   name: z.string().trim().min(1).max(100),
@@ -92,6 +93,8 @@ export async function POST(req: Request) {
       data: { name, email, hashedPassword, phone, role: 'super_admin' },
       select: { id: true, name: true, email: true, role: true },
     })
+
+    await notifyAdminUserCreated(user.id)
 
     return NextResponse.json({ user }, { status: 201 })
   } catch (error) {

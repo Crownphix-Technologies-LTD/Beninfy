@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from 'crypto'
 import { prisma } from '@/lib/prisma'
-import { reserveBookingAfterPayment } from '@/lib/paymentSettlement'
+import { notifyPaymentIssue, notifyPaymentSuccess } from '@/lib/notifications'
+import { failBookingPayment, reserveBookingAfterPayment } from '@/lib/paymentSettlement'
 
 const PAYSTACK_BASE_URL = 'https://api.paystack.co'
 
@@ -31,6 +32,13 @@ export type PaystackVerifyResponse = {
 export type PaymentSettlement =
   | { ok: true; status: 'paid'; bookingId: string; reference: string; providerReference?: string }
   | { ok: false; status: 'pending' | 'failed' | 'amount_mismatch' | 'not_found'; message: string }
+
+const PAYSTACK_STILL_PENDING_STATUSES = new Set(['ongoing', 'pending', 'processing', 'queued'])
+
+function normalizeUnpaidPaystackStatus(status: string | undefined) {
+  const normalized = status?.toLowerCase()
+  return normalized && PAYSTACK_STILL_PENDING_STATUSES.has(normalized) ? 'pending' : 'failed'
+}
 
 export function paystackEnabled() {
   return process.env.PAYMENTS_ENABLED === 'true'
@@ -144,13 +152,36 @@ export async function settlePaymentFromPaystack(reference: string, verified: Pay
 
   const transaction = verified.data
   if (transaction?.status !== 'success') {
-    await prisma.payment.update({ where: { reference }, data: { status: transaction?.status || 'failed' } })
-    return { ok: false, status: 'failed', message: transaction?.gateway_response || 'Payment was not successful' }
+    const nextStatus = normalizeUnpaidPaystackStatus(transaction?.status)
+    await prisma.payment.update({ where: { reference }, data: { status: nextStatus } })
+    if (nextStatus === 'failed') {
+      await failBookingPayment(payment.bookingId)
+    }
+    if (payment.status !== nextStatus && nextStatus === 'failed') {
+      await notifyPaymentIssue({
+        bookingId: payment.bookingId,
+        reference,
+        provider: 'paystack',
+        status: transaction?.status || 'failed',
+        message: transaction?.gateway_response || 'Payment was not successful',
+      })
+    }
+    return { ok: false, status: nextStatus, message: transaction?.gateway_response || 'Payment was not successful' }
   }
 
   const expectedAmount = payment.amountNGN * 100
   if (transaction.amount !== expectedAmount || transaction.currency !== 'NGN') {
     await prisma.payment.update({ where: { reference }, data: { status: 'amount_mismatch' } })
+    await failBookingPayment(payment.bookingId)
+    if (payment.status !== 'amount_mismatch') {
+      await notifyPaymentIssue({
+        bookingId: payment.bookingId,
+        reference,
+        provider: 'paystack',
+        status: 'amount_mismatch',
+        message: 'Payment amount does not match booking total',
+      })
+    }
     return { ok: false, status: 'amount_mismatch', message: 'Payment amount does not match booking total' }
   }
 
@@ -167,6 +198,10 @@ export async function settlePaymentFromPaystack(reference: string, verified: Pay
     }),
     reserveBookingAfterPayment(payment.bookingId, payment.id),
   ])
+
+  if (payment.status !== 'paid') {
+    await notifyPaymentSuccess(payment.bookingId, payment.id)
+  }
 
   return { ok: true, status: 'paid', bookingId: payment.bookingId, reference, providerReference: transaction.reference }
 }

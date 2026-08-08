@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { z } from 'zod'
 import { requireAdmin } from '@/lib/admin'
+import { notifyRoutePriceChanged } from '@/lib/notifications'
 import { prisma } from '@/lib/prisma'
 import { propagateCategoryRoutePrice } from '@/lib/routePricePropagation'
 
@@ -46,6 +47,13 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         await propagateCategoryRoutePrice(tx, updated)
         return updated
       })
+      await notifyRoutePriceChanged('updated', [
+        ['Route ID', routePrice.routeId],
+        ['Vehicle/fleet ID', routePrice.vehicleId],
+        ['Pricing scope', routePrice.pricingScope],
+        ['Amount', `NGN ${routePrice.amountNGN.toLocaleString()}`],
+        ['Notes', routePrice.notes],
+      ])
       return NextResponse.json({ routePrice })
     }
 
@@ -57,6 +65,13 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       await propagateCategoryRoutePrice(tx, updated)
       return updated
     })
+    await notifyRoutePriceChanged('updated', [
+      ['Route ID', routePrice.routeId],
+      ['Vehicle/fleet ID', routePrice.vehicleId],
+      ['Pricing scope', routePrice.pricingScope],
+      ['Amount', `NGN ${routePrice.amountNGN.toLocaleString()}`],
+      ['Notes', routePrice.notes],
+    ])
     return NextResponse.json({ routePrice })
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
@@ -70,6 +85,13 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
   const guard = await requireAdmin()
   if (!guard.ok) return guard.response
   const { id } = await params
+  const routePrice = await prisma.routePrice.findUnique({ where: { id } })
   await prisma.routePrice.delete({ where: { id } })
+  await notifyRoutePriceChanged('deleted', [
+    ['Route ID', routePrice?.routeId],
+    ['Vehicle/fleet ID', routePrice?.vehicleId],
+    ['Pricing scope', routePrice?.pricingScope],
+    ['Amount', routePrice?.amountNGN ? `NGN ${routePrice.amountNGN.toLocaleString()}` : null],
+  ])
   return NextResponse.json({ ok: true })
 }

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { requireAdmin } from '@/lib/admin'
+import { notifyBookingAssignmentChanged } from '@/lib/notifications'
 import { prisma } from '@/lib/prisma'
 
 const patchSchema = z.object({
@@ -80,6 +81,15 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       driver: true,
     },
   })
+
+  if (
+    data.fleetVehicleId !== undefined ||
+    data.driverId !== undefined ||
+    data.status !== undefined ||
+    data.notes !== undefined
+  ) {
+    await notifyBookingAssignmentChanged(bookingLeg.id)
+  }
 
   return NextResponse.json({ bookingLeg })
 }

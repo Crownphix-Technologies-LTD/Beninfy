@@ -15,3 +15,26 @@ export function reserveBookingAfterPayment(bookingId: string, paymentId: string)
     },
   })
 }
+
+export function failBookingPayment(bookingId: string) {
+  return prisma.$transaction([
+    prisma.booking.updateMany({
+      where: {
+        id: bookingId,
+        status: 'pending',
+      },
+      data: {
+        status: 'cancelled',
+      },
+    }),
+    prisma.bookingLeg.updateMany({
+      where: {
+        bookingId,
+        status: 'payment_pending',
+      },
+      data: {
+        status: 'cancelled',
+      },
+    }),
+  ])
+}

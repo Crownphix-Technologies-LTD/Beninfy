@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { z } from 'zod'
 import { requireAdmin } from '@/lib/admin'
+import { notifyFleetVehicleChanged } from '@/lib/notifications'
 import { prisma } from '@/lib/prisma'
 
 const optionalText = z.preprocess(
@@ -57,6 +58,14 @@ export async function POST(req: Request) {
   if (!parsed.success) return NextResponse.json({ error: 'Invalid input', issues: parsed.error.flatten() }, { status: 400 })
   try {
     const fleetVehicle = await prisma.fleetVehicle.create({ data: parsed.data })
+    await notifyFleetVehicleChanged('created', [
+      ['Label', fleetVehicle.label],
+      ['Plate number', fleetVehicle.plateNumber],
+      ['Color', fleetVehicle.color],
+      ['Category ID', fleetVehicle.vehicleId],
+      ['Status', fleetVehicle.status],
+      ['Current city', fleetVehicle.currentCity],
+    ])
     return NextResponse.json({ fleetVehicle }, { status: 201 })
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError) {

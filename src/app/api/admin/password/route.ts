@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs'
 import { z } from 'zod'
 import { requireAdmin } from '@/lib/admin'
 import { prisma } from '@/lib/prisma'
+import { notifyPasswordChanged } from '@/lib/notifications'
 
 const schema = z.object({
   currentPassword: z.string().min(1).optional(),
@@ -43,6 +44,8 @@ export async function PATCH(req: Request) {
       sessionVersion: { increment: 1 },
     },
   })
+
+  await notifyPasswordChanged(user.id, 'self')
 
   return NextResponse.json({ ok: true })
 }

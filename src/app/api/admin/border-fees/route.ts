@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { requireAdmin } from '@/lib/admin'
+import { notifyBackofficeRecordChanged } from '@/lib/notifications'
 import { prisma } from '@/lib/prisma'
 
 const schema = z.object({
@@ -36,5 +37,12 @@ export async function POST(req: Request) {
   const parsed = schema.safeParse(body)
   if (!parsed.success) return NextResponse.json({ error: 'Invalid input', issues: parsed.error.flatten() }, { status: 400 })
   const borderFee = await prisma.borderFee.create({ data: parsed.data })
+  await notifyBackofficeRecordChanged('Border fee', 'created', [
+    ['ID', borderFee.id],
+    ['Country', borderFee.country],
+    ['Border', borderFee.border],
+    ['One-way fee', `NGN ${borderFee.feePerPersonNGN.toLocaleString()}`],
+    ['Round-trip fee', `NGN ${borderFee.feeRoundTripNGN.toLocaleString()}`],
+  ])
   return NextResponse.json({ borderFee }, { status: 201 })
 }

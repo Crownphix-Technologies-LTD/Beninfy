@@ -1,6 +1,7 @@
 import { createHash, timingSafeEqual } from 'crypto'
 import { prisma } from '@/lib/prisma'
-import { reserveBookingAfterPayment } from '@/lib/paymentSettlement'
+import { notifyPaymentIssue, notifyPaymentSuccess } from '@/lib/notifications'
+import { failBookingPayment, reserveBookingAfterPayment } from '@/lib/paymentSettlement'
 
 type PayOnUsEnvironment = 'test' | 'production'
 
@@ -192,6 +193,18 @@ export async function settlePaymentFromPayOnUs(
       where: { id: payment.id },
       data: { status: nextStatus, providerReference: data?.onusReference ?? onusReference },
     })
+    if (nextStatus === 'failed') {
+      await failBookingPayment(payment.bookingId)
+    }
+    if (payment.status !== nextStatus && nextStatus === 'failed') {
+      await notifyPaymentIssue({
+        bookingId: payment.bookingId,
+        reference: payment.reference,
+        provider: 'payonus',
+        status: nextStatus,
+        message: verified.message || 'Payment is not complete yet',
+      })
+    }
     return { ok: false, status: nextStatus, message: verified.message || 'Payment is not complete yet' }
   }
 
@@ -202,6 +215,16 @@ export async function settlePaymentFromPayOnUs(
       where: { id: payment.id },
       data: { status: 'amount_mismatch', providerReference: data?.onusReference ?? onusReference },
     })
+    await failBookingPayment(payment.bookingId)
+    if (payment.status !== 'amount_mismatch') {
+      await notifyPaymentIssue({
+        bookingId: payment.bookingId,
+        reference: payment.reference,
+        provider: 'payonus',
+        status: 'amount_mismatch',
+        message: 'Payment amount does not match booking total',
+      })
+    }
     return { ok: false, status: 'amount_mismatch', message: 'Payment amount does not match booking total' }
   }
 
@@ -213,6 +236,10 @@ export async function settlePaymentFromPayOnUs(
     }),
     reserveBookingAfterPayment(payment.bookingId, payment.id),
   ])
+
+  if (payment.status !== 'paid') {
+    await notifyPaymentSuccess(payment.bookingId, payment.id)
+  }
 
   return { ok: true, status: 'paid', bookingId: payment.bookingId, reference: payment.reference, providerReference }
 }
@@ -242,6 +269,18 @@ export async function settlePaymentFromPayOnUsWebhook(payload: PayOnUsWebhookPay
       where: { id: payment.id },
       data: { status: nextStatus, providerReference: onusReference ?? payment.providerReference },
     })
+    if (nextStatus === 'failed') {
+      await failBookingPayment(payment.bookingId)
+    }
+    if (payment.status !== nextStatus && nextStatus === 'failed') {
+      await notifyPaymentIssue({
+        bookingId: payment.bookingId,
+        reference: payment.reference,
+        provider: 'payonus',
+        status: nextStatus,
+        message: 'Payment is not complete yet',
+      })
+    }
     return { ok: false, status: nextStatus, message: 'Payment is not complete yet' }
   }
 
@@ -251,6 +290,16 @@ export async function settlePaymentFromPayOnUsWebhook(payload: PayOnUsWebhookPay
       where: { id: payment.id },
       data: { status: 'amount_mismatch', providerReference: onusReference ?? payment.providerReference },
     })
+    await failBookingPayment(payment.bookingId)
+    if (payment.status !== 'amount_mismatch') {
+      await notifyPaymentIssue({
+        bookingId: payment.bookingId,
+        reference: payment.reference,
+        provider: 'payonus',
+        status: 'amount_mismatch',
+        message: 'Payment amount does not match booking total',
+      })
+    }
     return { ok: false, status: 'amount_mismatch', message: 'Payment amount does not match booking total' }
   }
 
@@ -267,6 +316,10 @@ export async function settlePaymentFromPayOnUsWebhook(payload: PayOnUsWebhookPay
     }),
     reserveBookingAfterPayment(payment.bookingId, payment.id),
   ])
+
+  if (payment.status !== 'paid') {
+    await notifyPaymentSuccess(payment.bookingId, payment.id)
+  }
 
   return { ok: true, status: 'paid', bookingId: payment.bookingId, reference: payment.reference, providerReference: onusReference }
 }

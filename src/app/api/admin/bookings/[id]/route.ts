@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { requireAdmin } from '@/lib/admin'
+import { notifyBookingStatusChanged } from '@/lib/notifications'
 import { prisma } from '@/lib/prisma'
 
 const patchSchema = z.object({
@@ -21,6 +22,8 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const body = await req.json().catch(() => null)
   const parsed = patchSchema.safeParse(body)
   if (!parsed.success) return NextResponse.json({ error: 'Invalid input' }, { status: 400 })
+  const current = await prisma.booking.findUnique({ where: { id }, select: { status: true } })
+  if (!current) return NextResponse.json({ error: 'Booking not found' }, { status: 404 })
   const booking = await prisma.booking.update({
     where: { id },
     data: {
@@ -33,6 +36,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       },
     },
   })
+  if (current.status !== booking.status) {
+    await notifyBookingStatusChanged(booking.id, booking.status)
+  }
   return NextResponse.json({ booking })
 }
 

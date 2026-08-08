@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { z } from 'zod'
 import { requireAdmin } from '@/lib/admin'
+import { notifyDriverChanged } from '@/lib/notifications'
 import { prisma } from '@/lib/prisma'
 
 const optionalText = z.preprocess(
@@ -31,6 +32,14 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   if (!parsed.success) return NextResponse.json({ error: 'Invalid input', issues: parsed.error.flatten() }, { status: 400 })
   try {
     const driver = await prisma.driver.update({ where: { id }, data: parsed.data })
+    await notifyDriverChanged('updated', [
+      ['Name', driver.name],
+      ['Phone', driver.phone],
+      ['Email', driver.email],
+      ['Status', driver.status],
+      ['Home city', driver.homeCity],
+      ['License number', driver.licenseNumber],
+    ])
     return NextResponse.json({ driver })
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
@@ -48,6 +57,12 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
   if (assignedLegs > 0) {
     return NextResponse.json({ error: 'Cannot delete: this driver has assigned booking legs.' }, { status: 409 })
   }
+  const driver = await prisma.driver.findUnique({ where: { id } })
   await prisma.driver.delete({ where: { id } })
+  await notifyDriverChanged('deleted', [
+    ['Name', driver?.name],
+    ['Phone', driver?.phone],
+    ['Email', driver?.email],
+  ])
   return NextResponse.json({ ok: true })
 }

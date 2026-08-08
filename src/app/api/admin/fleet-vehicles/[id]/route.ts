@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { z } from 'zod'
 import { requireAdmin } from '@/lib/admin'
+import { notifyFleetVehicleChanged } from '@/lib/notifications'
 import { prisma } from '@/lib/prisma'
 
 const optionalText = z.preprocess(
@@ -28,6 +29,14 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   if (!parsed.success) return NextResponse.json({ error: 'Invalid input', issues: parsed.error.flatten() }, { status: 400 })
   try {
     const fleetVehicle = await prisma.fleetVehicle.update({ where: { id }, data: parsed.data })
+    await notifyFleetVehicleChanged('updated', [
+      ['Label', fleetVehicle.label],
+      ['Plate number', fleetVehicle.plateNumber],
+      ['Color', fleetVehicle.color],
+      ['Category ID', fleetVehicle.vehicleId],
+      ['Status', fleetVehicle.status],
+      ['Current city', fleetVehicle.currentCity],
+    ])
     return NextResponse.json({ fleetVehicle })
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError) {
@@ -54,7 +63,14 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
     return NextResponse.json({ error: 'Cannot delete: this fleet vehicle has assigned booking legs.' }, { status: 409 })
   }
   try {
+    const fleetVehicle = await prisma.fleetVehicle.findUnique({ where: { id } })
     await prisma.fleetVehicle.delete({ where: { id } })
+    await notifyFleetVehicleChanged('deleted', [
+      ['Label', fleetVehicle?.label],
+      ['Plate number', fleetVehicle?.plateNumber],
+      ['Color', fleetVehicle?.color],
+      ['Category ID', fleetVehicle?.vehicleId],
+    ])
     return NextResponse.json({ ok: true })
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {

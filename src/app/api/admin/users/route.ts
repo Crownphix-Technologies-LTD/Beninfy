@@ -4,6 +4,7 @@ import bcrypt from 'bcryptjs'
 import { requireAdmin, requireSuperAdmin, getRole } from '@/lib/admin'
 import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { notifyAdminUserCreated } from '@/lib/notifications'
 
 export async function GET(req: Request) {
   const guard = await requireAdmin()
@@ -61,6 +62,7 @@ export async function POST(req: Request) {
     data: { name, email, hashedPassword, phone, role },
     select: { id: true, name: true, email: true, phone: true, role: true, createdAt: true },
   })
+  await notifyAdminUserCreated(user.id)
   return NextResponse.json({ user }, { status: 201 })
 }
 

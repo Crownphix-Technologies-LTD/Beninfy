@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client'
 import { z } from 'zod'
 import { requireAdmin } from '@/lib/admin'
 import { normalizeCouponCode } from '@/lib/coupons'
+import { notifyCouponChanged } from '@/lib/notifications'
 import { prisma } from '@/lib/prisma'
 
 const optionalText = z.preprocess(
@@ -66,6 +67,14 @@ export async function POST(req: Request) {
 
   try {
     const coupon = await prisma.coupon.create({ data: couponData(parsed.data) })
+    await notifyCouponChanged('created', [
+      ['Code', coupon.code],
+      ['Discount type', coupon.discountType],
+      ['Amount', coupon.amountNGN ? `NGN ${coupon.amountNGN.toLocaleString()}` : null],
+      ['Percent', coupon.percent ? `${coupon.percent}%` : null],
+      ['Active', coupon.active ? 'Yes' : 'No'],
+      ['Max redemptions', coupon.maxRedemptions],
+    ])
     return NextResponse.json({ coupon }, { status: 201 })
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {

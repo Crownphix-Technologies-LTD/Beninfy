@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { requireAdmin } from '@/lib/admin'
+import { notifyBackofficeRecordChanged } from '@/lib/notifications'
 import { prisma } from '@/lib/prisma'
 import { ensureDefaultRoutes } from '@/lib/routeCatalog'
 
@@ -35,5 +36,12 @@ export async function POST(req: Request) {
   const parsed = schema.safeParse(body)
   if (!parsed.success) return NextResponse.json({ error: 'Invalid input', issues: parsed.error.flatten() }, { status: 400 })
   const route = await prisma.route.create({ data: parsed.data })
+  await notifyBackofficeRecordChanged('Route', 'created', [
+    ['ID', route.id],
+    ['From', route.from],
+    ['To', route.to],
+    ['Duration hours', route.durationHours],
+    ['Popular', route.popular ? 'Yes' : 'No'],
+  ])
   return NextResponse.json({ route }, { status: 201 })
 }

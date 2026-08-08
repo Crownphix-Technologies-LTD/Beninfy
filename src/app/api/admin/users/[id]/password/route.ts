@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs'
 import { z } from 'zod'
 import { requireSuperAdmin } from '@/lib/admin'
 import { prisma } from '@/lib/prisma'
+import { notifyPasswordChanged } from '@/lib/notifications'
 
 const schema = z.object({
   password: z.string().min(8).max(100),
@@ -37,6 +38,8 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       sessionVersion: { increment: 1 },
     },
   })
+
+  await notifyPasswordChanged(id, 'admin_reset')
 
   return NextResponse.json({ ok: true })
 }
