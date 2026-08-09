@@ -1,7 +1,7 @@
 import { createHash, timingSafeEqual } from 'crypto'
 import { prisma } from '@/lib/prisma'
 import { notifyPaymentIssue, notifyPaymentSuccess } from '@/lib/notifications'
-import { failBookingPayment, reserveBookingAfterPayment } from '@/lib/paymentSettlement'
+import { failBookingPayment, markPaymentPaidAndReserveBooking } from '@/lib/paymentSettlement'
 
 type PayOnUsEnvironment = 'test' | 'production'
 
@@ -61,7 +61,7 @@ export type PayOnUsWebhookPayload = {
 
 export type PaymentSettlement =
   | { ok: true; status: 'paid'; bookingId: string; reference: string; providerReference?: string }
-  | { ok: false; status: 'pending' | 'failed' | 'amount_mismatch' | 'not_found'; message: string }
+  | { ok: false; status: 'pending' | 'failed' | 'amount_mismatch' | 'availability_conflict' | 'not_found'; message: string }
 
 const tokenCache = globalThis as typeof globalThis & {
   __payonusToken?: { token: string; expiresAt: number }
@@ -229,13 +229,29 @@ export async function settlePaymentFromPayOnUs(
   }
 
   const providerReference = data?.onusReference ?? onusReference
-  await prisma.$transaction([
-    prisma.payment.update({
-      where: { id: payment.id },
-      data: { status: 'paid', provider: 'payonus', providerReference, currencyCode: 'NGN', checkoutAmount: payment.amountNGN },
-    }),
-    reserveBookingAfterPayment(payment.bookingId, payment.id),
-  ])
+  const reservation = await markPaymentPaidAndReserveBooking({
+    paymentId: payment.id,
+    bookingId: payment.bookingId,
+    paymentData: {
+      provider: 'payonus',
+      providerReference,
+      currencyCode: 'NGN',
+      checkoutAmount: payment.amountNGN,
+    },
+  })
+
+  if (!reservation.ok) {
+    if (payment.status !== 'paid') {
+      await notifyPaymentIssue({
+        bookingId: payment.bookingId,
+        reference: payment.reference,
+        provider: 'payonus',
+        status: reservation.status,
+        message: reservation.message,
+      })
+    }
+    return { ok: false, status: reservation.status, message: reservation.message }
+  }
 
   if (payment.status !== 'paid') {
     await notifyPaymentSuccess(payment.bookingId, payment.id)
@@ -303,19 +319,29 @@ export async function settlePaymentFromPayOnUsWebhook(payload: PayOnUsWebhookPay
     return { ok: false, status: 'amount_mismatch', message: 'Payment amount does not match booking total' }
   }
 
-  await prisma.$transaction([
-    prisma.payment.update({
-      where: { id: payment.id },
-      data: {
-        status: 'paid',
+  const reservation = await markPaymentPaidAndReserveBooking({
+    paymentId: payment.id,
+    bookingId: payment.bookingId,
+    paymentData: {
+      provider: 'payonus',
+      providerReference: onusReference ?? payment.providerReference,
+      currencyCode: 'NGN',
+      checkoutAmount: payment.amountNGN,
+    },
+  })
+
+  if (!reservation.ok) {
+    if (payment.status !== 'paid') {
+      await notifyPaymentIssue({
+        bookingId: payment.bookingId,
+        reference: payment.reference,
         provider: 'payonus',
-        providerReference: onusReference ?? payment.providerReference,
-        currencyCode: 'NGN',
-        checkoutAmount: payment.amountNGN,
-      },
-    }),
-    reserveBookingAfterPayment(payment.bookingId, payment.id),
-  ])
+        status: reservation.status,
+        message: reservation.message,
+      })
+    }
+    return { ok: false, status: reservation.status, message: reservation.message }
+  }
 
   if (payment.status !== 'paid') {
     await notifyPaymentSuccess(payment.bookingId, payment.id)

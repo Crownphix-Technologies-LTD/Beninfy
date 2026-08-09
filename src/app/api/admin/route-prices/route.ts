@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { z } from 'zod'
 import { requireAdmin } from '@/lib/admin'
+import { writeAuditLog } from '@/lib/auditLog'
 import { notifyRoutePriceChanged } from '@/lib/notifications'
 import { prisma } from '@/lib/prisma'
 import { ensureDefaultRoutePrices } from '@/lib/routePriceCatalog'
@@ -49,6 +50,19 @@ export async function POST(req: Request) {
       ['Amount', `NGN ${routePrice.amountNGN.toLocaleString()}`],
       ['Notes', routePrice.notes],
     ])
+    await writeAuditLog({
+      session: guard.session,
+      req,
+      action: 'create',
+      entityType: 'route_price',
+      entityId: routePrice.id,
+      metadata: {
+        routeId: routePrice.routeId,
+        vehicleId: routePrice.vehicleId,
+        pricingScope: routePrice.pricingScope,
+        amountNGN: routePrice.amountNGN,
+      },
+    })
     return NextResponse.json({ routePrice }, { status: 201 })
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError) {

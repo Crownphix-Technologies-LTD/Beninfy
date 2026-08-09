@@ -26,6 +26,7 @@ const NAV_GROUPS = [
       { href: '/coupons', label: 'Coupons', icon: 'confirmation_number', hint: 'Discount codes' },
       { href: '/route-prices', label: 'Prices', icon: 'sell', hint: 'Route fares' },
       { href: '/users', label: 'Users', icon: 'group', hint: 'Accounts' },
+      { href: '/audit-logs', label: 'Audit logs', icon: 'policy', hint: 'Security trail' },
     ],
   },
   {

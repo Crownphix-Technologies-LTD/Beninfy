@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { z } from 'zod'
 import { requireAdmin } from '@/lib/admin'
+import { refreshStalePaystackPayments } from '@/lib/paymentMaintenance'
 import { prisma } from '@/lib/prisma'
 
 export async function GET(req: Request) {
@@ -13,6 +14,10 @@ export async function GET(req: Request) {
   const q = url.searchParams.get('q')?.trim()
   const limit = Math.min(Number(url.searchParams.get('limit') ?? 50), 200)
 
+  if (!status || status === 'pending' || q?.toUpperCase().startsWith('BFY-')) {
+    await refreshStalePaystackPayments({ bookingDisplayRef: q })
+  }
+
   const where: Record<string, unknown> = {}
   if (status) where.status = status
   if (q) {
@@ -21,6 +26,8 @@ export async function GET(req: Request) {
       { to: { contains: q, mode: 'insensitive' } },
       { user: { email: { contains: q, mode: 'insensitive' } } },
       { user: { name: { contains: q, mode: 'insensitive' } } },
+      { id: { endsWith: q.replace(/^BFY-/i, '').toLowerCase() } },
+      { payments: { some: { reference: { contains: q, mode: 'insensitive' } } } },
     ]
   }
 

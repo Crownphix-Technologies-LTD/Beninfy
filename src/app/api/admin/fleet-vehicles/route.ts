@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { z } from 'zod'
 import { requireAdmin } from '@/lib/admin'
+import { writeAuditLog } from '@/lib/auditLog'
 import { notifyFleetVehicleChanged } from '@/lib/notifications'
 import { prisma } from '@/lib/prisma'
 
@@ -66,6 +67,20 @@ export async function POST(req: Request) {
       ['Status', fleetVehicle.status],
       ['Current city', fleetVehicle.currentCity],
     ])
+    await writeAuditLog({
+      session: guard.session,
+      req,
+      action: 'create',
+      entityType: 'fleet_vehicle',
+      entityId: fleetVehicle.id,
+      metadata: {
+        label: fleetVehicle.label,
+        plateNumber: fleetVehicle.plateNumber,
+        vehicleId: fleetVehicle.vehicleId,
+        status: fleetVehicle.status,
+        color: fleetVehicle.color,
+      },
+    })
     return NextResponse.json({ fleetVehicle }, { status: 201 })
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError) {

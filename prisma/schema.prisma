@@ -36,6 +36,22 @@ model RateLimitBucket {
   @@index([windowStart])
 }
 
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String?
+  actorEmail String?
+  action     String
+  entityType String
+  entityId   String?
+  ipAddress  String?
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  @@index([actorId])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+}
+
 model Account {
   id                 String  @id @default(cuid())
   userId             String

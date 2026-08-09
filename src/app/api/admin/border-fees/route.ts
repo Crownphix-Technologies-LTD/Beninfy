@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { requireAdmin } from '@/lib/admin'
+import { writeAuditLog } from '@/lib/auditLog'
 import { notifyBackofficeRecordChanged } from '@/lib/notifications'
 import { prisma } from '@/lib/prisma'
 
@@ -44,5 +45,18 @@ export async function POST(req: Request) {
     ['One-way fee', `NGN ${borderFee.feePerPersonNGN.toLocaleString()}`],
     ['Round-trip fee', `NGN ${borderFee.feeRoundTripNGN.toLocaleString()}`],
   ])
+  await writeAuditLog({
+    session: guard.session,
+    req,
+    action: 'create',
+    entityType: 'border_fee',
+    entityId: borderFee.id,
+    metadata: {
+      country: borderFee.country,
+      border: borderFee.border,
+      feePerPersonNGN: borderFee.feePerPersonNGN,
+      feeRoundTripNGN: borderFee.feeRoundTripNGN,
+    },
+  })
   return NextResponse.json({ borderFee }, { status: 201 })
 }

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { requireAdmin } from '@/lib/admin'
+import { writeAuditLog } from '@/lib/auditLog'
 import { notifyBackofficeRecordChanged } from '@/lib/notifications'
 import { prisma } from '@/lib/prisma'
 
@@ -27,6 +28,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const body = await req.json().catch(() => null)
   const parsed = patchSchema.safeParse(body)
   if (!parsed.success) return NextResponse.json({ error: 'Invalid input', issues: parsed.error.flatten() }, { status: 400 })
+  const current = await prisma.tour.findUnique({ where: { id } })
   const tour = await prisma.tour.update({ where: { id }, data: parsed.data })
   await notifyBackofficeRecordChanged('Tour', 'updated', [
     ['ID', tour.id],
@@ -35,10 +37,18 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     ['Duration days', tour.durationDays],
     ['Starting from', `NGN ${tour.startingFromNGN.toLocaleString()}`],
   ])
+  await writeAuditLog({
+    session: guard.session,
+    req,
+    action: 'update',
+    entityType: 'tour',
+    entityId: tour.id,
+    metadata: { previous: current, next: tour },
+  })
   return NextResponse.json({ tour })
 }
 
-export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const guard = await requireAdmin()
   if (!guard.ok) return guard.response
   const { id } = await params
@@ -49,5 +59,13 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
     ['Title', tour?.title],
     ['Country', tour?.country],
   ])
+  await writeAuditLog({
+    session: guard.session,
+    req,
+    action: 'delete',
+    entityType: 'tour',
+    entityId: id,
+    metadata: { previous: tour },
+  })
   return NextResponse.json({ ok: true })
 }

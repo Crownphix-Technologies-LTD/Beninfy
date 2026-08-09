@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { requireAdmin } from '@/lib/admin'
+import { writeAuditLog } from '@/lib/auditLog'
 import { notifyBackofficeRecordChanged } from '@/lib/notifications'
 import { prisma } from '@/lib/prisma'
 
@@ -29,6 +30,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const body = await req.json().catch(() => null)
   const parsed = patchSchema.safeParse(body)
   if (!parsed.success) return NextResponse.json({ error: 'Invalid input', issues: parsed.error.flatten() }, { status: 400 })
+  const current = await prisma.borderFee.findUnique({ where: { id } })
   const borderFee = await prisma.borderFee.update({ where: { id }, data: parsed.data })
   await notifyBackofficeRecordChanged('Border fee', 'updated', [
     ['ID', borderFee.id],
@@ -37,10 +39,18 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     ['One-way fee', `NGN ${borderFee.feePerPersonNGN.toLocaleString()}`],
     ['Round-trip fee', `NGN ${borderFee.feeRoundTripNGN.toLocaleString()}`],
   ])
+  await writeAuditLog({
+    session: guard.session,
+    req,
+    action: 'update',
+    entityType: 'border_fee',
+    entityId: borderFee.id,
+    metadata: { previous: current, next: borderFee },
+  })
   return NextResponse.json({ borderFee })
 }
 
-export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const guard = await requireAdmin()
   if (!guard.ok) return guard.response
   const { id } = await params
@@ -51,5 +61,13 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
     ['Country', borderFee?.country],
     ['Border', borderFee?.border],
   ])
+  await writeAuditLog({
+    session: guard.session,
+    req,
+    action: 'delete',
+    entityType: 'border_fee',
+    entityId: id,
+    metadata: { previous: borderFee },
+  })
   return NextResponse.json({ ok: true })
 }

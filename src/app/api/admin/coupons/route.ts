@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { z } from 'zod'
 import { requireAdmin } from '@/lib/admin'
+import { writeAuditLog } from '@/lib/auditLog'
 import { normalizeCouponCode } from '@/lib/coupons'
 import { notifyCouponChanged } from '@/lib/notifications'
 import { prisma } from '@/lib/prisma'
@@ -75,6 +76,20 @@ export async function POST(req: Request) {
       ['Active', coupon.active ? 'Yes' : 'No'],
       ['Max redemptions', coupon.maxRedemptions],
     ])
+    await writeAuditLog({
+      session: guard.session,
+      req,
+      action: 'create',
+      entityType: 'coupon',
+      entityId: coupon.id,
+      metadata: {
+        code: coupon.code,
+        discountType: coupon.discountType,
+        amountNGN: coupon.amountNGN,
+        percent: coupon.percent,
+        active: coupon.active,
+      },
+    })
     return NextResponse.json({ coupon }, { status: 201 })
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {

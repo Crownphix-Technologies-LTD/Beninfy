@@ -3,6 +3,7 @@ import { z } from 'zod'
 import bcrypt from 'bcryptjs'
 import { requireAdmin, requireSuperAdmin, getRole } from '@/lib/admin'
 import { auth } from '@/lib/auth'
+import { writeAuditLog } from '@/lib/auditLog'
 import { prisma } from '@/lib/prisma'
 import { notifyAdminUserCreated } from '@/lib/notifications'
 
@@ -63,6 +64,17 @@ export async function POST(req: Request) {
     select: { id: true, name: true, email: true, phone: true, role: true, createdAt: true },
   })
   await notifyAdminUserCreated(user.id)
+  await writeAuditLog({
+    session: guard.session,
+    req,
+    action: 'create',
+    entityType: 'user',
+    entityId: user.id,
+    metadata: {
+      email: user.email,
+      role: user.role,
+    },
+  })
   return NextResponse.json({ user }, { status: 201 })
 }
 
@@ -86,8 +98,8 @@ export async function PATCH(req: Request) {
     return NextResponse.json({ error: 'Only super admin can change roles' }, { status: 403 })
   }
 
+  const target = await prisma.user.findUnique({ where: { id }, select: { role: true, email: true, name: true, phone: true } })
   if (parsed.data.role) {
-    const target = await prisma.user.findUnique({ where: { id }, select: { role: true } })
     if (target?.role === 'super_admin' && parsed.data.role !== 'super_admin') {
       return NextResponse.json({ error: 'Cannot demote a super admin' }, { status: 403 })
     }
@@ -97,6 +109,17 @@ export async function PATCH(req: Request) {
     where: { id },
     data: parsed.data,
     select: { id: true, name: true, email: true, phone: true, role: true },
+  })
+  await writeAuditLog({
+    session: guard.session,
+    req,
+    action: 'update',
+    entityType: 'user',
+    entityId: user.id,
+    metadata: {
+      previous: target,
+      next: user,
+    },
   })
   return NextResponse.json({ user })
 }
@@ -110,10 +133,18 @@ export async function DELETE(req: Request) {
   if (id === guard.session?.user?.id) {
     return NextResponse.json({ error: 'Cannot delete yourself' }, { status: 400 })
   }
-  const target = await prisma.user.findUnique({ where: { id }, select: { role: true } })
+  const target = await prisma.user.findUnique({ where: { id }, select: { role: true, email: true, name: true } })
   if (target?.role === 'super_admin') {
     return NextResponse.json({ error: 'Cannot delete a super admin' }, { status: 403 })
   }
   await prisma.user.delete({ where: { id } })
+  await writeAuditLog({
+    session: guard.session,
+    req,
+    action: 'delete',
+    entityType: 'user',
+    entityId: id,
+    metadata: { previous: target },
+  })
   return NextResponse.json({ ok: true })
 }

@@ -65,7 +65,7 @@ interface DriverOption {
   status: string
 }
 
-const STATUSES = ['', 'pending', 'confirmed', 'cancelled', 'completed']
+const STATUSES = ['', 'pending', 'confirmed', 'ops_review', 'cancelled', 'completed']
 
 export default function AdminBookingsPage() {
   const [bookings, setBookings] = useState<BookingRow[]>([])
@@ -305,6 +305,7 @@ export default function AdminBookingsPage() {
                   >
                     <option value="pending">pending</option>
                     <option value="confirmed">confirmed</option>
+                    <option value="ops_review">ops_review</option>
                     <option value="cancelled">cancelled</option>
                     <option value="completed">completed</option>
                   </select>

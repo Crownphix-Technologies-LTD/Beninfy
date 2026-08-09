@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import bcrypt from 'bcryptjs'
 import { z } from 'zod'
 import { requireAdmin } from '@/lib/admin'
+import { writeAuditLog } from '@/lib/auditLog'
 import { prisma } from '@/lib/prisma'
 import { notifyPasswordChanged } from '@/lib/notifications'
 
@@ -46,6 +47,13 @@ export async function PATCH(req: Request) {
   })
 
   await notifyPasswordChanged(user.id, 'self')
+  await writeAuditLog({
+    session: guard.session,
+    req,
+    action: 'password_change',
+    entityType: 'user',
+    entityId: user.id,
+  })
 
   return NextResponse.json({ ok: true })
 }

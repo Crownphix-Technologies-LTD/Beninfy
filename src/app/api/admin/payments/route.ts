@@ -1,42 +1,7 @@
 import { NextResponse } from 'next/server'
 import { requireAdmin } from '@/lib/admin'
-import {
-  getPaystackConfigurationError,
-  getPaystackSecret,
-  settlePaymentFromPaystack,
-  verifyPaystackTransaction,
-} from '@/lib/paystack'
+import { refreshStalePaystackPayments } from '@/lib/paymentMaintenance'
 import { prisma } from '@/lib/prisma'
-
-async function refreshStalePaystackPayments() {
-  if (getPaystackConfigurationError()) return
-  const secret = getPaystackSecret()
-  if (!secret) return
-
-  const staleBefore = new Date(Date.now() - 20 * 60 * 1000)
-  const payments = await prisma.payment.findMany({
-    where: {
-      provider: 'paystack',
-      status: 'pending',
-      createdAt: { lt: staleBefore },
-    },
-    orderBy: { createdAt: 'asc' },
-    take: 25,
-    select: { reference: true },
-  })
-
-  for (const payment of payments) {
-    try {
-      const verified = await verifyPaystackTransaction(secret, payment.reference)
-      await settlePaymentFromPaystack(payment.reference, verified)
-    } catch (error) {
-      console.error('Failed to refresh stale Paystack payment', {
-        reference: payment.reference,
-        error,
-      })
-    }
-  }
-}
 
 export async function GET(req: Request) {
   const guard = await requireAdmin()

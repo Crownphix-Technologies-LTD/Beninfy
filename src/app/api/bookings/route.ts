@@ -13,7 +13,9 @@ import { vehicles as catalogVehicles } from '@/data/vehicles'
 import { assertFleetVehicleAvailable, assertVehicleTypeAvailable, findAvailableFleetVehicle } from '@/lib/availability'
 import { normalizeCouponCode, validateCouponCode } from '@/lib/coupons'
 import { notifyAutoAccountCreated, notifyBookingCreatedPending } from '@/lib/notifications'
+import { refreshStalePaystackPayments } from '@/lib/paymentMaintenance'
 import { getRoutePriceOverrides } from '@/lib/routePriceOverrides'
+import { checkRateLimit, requestIp } from '@/lib/rateLimit'
 import type { RouteId, VehicleId } from '@/types'
 
 const createSchema = z.object({
@@ -78,6 +80,19 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Lead passenger email is required' }, { status: 400 })
   }
   const leadPassengerName = data.passengerName || session?.user?.name || null
+  const rateLimit = await checkRateLimit({
+    scope: 'booking-create',
+    identifier: session?.user?.id || `${leadPassengerEmail}:${requestIp(req)}`,
+    limit: 8,
+    windowMs: 15 * 60 * 1000,
+  })
+  if (!rateLimit.allowed) {
+    return NextResponse.json(
+      { error: 'Too many booking attempts' },
+      { status: 429, headers: { 'Retry-After': String(rateLimit.retryAfter) } }
+    )
+  }
+
   const existingLeadUser = !session?.user?.id
     ? await prisma.user.findUnique({
         where: { email: leadPassengerEmail },
@@ -313,6 +328,7 @@ export async function GET() {
   const customer = await requireCustomer()
   if (!customer.ok) return customer.response
   const { session } = customer
+  await refreshStalePaystackPayments({ take: 50 })
   const bookings = await prisma.booking.findMany({
     where: { userId: session.user!.id },
     orderBy: { createdAt: 'desc' },

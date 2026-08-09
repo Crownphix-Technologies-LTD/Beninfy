@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from 'crypto'
 import { prisma } from '@/lib/prisma'
 import { notifyPaymentIssue, notifyPaymentSuccess } from '@/lib/notifications'
-import { failBookingPayment, reserveBookingAfterPayment } from '@/lib/paymentSettlement'
+import { failBookingPayment, markPaymentPaidAndReserveBooking } from '@/lib/paymentSettlement'
 
 const PAYSTACK_BASE_URL = 'https://api.paystack.co'
 
@@ -31,7 +31,7 @@ export type PaystackVerifyResponse = {
 
 export type PaymentSettlement =
   | { ok: true; status: 'paid'; bookingId: string; reference: string; providerReference?: string }
-  | { ok: false; status: 'pending' | 'failed' | 'amount_mismatch' | 'not_found'; message: string }
+  | { ok: false; status: 'pending' | 'failed' | 'amount_mismatch' | 'availability_conflict' | 'not_found'; message: string }
 
 const PAYSTACK_STILL_PENDING_STATUSES = new Set(['ongoing', 'pending', 'processing', 'queued'])
 
@@ -185,19 +185,29 @@ export async function settlePaymentFromPaystack(reference: string, verified: Pay
     return { ok: false, status: 'amount_mismatch', message: 'Payment amount does not match booking total' }
   }
 
-  await prisma.$transaction([
-    prisma.payment.update({
-      where: { reference },
-      data: {
-        status: 'paid',
+  const reservation = await markPaymentPaidAndReserveBooking({
+    paymentId: payment.id,
+    bookingId: payment.bookingId,
+    paymentData: {
+      provider: 'paystack',
+      providerReference: transaction.reference ?? payment.providerReference,
+      currencyCode: 'NGN',
+      checkoutAmount: payment.amountNGN,
+    },
+  })
+
+  if (!reservation.ok) {
+    if (payment.status !== 'paid') {
+      await notifyPaymentIssue({
+        bookingId: payment.bookingId,
+        reference,
         provider: 'paystack',
-        providerReference: transaction.reference ?? payment.providerReference,
-        currencyCode: 'NGN',
-        checkoutAmount: payment.amountNGN,
-      },
-    }),
-    reserveBookingAfterPayment(payment.bookingId, payment.id),
-  ])
+        status: reservation.status,
+        message: reservation.message,
+      })
+    }
+    return { ok: false, status: reservation.status, message: reservation.message }
+  }
 
   if (payment.status !== 'paid') {
     await notifyPaymentSuccess(payment.bookingId, payment.id)

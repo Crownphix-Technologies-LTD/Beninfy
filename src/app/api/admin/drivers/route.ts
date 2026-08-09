@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { z } from 'zod'
 import { requireAdmin } from '@/lib/admin'
+import { writeAuditLog } from '@/lib/auditLog'
 import { notifyDriverChanged } from '@/lib/notifications'
 import { prisma } from '@/lib/prisma'
 
@@ -46,6 +47,20 @@ export async function POST(req: Request) {
       ['Home city', driver.homeCity],
       ['License number', driver.licenseNumber],
     ])
+    await writeAuditLog({
+      session: guard.session,
+      req,
+      action: 'create',
+      entityType: 'driver',
+      entityId: driver.id,
+      metadata: {
+        name: driver.name,
+        phone: driver.phone,
+        email: driver.email,
+        status: driver.status,
+        homeCity: driver.homeCity,
+      },
+    })
     return NextResponse.json({ driver }, { status: 201 })
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {

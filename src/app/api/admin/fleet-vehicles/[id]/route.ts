@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { z } from 'zod'
 import { requireAdmin } from '@/lib/admin'
+import { writeAuditLog } from '@/lib/auditLog'
 import { notifyFleetVehicleChanged } from '@/lib/notifications'
 import { prisma } from '@/lib/prisma'
 
@@ -28,6 +29,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const parsed = patchSchema.safeParse(body)
   if (!parsed.success) return NextResponse.json({ error: 'Invalid input', issues: parsed.error.flatten() }, { status: 400 })
   try {
+    const current = await prisma.fleetVehicle.findUnique({ where: { id } })
     const fleetVehicle = await prisma.fleetVehicle.update({ where: { id }, data: parsed.data })
     await notifyFleetVehicleChanged('updated', [
       ['Label', fleetVehicle.label],
@@ -37,6 +39,14 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       ['Status', fleetVehicle.status],
       ['Current city', fleetVehicle.currentCity],
     ])
+    await writeAuditLog({
+      session: guard.session,
+      req,
+      action: 'update',
+      entityType: 'fleet_vehicle',
+      entityId: fleetVehicle.id,
+      metadata: { previous: current, next: fleetVehicle },
+    })
     return NextResponse.json({ fleetVehicle })
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError) {
@@ -54,7 +64,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   }
 }
 
-export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const guard = await requireAdmin()
   if (!guard.ok) return guard.response
   const { id } = await params
@@ -71,6 +81,14 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
       ['Color', fleetVehicle?.color],
       ['Category ID', fleetVehicle?.vehicleId],
     ])
+    await writeAuditLog({
+      session: guard.session,
+      req,
+      action: 'delete',
+      entityType: 'fleet_vehicle',
+      entityId: id,
+      metadata: { previous: fleetVehicle },
+    })
     return NextResponse.json({ ok: true })
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { requireAdmin } from '@/lib/admin'
+import { writeAuditLog } from '@/lib/auditLog'
 import { notifyBackofficeRecordChanged } from '@/lib/notifications'
 import { prisma } from '@/lib/prisma'
 import { ensureDefaultRoutes } from '@/lib/routeCatalog'
@@ -43,5 +44,18 @@ export async function POST(req: Request) {
     ['Duration hours', route.durationHours],
     ['Popular', route.popular ? 'Yes' : 'No'],
   ])
+  await writeAuditLog({
+    session: guard.session,
+    req,
+    action: 'create',
+    entityType: 'route',
+    entityId: route.id,
+    metadata: {
+      from: route.from,
+      to: route.to,
+      durationHours: route.durationHours,
+      popular: route.popular,
+    },
+  })
   return NextResponse.json({ route }, { status: 201 })
 }

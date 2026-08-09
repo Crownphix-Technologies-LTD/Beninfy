@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { z } from 'zod'
 import { requireAdmin } from '@/lib/admin'
+import { writeAuditLog } from '@/lib/auditLog'
 import { notifyBackofficeRecordChanged } from '@/lib/notifications'
 import { prisma } from '@/lib/prisma'
 import { ensureDefaultVehicles } from '@/lib/vehicleCatalog'
@@ -46,6 +47,19 @@ export async function POST(req: Request) {
       ['Available', vehicle.available ? 'Yes' : 'No'],
       ['Base price', vehicle.basePriceNGN ? `NGN ${vehicle.basePriceNGN.toLocaleString()}` : null],
     ])
+    await writeAuditLog({
+      session: guard.session,
+      req,
+      action: 'create',
+      entityType: 'vehicle',
+      entityId: vehicle.id,
+      metadata: {
+        name: vehicle.name,
+        capacity: vehicle.capacity,
+        available: vehicle.available,
+        basePriceNGN: vehicle.basePriceNGN,
+      },
+    })
     return NextResponse.json({ vehicle }, { status: 201 })
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {

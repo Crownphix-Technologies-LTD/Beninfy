@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { requireAdmin } from '@/lib/admin'
+import { writeAuditLog } from '@/lib/auditLog'
 import { notifyBackofficeRecordChanged } from '@/lib/notifications'
 import { prisma } from '@/lib/prisma'
 
@@ -26,6 +27,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const body = await req.json().catch(() => null)
   const parsed = patchSchema.safeParse(body)
   if (!parsed.success) return NextResponse.json({ error: 'Invalid input', issues: parsed.error.flatten() }, { status: 400 })
+  const current = await prisma.route.findUnique({ where: { id } })
   const route = await prisma.route.update({ where: { id }, data: parsed.data })
   await notifyBackofficeRecordChanged('Route', 'updated', [
     ['ID', route.id],
@@ -34,10 +36,18 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     ['Duration hours', route.durationHours],
     ['Popular', route.popular ? 'Yes' : 'No'],
   ])
+  await writeAuditLog({
+    session: guard.session,
+    req,
+    action: 'update',
+    entityType: 'route',
+    entityId: route.id,
+    metadata: { previous: current, next: route },
+  })
   return NextResponse.json({ route })
 }
 
-export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const guard = await requireAdmin()
   if (!guard.ok) return guard.response
   const { id } = await params
@@ -48,5 +58,13 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
     ['From', route?.from],
     ['To', route?.to],
   ])
+  await writeAuditLog({
+    session: guard.session,
+    req,
+    action: 'delete',
+    entityType: 'route',
+    entityId: id,
+    metadata: { previous: route },
+  })
   return NextResponse.json({ ok: true })
 }

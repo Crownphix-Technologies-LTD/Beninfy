@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { requireAdmin } from '@/lib/admin'
+import { writeAuditLog } from '@/lib/auditLog'
 import { notifyBackofficeRecordChanged } from '@/lib/notifications'
 import { prisma } from '@/lib/prisma'
 import { ensureDefaultTours } from '@/lib/tourCatalog'
@@ -44,5 +45,18 @@ export async function POST(req: Request) {
     ['Duration days', tour.durationDays],
     ['Starting from', `NGN ${tour.startingFromNGN.toLocaleString()}`],
   ])
+  await writeAuditLog({
+    session: guard.session,
+    req,
+    action: 'create',
+    entityType: 'tour',
+    entityId: tour.id,
+    metadata: {
+      title: tour.title,
+      country: tour.country,
+      durationDays: tour.durationDays,
+      startingFromNGN: tour.startingFromNGN,
+    },
+  })
   return NextResponse.json({ tour }, { status: 201 })
 }

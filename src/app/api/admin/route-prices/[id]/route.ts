@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { z } from 'zod'
 import { requireAdmin } from '@/lib/admin'
+import { writeAuditLog } from '@/lib/auditLog'
 import { notifyRoutePriceChanged } from '@/lib/notifications'
 import { prisma } from '@/lib/prisma'
 import { propagateCategoryRoutePrice } from '@/lib/routePricePropagation'
@@ -54,6 +55,18 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         ['Amount', `NGN ${routePrice.amountNGN.toLocaleString()}`],
         ['Notes', routePrice.notes],
       ])
+      await writeAuditLog({
+        session: guard.session,
+        req,
+        action: 'merge_update',
+        entityType: 'route_price',
+        entityId: routePrice.id,
+        metadata: {
+          deletedDuplicateId: id,
+          previous: current,
+          next: routePrice,
+        },
+      })
       return NextResponse.json({ routePrice })
     }
 
@@ -72,6 +85,17 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       ['Amount', `NGN ${routePrice.amountNGN.toLocaleString()}`],
       ['Notes', routePrice.notes],
     ])
+    await writeAuditLog({
+      session: guard.session,
+      req,
+      action: 'update',
+      entityType: 'route_price',
+      entityId: routePrice.id,
+      metadata: {
+        previous: current,
+        next: routePrice,
+      },
+    })
     return NextResponse.json({ routePrice })
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
@@ -81,7 +105,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   }
 }
 
-export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const guard = await requireAdmin()
   if (!guard.ok) return guard.response
   const { id } = await params
@@ -93,5 +117,13 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
     ['Pricing scope', routePrice?.pricingScope],
     ['Amount', routePrice?.amountNGN ? `NGN ${routePrice.amountNGN.toLocaleString()}` : null],
   ])
+  await writeAuditLog({
+    session: guard.session,
+    req,
+    action: 'delete',
+    entityType: 'route_price',
+    entityId: id,
+    metadata: { previous: routePrice },
+  })
   return NextResponse.json({ ok: true })
 }
