@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { z } from 'zod'
-import { requireAdmin } from '@/lib/admin'
+import { requireAdminPermission } from '@/lib/admin'
 import { writeAuditLog } from '@/lib/auditLog'
 import { notifyFleetVehicleChanged } from '@/lib/notifications'
 import { prisma } from '@/lib/prisma'
@@ -22,7 +22,7 @@ const patchSchema = z.object({
 })
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const guard = await requireAdmin()
+  const guard = await requireAdminPermission('fleet')
   if (!guard.ok) return guard.response
   const { id } = await params
   const body = await req.json().catch(() => null)
@@ -65,7 +65,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 }
 
 export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const guard = await requireAdmin()
+  const guard = await requireAdminPermission('fleet')
   if (!guard.ok) return guard.response
   const { id } = await params
   const assignedLegs = await prisma.bookingLeg.count({ where: { fleetVehicleId: id } })

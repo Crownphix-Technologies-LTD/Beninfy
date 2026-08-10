@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
-import { requireAdmin } from '@/lib/admin'
+import { requireAdminPermission } from '@/lib/admin'
 import { writeAuditLog } from '@/lib/auditLog'
 import { notifyBackofficeRecordChanged } from '@/lib/notifications'
 import { prisma } from '@/lib/prisma'
@@ -24,7 +24,7 @@ const patchSchema = z.object({
 })
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const guard = await requireAdmin()
+  const guard = await requireAdminPermission('border_fees')
   if (!guard.ok) return guard.response
   const { id } = await params
   const body = await req.json().catch(() => null)
@@ -51,7 +51,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 }
 
 export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const guard = await requireAdmin()
+  const guard = await requireAdminPermission('border_fees')
   if (!guard.ok) return guard.response
   const { id } = await params
   const borderFee = await prisma.borderFee.findUnique({ where: { id } })

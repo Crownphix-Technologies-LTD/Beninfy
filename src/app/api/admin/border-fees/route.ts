@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
-import { requireAdmin } from '@/lib/admin'
+import { requireAdminPermission } from '@/lib/admin'
 import { writeAuditLog } from '@/lib/auditLog'
 import { notifyBackofficeRecordChanged } from '@/lib/notifications'
 import { prisma } from '@/lib/prisma'
@@ -25,14 +25,14 @@ const schema = z.object({
 })
 
 export async function GET() {
-  const guard = await requireAdmin()
+  const guard = await requireAdminPermission('border_fees')
   if (!guard.ok) return guard.response
   const borderFees = await prisma.borderFee.findMany({ orderBy: { country: 'asc' } })
   return NextResponse.json({ borderFees })
 }
 
 export async function POST(req: Request) {
-  const guard = await requireAdmin()
+  const guard = await requireAdminPermission('border_fees')
   if (!guard.ok) return guard.response
   const body = await req.json().catch(() => null)
   const parsed = schema.safeParse(body)

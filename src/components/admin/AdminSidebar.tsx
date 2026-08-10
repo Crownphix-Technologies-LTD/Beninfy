@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useEffect, useRef } from 'react'
 import type { ReactNode } from 'react'
+import { ADMIN_ROLE_LABELS, adminRoleCan, type AdminPermission } from '@/lib/roles'
 
 type AdminSidebarProps = {
   locale: string
@@ -20,38 +21,36 @@ const NAV_GROUPS = [
   {
     label: 'Command',
     items: [
-      { href: '', label: 'Overview', icon: 'dashboard', hint: 'Daily pulse' },
-      { href: '/bookings', label: 'Bookings', icon: 'event', hint: 'Trips & assignments' },
-      { href: '/payments', label: 'Payments', icon: 'payments', hint: 'Collections' },
-      { href: '/coupons', label: 'Coupons', icon: 'confirmation_number', hint: 'Discount codes' },
-      { href: '/route-prices', label: 'Prices', icon: 'sell', hint: 'Route fares' },
-      { href: '/users', label: 'Users', icon: 'group', hint: 'Accounts' },
-      { href: '/audit-logs', label: 'Audit logs', icon: 'policy', hint: 'Security trail' },
+      { href: '', label: 'Overview', icon: 'dashboard', hint: 'Daily pulse', permission: 'overview' },
+      { href: '/bookings', label: 'Bookings', icon: 'event', hint: 'Trips & assignments', permission: 'bookings' },
+      { href: '/payments', label: 'Payments', icon: 'payments', hint: 'Collections', permission: 'payments' },
+      { href: '/coupons', label: 'Coupons', icon: 'confirmation_number', hint: 'Discount codes', permission: 'coupons' },
+      { href: '/route-prices', label: 'Prices', icon: 'sell', hint: 'Route fares', permission: 'pricing' },
+      { href: '/users', label: 'Users', icon: 'group', hint: 'Accounts', permission: 'users' },
+      { href: '/audit-logs', label: 'Audit logs', icon: 'policy', hint: 'Security trail', permission: 'audit' },
     ],
   },
   {
     label: 'Operations',
     items: [
-      { href: '/vehicles', label: 'Categories', icon: 'category', hint: 'Booking buckets' },
-      { href: '/fleet-vehicles', label: 'Fleet units', icon: 'garage', hint: 'Cars & plates' },
-      { href: '/drivers', label: 'Drivers', icon: 'badge', hint: 'Crew' },
-      { href: '/routes', label: 'Routes', icon: 'route', hint: 'Corridors' },
+      { href: '/vehicles', label: 'Categories', icon: 'category', hint: 'Booking buckets', permission: 'vehicles' },
+      { href: '/fleet-vehicles', label: 'Fleet units', icon: 'garage', hint: 'Cars & plates', permission: 'fleet' },
+      { href: '/drivers', label: 'Drivers', icon: 'badge', hint: 'Crew', permission: 'drivers' },
+      { href: '/routes', label: 'Routes', icon: 'route', hint: 'Corridors', permission: 'routes' },
     ],
   },
   {
     label: 'Experience',
     items: [
-      { href: '/tours', label: 'Tours', icon: 'travel_explore', hint: 'Packages' },
-      { href: '/border-fees', label: 'Border fees', icon: 'currency_exchange', hint: 'Crossings' },
-      { href: '/settings', label: 'Settings', icon: 'settings', hint: 'Security' },
+      { href: '/tours', label: 'Tours', icon: 'travel_explore', hint: 'Packages', permission: 'tours' },
+      { href: '/border-fees', label: 'Border fees', icon: 'currency_exchange', hint: 'Crossings', permission: 'border_fees' },
+      { href: '/settings', label: 'Settings', icon: 'settings', hint: 'Security', permission: 'settings' },
     ],
   },
-]
-
-const NAV_ITEMS = NAV_GROUPS.flatMap((group) => group.items)
+] satisfies Array<{ label: string; items: Array<{ href: string; label: string; icon: string; hint: string; permission: AdminPermission }> }>
 
 function roleLabel(role?: string | null) {
-  return role === 'super_admin' ? 'Super admin' : 'Admin'
+  return ADMIN_ROLE_LABELS[role as keyof typeof ADMIN_ROLE_LABELS] ?? 'Admin'
 }
 
 function initials(name?: string | null, email?: string | null) {
@@ -68,6 +67,11 @@ export default function AdminSidebar({ locale, user, signOutSlot }: AdminSidebar
   const pathname = usePathname()
   const desktopNavRef = useRef<HTMLElement | null>(null)
   const adminBase = `/${locale}/admin`
+  const visibleGroups = NAV_GROUPS.map((group) => ({
+    ...group,
+    items: group.items.filter((item) => adminRoleCan(user.role, item.permission)),
+  })).filter((group) => group.items.length > 0)
+  const visibleItems = visibleGroups.flatMap((group) => group.items)
 
   const isActive = (href: string) => {
     const target = `${adminBase}${href}`
@@ -158,7 +162,7 @@ export default function AdminSidebar({ locale, user, signOutSlot }: AdminSidebar
             tabIndex={0}
             className="admin-sidebar-scroll min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-3 py-3"
           >
-            {NAV_GROUPS.map((group) => (
+            {visibleGroups.map((group) => (
               <section key={group.label}>
                 <p className="mb-2 px-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-gray-400">{group.label}</p>
                 <div className="space-y-1">
@@ -230,7 +234,7 @@ export default function AdminSidebar({ locale, user, signOutSlot }: AdminSidebar
           </div>
         </div>
         <nav className="flex gap-2 overflow-x-auto pb-1">
-          {NAV_ITEMS.map((item) => {
+          {visibleItems.map((item) => {
             const active = isActive(item.href)
             return (
               <Link

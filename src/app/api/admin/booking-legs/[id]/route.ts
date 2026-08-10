@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
-import { requireAdmin } from '@/lib/admin'
+import { requireAdminPermission } from '@/lib/admin'
 import { notifyBookingAssignmentChanged } from '@/lib/notifications'
 import { prisma } from '@/lib/prisma'
 
@@ -20,7 +20,7 @@ function dayWindow(date: Date) {
 }
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const guard = await requireAdmin()
+  const guard = await requireAdminPermission('bookings')
   if (!guard.ok) return guard.response
   const { id } = await params
   const body = await req.json().catch(() => null)

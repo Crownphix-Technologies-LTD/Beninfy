@@ -10,22 +10,30 @@ import {
   adminPrimaryButtonClass,
   adminSecondaryButtonClass,
 } from '@/components/admin/AdminUI'
+import { ADMIN_ROLE_LABELS, type AppRole } from '@/lib/roles'
 
 interface UserRow {
   id: string
   name: string | null
   email: string | null
   phone: string | null
-  role: 'user' | 'admin' | 'super_admin'
+  role: AppRole
   createdAt: string
   _count: { bookings: number }
 }
 
-const ROLE_LABEL: Record<UserRow['role'], string> = {
-  user: 'User',
-  admin: 'Admin',
-  super_admin: 'Super admin',
-}
+const CREATE_ROLE_OPTIONS: AppRole[] = [
+  'admin',
+  'operations_admin',
+  'finance_admin',
+  'fleet_admin',
+  'pricing_admin',
+  'support_admin',
+  'content_admin',
+  'user',
+]
+
+const EDIT_ROLE_OPTIONS: AppRole[] = ['user', ...CREATE_ROLE_OPTIONS.filter((role) => role !== 'user')]
 
 export default function AdminUsersPage() {
   const [users, setUsers] = useState<UserRow[]>([])
@@ -34,7 +42,7 @@ export default function AdminUsersPage() {
   const [q, setQ] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
   const [showCreate, setShowCreate] = useState(false)
-  const [form, setForm] = useState({ name: '', email: '', password: '', phone: '', role: 'admin' as 'admin' | 'user' })
+  const [form, setForm] = useState({ name: '', email: '', password: '', phone: '', role: 'admin' as AppRole })
   const [resetTarget, setResetTarget] = useState<UserRow | null>(null)
   const [resetPassword, setResetPassword] = useState('')
   const [resetError, setResetError] = useState<string | null>(null)
@@ -216,11 +224,12 @@ export default function AdminUsersPage() {
                         disabled={busy === u.id}
                         className="rounded-lg border border-gray-200 bg-white px-2 py-2 text-xs outline-none focus:border-[#3e004c] focus:ring-2 focus:ring-[#3e004c]/15"
                       >
-                        <option value="user">user</option>
-                        <option value="admin">admin</option>
+                        {EDIT_ROLE_OPTIONS.map((role) => (
+                          <option key={role} value={role}>{ADMIN_ROLE_LABELS[role]}</option>
+                        ))}
                       </select>
                     ) : (
-                      <AdminStatusBadge status={ROLE_LABEL[u.role]} />
+                      <AdminStatusBadge status={ADMIN_ROLE_LABELS[u.role]} />
                     )}
                   </td>
                   {isSuper && (
@@ -332,11 +341,12 @@ export default function AdminUsersPage() {
               <label className={adminLabelClass}>Role</label>
               <select
                 value={form.role}
-                onChange={(e) => setForm({ ...form, role: e.target.value as 'admin' | 'user' })}
+                onChange={(e) => setForm({ ...form, role: e.target.value as AppRole })}
                 className={adminInputClass}
               >
-                <option value="admin">Admin</option>
-                <option value="user">User</option>
+                {CREATE_ROLE_OPTIONS.map((role) => (
+                  <option key={role} value={role}>{ADMIN_ROLE_LABELS[role]}</option>
+                ))}
               </select>
             </div>
             {error && <p className="rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}

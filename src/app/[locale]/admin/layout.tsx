@@ -3,6 +3,7 @@ import { auth } from '@/lib/auth'
 import { signOut } from '@/lib/auth'
 import { setRequestLocale } from 'next-intl/server'
 import AdminSidebar from '@/components/admin/AdminSidebar'
+import { isAdminRole } from '@/lib/roles'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
@@ -21,7 +22,7 @@ export default async function AdminLayout({ children, params }: Props) {
   const session = await auth()
   const role = (session?.user as { role?: string } | undefined)?.role
   if (!session?.user?.id) redirect(`/${locale}/admin-login`)
-  if (role !== 'admin' && role !== 'super_admin') redirect(`/${locale}/dashboard`)
+  if (!isAdminRole(role)) redirect(`/${locale}/dashboard`)
 
   const signOutSlot = (
     <form

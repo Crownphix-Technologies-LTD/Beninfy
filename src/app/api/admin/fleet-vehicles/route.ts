@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { z } from 'zod'
-import { requireAdmin } from '@/lib/admin'
+import { requireAdminPermission } from '@/lib/admin'
 import { writeAuditLog } from '@/lib/auditLog'
 import { notifyFleetVehicleChanged } from '@/lib/notifications'
 import { prisma } from '@/lib/prisma'
@@ -22,7 +22,7 @@ const schema = z.object({
 })
 
 export async function GET() {
-  const guard = await requireAdmin()
+  const guard = await requireAdminPermission('fleet')
   if (!guard.ok) return guard.response
   try {
     const fleetVehicles = await prisma.fleetVehicle.findMany({
@@ -52,7 +52,7 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  const guard = await requireAdmin()
+  const guard = await requireAdminPermission('fleet')
   if (!guard.ok) return guard.response
   const body = await req.json().catch(() => null)
   const parsed = schema.safeParse(body)

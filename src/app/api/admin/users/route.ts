@@ -1,14 +1,13 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import bcrypt from 'bcryptjs'
-import { requireAdmin, requireSuperAdmin, getRole } from '@/lib/admin'
-import { auth } from '@/lib/auth'
+import { requireAdminPermission, requireSuperAdmin } from '@/lib/admin'
 import { writeAuditLog } from '@/lib/auditLog'
 import { prisma } from '@/lib/prisma'
 import { notifyAdminUserCreated } from '@/lib/notifications'
 
 export async function GET(req: Request) {
-  const guard = await requireAdmin()
+  const guard = await requireAdminPermission('users')
   if (!guard.ok) return guard.response
   const url = new URL(req.url)
   const q = url.searchParams.get('q')?.trim()
@@ -34,8 +33,7 @@ export async function GET(req: Request) {
     },
     take: 200,
   })
-  const session = await auth()
-  return NextResponse.json({ users, viewerRole: getRole(session as never) })
+  return NextResponse.json({ users, viewerRole: guard.role })
 }
 
 const createSchema = z.object({
@@ -43,7 +41,16 @@ const createSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8).max(100),
   phone: z.string().trim().min(4).max(30).optional(),
-  role: z.enum(['user', 'admin']).default('admin'),
+  role: z.enum([
+    'user',
+    'admin',
+    'operations_admin',
+    'finance_admin',
+    'fleet_admin',
+    'pricing_admin',
+    'support_admin',
+    'content_admin',
+  ]).default('admin'),
 })
 
 export async function POST(req: Request) {
@@ -79,13 +86,23 @@ export async function POST(req: Request) {
 }
 
 const patchSchema = z.object({
-  role: z.enum(['user', 'admin', 'super_admin']).optional(),
+  role: z.enum([
+    'user',
+    'admin',
+    'super_admin',
+    'operations_admin',
+    'finance_admin',
+    'fleet_admin',
+    'pricing_admin',
+    'support_admin',
+    'content_admin',
+  ]).optional(),
   name: z.string().min(1).max(100).optional(),
   phone: z.string().nullable().optional(),
 })
 
 export async function PATCH(req: Request) {
-  const guard = await requireAdmin()
+  const guard = await requireAdminPermission('users')
   if (!guard.ok) return guard.response
   const url = new URL(req.url)
   const id = url.searchParams.get('id')

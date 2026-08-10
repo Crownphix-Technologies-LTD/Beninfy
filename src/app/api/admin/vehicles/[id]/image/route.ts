@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { requireAdmin } from '@/lib/admin'
+import { requireAdminPermission } from '@/lib/admin'
 import { notifyBackofficeRecordChanged } from '@/lib/notifications'
 import { prisma } from '@/lib/prisma'
 import { uploadCatalogImage } from '@/lib/supabaseStorage'
@@ -8,7 +8,7 @@ const MAX_IMAGE_BYTES = 6 * 1024 * 1024
 const ALLOWED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/avif'])
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const guard = await requireAdmin()
+  const guard = await requireAdminPermission('vehicles')
   if (!guard.ok) return guard.response
 
   const { id } = await params

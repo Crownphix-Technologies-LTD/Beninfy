@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { z } from 'zod'
-import { requireAdmin } from '@/lib/admin'
+import { requireAdminPermission } from '@/lib/admin'
 import { writeAuditLog } from '@/lib/auditLog'
 import { normalizeCouponCode } from '@/lib/coupons'
 import { notifyCouponChanged } from '@/lib/notifications'
@@ -53,14 +53,14 @@ function couponData(data: z.infer<typeof schema>) {
 }
 
 export async function GET() {
-  const guard = await requireAdmin()
+  const guard = await requireAdminPermission('coupons')
   if (!guard.ok) return guard.response
   const coupons = await prisma.coupon.findMany({ orderBy: [{ active: 'desc' }, { createdAt: 'desc' }] })
   return NextResponse.json({ coupons })
 }
 
 export async function POST(req: Request) {
-  const guard = await requireAdmin()
+  const guard = await requireAdminPermission('coupons')
   if (!guard.ok) return guard.response
   const body = await req.json().catch(() => null)
   const parsed = schema.safeParse(body)

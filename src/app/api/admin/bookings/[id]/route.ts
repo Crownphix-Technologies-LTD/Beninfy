@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
-import { requireAdmin } from '@/lib/admin'
+import { requireAdminPermission } from '@/lib/admin'
 import { writeAuditLog } from '@/lib/auditLog'
 import { notifyBookingStatusChanged } from '@/lib/notifications'
 import { prisma } from '@/lib/prisma'
@@ -18,7 +18,7 @@ function legStatusForBookingStatus(status: z.infer<typeof patchSchema>['status']
 }
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const guard = await requireAdmin()
+  const guard = await requireAdminPermission('bookings')
   if (!guard.ok) return guard.response
   const { id } = await params
   const body = await req.json().catch(() => null)
@@ -56,7 +56,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 }
 
 export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const guard = await requireAdmin()
+  const guard = await requireAdminPermission('bookings')
   if (!guard.ok) return guard.response
   const { id } = await params
   const booking = await prisma.booking.findUnique({

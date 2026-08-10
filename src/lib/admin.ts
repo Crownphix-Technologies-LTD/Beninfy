@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import type { Session } from 'next-auth'
 import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
-import { isAdminRole, type AppRole } from '@/lib/roles'
+import { adminRoleCan, isAdminRole, type AdminPermission, type AppRole } from '@/lib/roles'
 
 export type Role = AppRole
 
@@ -31,6 +31,20 @@ export async function requireAdmin() {
   }
 
   return { ok: true as const, session, role: user.role as Role }
+}
+
+export async function requireAdminPermission(permission: AdminPermission) {
+  const guard = await requireAdmin()
+  if (!guard.ok) return guard
+
+  if (!adminRoleCan(guard.role, permission)) {
+    return {
+      ok: false as const,
+      response: NextResponse.json({ error: 'Forbidden' }, { status: 403 }),
+    }
+  }
+
+  return guard
 }
 
 export async function requireSuperAdmin() {

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { z } from 'zod'
-import { requireAdmin } from '@/lib/admin'
+import { requireAdminPermission } from '@/lib/admin'
 import { writeAuditLog } from '@/lib/auditLog'
 import { notifyRoutePriceChanged } from '@/lib/notifications'
 import { prisma } from '@/lib/prisma'
@@ -17,7 +17,7 @@ const schema = z.object({
 })
 
 export async function GET() {
-  const guard = await requireAdmin()
+  const guard = await requireAdminPermission('pricing')
   if (!guard.ok) return guard.response
   await ensureDefaultRoutePrices()
   const routePrices = await prisma.routePrice.findMany({
@@ -30,7 +30,7 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  const guard = await requireAdmin()
+  const guard = await requireAdminPermission('pricing')
   if (!guard.ok) return guard.response
   await ensureDefaultRoutePrices()
   const body = await req.json().catch(() => null)

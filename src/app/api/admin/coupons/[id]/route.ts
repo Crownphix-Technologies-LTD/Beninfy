@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { z } from 'zod'
-import { requireAdmin } from '@/lib/admin'
+import { requireAdminPermission } from '@/lib/admin'
 import { writeAuditLog } from '@/lib/auditLog'
 import { normalizeCouponCode } from '@/lib/coupons'
 import { notifyCouponChanged } from '@/lib/notifications'
@@ -51,7 +51,7 @@ function couponPatchData(data: z.infer<typeof patchSchema>) {
 }
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const guard = await requireAdmin()
+  const guard = await requireAdminPermission('coupons')
   if (!guard.ok) return guard.response
   const { id } = await params
   const body = await req.json().catch(() => null)
@@ -90,7 +90,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 }
 
 export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const guard = await requireAdmin()
+  const guard = await requireAdminPermission('coupons')
   if (!guard.ok) return guard.response
   const { id } = await params
   const bookings = await prisma.booking.count({ where: { couponId: id } })
