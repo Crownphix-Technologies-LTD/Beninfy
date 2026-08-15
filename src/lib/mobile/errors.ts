@@ -41,6 +41,17 @@ export type MobileErrorCode =
   | 'PAYMENT_ALREADY_COMPLETED'
   | 'BOOKING_NOT_PAYABLE'
   | 'PAYMENT_PROVIDER_UNAVAILABLE'
+  | 'ROUTE_NOT_FOUND'
+  | 'VEHICLE_NOT_FOUND'
+  | 'ROUTE_NOT_AVAILABLE'
+  | 'VEHICLE_NOT_AVAILABLE'
+  | 'NO_AVAILABILITY'
+  | 'INVALID_TRIP_DATES'
+  | 'INVALID_RETURN_DATE'
+  | 'PICKUP_AREA_REQUIRED'
+  | 'COUPON_INVALID'
+  | 'COUPON_EXPIRED'
+  | 'QUOTE_UNAVAILABLE'
   | 'ONBOARDING_INCOMPLETE'
   | 'PHONE_INVALID'
   | 'PHONE_VERIFICATION_REQUIRED'
@@ -165,6 +176,28 @@ export function mobileErrorFromCode(code: MobileErrorCode, message?: string) {
       return mobileError(code, message ?? 'Booking is not payable', 409)
     case 'PAYMENT_PROVIDER_UNAVAILABLE':
       return mobileError(code, message ?? 'Payment provider is unavailable', 503)
+    case 'ROUTE_NOT_FOUND':
+      return mobileError(code, message ?? 'Route not found', 404)
+    case 'VEHICLE_NOT_FOUND':
+      return mobileError(code, message ?? 'Vehicle not found', 404)
+    case 'ROUTE_NOT_AVAILABLE':
+      return mobileError(code, message ?? 'Route is not available for booking', 409)
+    case 'VEHICLE_NOT_AVAILABLE':
+      return mobileError(code, message ?? 'Vehicle is not available for booking', 409)
+    case 'NO_AVAILABILITY':
+      return mobileError(code, message ?? 'No fleet unit is available for the selected date', 409)
+    case 'INVALID_TRIP_DATES':
+      return mobileError(code, message ?? 'Trip dates are invalid', 400)
+    case 'INVALID_RETURN_DATE':
+      return mobileError(code, message ?? 'Return date is required for round trips', 400)
+    case 'PICKUP_AREA_REQUIRED':
+      return mobileError(code, message ?? 'Pickup fare zone is required for this route', 400)
+    case 'COUPON_INVALID':
+      return mobileError(code, message ?? 'Coupon code is invalid', 400)
+    case 'COUPON_EXPIRED':
+      return mobileError(code, message ?? 'Coupon code has expired', 410)
+    case 'QUOTE_UNAVAILABLE':
+      return mobileError(code, message ?? 'Fare quote is unavailable for this selection', 409)
     case 'PAYMENT_AMOUNT_MISMATCH':
       return mobileError(code, message ?? 'Payment amount needs review', 409)
     case 'PAYMENT_FAILED':
