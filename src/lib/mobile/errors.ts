@@ -41,6 +41,17 @@ export type MobileErrorCode =
   | 'PAYMENT_ALREADY_COMPLETED'
   | 'BOOKING_NOT_PAYABLE'
   | 'PAYMENT_PROVIDER_UNAVAILABLE'
+  | 'ONBOARDING_INCOMPLETE'
+  | 'PHONE_INVALID'
+  | 'PHONE_VERIFICATION_REQUIRED'
+  | 'OTP_INVALID'
+  | 'OTP_EXPIRED'
+  | 'OTP_ATTEMPTS_EXCEEDED'
+  | 'OTP_RESEND_TOO_SOON'
+  | 'OTP_RATE_LIMITED'
+  | 'RESET_TOKEN_INVALID'
+  | 'RESET_TOKEN_EXPIRED'
+  | 'PASSWORD_INVALID'
   | 'INTERNAL_ERROR'
 
 export type MobileErrorBody = {
@@ -160,6 +171,28 @@ export function mobileErrorFromCode(code: MobileErrorCode, message?: string) {
     case 'PAYMENT_CANCELLED':
     case 'PAYMENT_EXPIRED':
       return mobileError(code, message ?? 'Payment was not completed', 409)
+    case 'ONBOARDING_INCOMPLETE':
+      return mobileError(code, message ?? 'Complete account onboarding to continue', 403)
+    case 'PHONE_INVALID':
+      return mobileError(code, message ?? 'Phone number is invalid', 400)
+    case 'PHONE_VERIFICATION_REQUIRED':
+      return mobileError(code, message ?? 'Use the onboarding flow to update phone details', 409)
+    case 'OTP_INVALID':
+      return mobileError(code, message ?? 'Verification code is invalid', 400)
+    case 'OTP_EXPIRED':
+      return mobileError(code, message ?? 'Verification code has expired', 410)
+    case 'OTP_ATTEMPTS_EXCEEDED':
+      return mobileError(code, message ?? 'Too many verification attempts', 429)
+    case 'OTP_RESEND_TOO_SOON':
+      return mobileError(code, message ?? 'Please wait before requesting another code', 429)
+    case 'OTP_RATE_LIMITED':
+      return mobileError(code, message ?? 'Too many verification code requests', 429)
+    case 'RESET_TOKEN_INVALID':
+      return mobileError(code, message ?? 'Password reset token is invalid', 400)
+    case 'RESET_TOKEN_EXPIRED':
+      return mobileError(code, message ?? 'Password reset token has expired', 410)
+    case 'PASSWORD_INVALID':
+      return mobileError(code, message ?? 'Password does not meet the required policy', 400)
     case 'VALIDATION_ERROR':
       return mobileValidationError(message)
     case 'INTERNAL_ERROR':

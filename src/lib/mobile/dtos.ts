@@ -13,6 +13,7 @@ import {
   toLocationDto,
   trackingStatusFor,
 } from '@/lib/mobile/tracking'
+import { type MobileOnboardingDto, toMobileOnboardingDto } from '@/lib/mobile/onboarding'
 
 export type MobileBookingStatus = 'pending' | 'confirmed' | 'ops_review' | 'cancelled' | 'completed'
 
@@ -36,6 +37,9 @@ export type CustomerProfileDto = {
   name: string | null
   email: string
   phone: string | null
+  emailVerified: boolean
+  locale: string | null
+  onboarding: MobileOnboardingDto
 }
 
 export type FleetVehicleDto = {
@@ -195,12 +199,20 @@ export function toCustomerProfileDto(user: {
   name: string | null
   email: string | null
   phone: string | null
+  emailVerified?: Date | string | null
+  locale?: string | null
 }): CustomerProfileDto {
   return {
     id: user.id,
     name: user.name,
     email: user.email ?? '',
     phone: user.phone,
+    emailVerified: Boolean(user.emailVerified),
+    locale: user.locale ?? null,
+    onboarding: toMobileOnboardingDto({
+      phone: user.phone,
+      emailVerified: user.emailVerified ?? null,
+    }),
   }
 }
 

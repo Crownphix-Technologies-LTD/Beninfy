@@ -8,9 +8,11 @@ export async function GET(req: Request) {
   const guard = await requireMobilePrincipal(req)
   if (!guard.ok) return mobileErrorFromCode(guard.code ?? 'UNAUTHENTICATED')
 
+  const profile = toCustomerProfileDto(guard.user)
   return Response.json({
     principal: guard.principal,
-    user: toCustomerProfileDto(guard.user),
+    user: profile,
+    onboarding: guard.principal.type === 'CUSTOMER' ? profile.onboarding : null,
     driver: guard.user.driver ? toDriverProfileDto(guard.user.driver) : null,
   })
 }

@@ -5,6 +5,7 @@ import { checkRateLimit, requestIp } from '@/lib/rateLimit'
 import { requireMobilePrincipal } from '@/lib/mobile/auth'
 import { mobileError, mobileErrorFromCode } from '@/lib/mobile/errors'
 import { toCustomerBookingDetailDto, toCustomerBookingSummaryDto } from '@/lib/mobile/dtos'
+import { requireCompletedCustomerOnboarding } from '@/lib/mobile/onboarding'
 
 export const runtime = 'nodejs'
 
@@ -14,9 +15,17 @@ const MAX_LIMIT = 50
 export async function GET(req: Request) {
   const guard = await requireMobilePrincipal(req, 'CUSTOMER')
   if (!guard.ok) return mobileErrorFromCode(guard.code ?? 'UNAUTHENTICATED')
+  const onboarding = await requireCompletedCustomerOnboarding(guard.user)
+  if (!onboarding.ok)
+    return mobileError(onboarding.code, 'Complete account onboarding to continue', 403, {
+      onboarding: onboarding.onboarding,
+    })
 
   const url = new URL(req.url)
-  const limit = Math.min(MAX_LIMIT, Math.max(1, Number(url.searchParams.get('limit') ?? DEFAULT_LIMIT)))
+  const limit = Math.min(
+    MAX_LIMIT,
+    Math.max(1, Number(url.searchParams.get('limit') ?? DEFAULT_LIMIT))
+  )
   const cursor = url.searchParams.get('cursor') || undefined
 
   const bookings = await prisma.booking.findMany({
@@ -35,7 +44,7 @@ export async function GET(req: Request) {
     bookings: page.map(toCustomerBookingSummaryDto),
     pageInfo: {
       hasMore,
-      nextCursor: hasMore ? page[page.length - 1]?.id ?? null : null,
+      nextCursor: hasMore ? (page[page.length - 1]?.id ?? null) : null,
     },
   })
 }
@@ -43,6 +52,11 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   const guard = await requireMobilePrincipal(req, 'CUSTOMER')
   if (!guard.ok) return mobileErrorFromCode(guard.code ?? 'UNAUTHENTICATED')
+  const onboarding = await requireCompletedCustomerOnboarding(guard.user)
+  if (!onboarding.ok)
+    return mobileError(onboarding.code, 'Complete account onboarding to continue', 403, {
+      onboarding: onboarding.onboarding,
+    })
 
   const rateLimit = await checkRateLimit({
     scope: 'mobile-booking-create',
@@ -51,7 +65,9 @@ export async function POST(req: Request) {
     windowMs: 15 * 60 * 1000,
   })
   if (!rateLimit.allowed) {
-    return mobileError('RATE_LIMITED', 'Too many booking attempts', 429, { retryAfter: rateLimit.retryAfter })
+    return mobileError('RATE_LIMITED', 'Too many booking attempts', 429, {
+      retryAfter: rateLimit.retryAfter,
+    })
   }
 
   const body = await req.json().catch(() => null)
@@ -76,7 +92,11 @@ export async function POST(req: Request) {
   const data = await response.json().catch(() => null)
   if (!response.ok) {
     const message = data?.error ?? 'Booking could not be created'
-    return mobileError(response.status === 409 ? 'TRIP_NOT_AVAILABLE' : 'VALIDATION_ERROR', message, response.status)
+    return mobileError(
+      response.status === 409 ? 'TRIP_NOT_AVAILABLE' : 'VALIDATION_ERROR',
+      message,
+      response.status
+    )
   }
 
   const bookingId = data?.booking?.id
@@ -84,7 +104,10 @@ export async function POST(req: Request) {
     ? await prisma.booking.findFirst({
         where: { id: bookingId, userId: guard.principal.userId },
         include: {
-          legs: { include: { fleetVehicle: true, driver: true }, orderBy: { departureDate: 'asc' } },
+          legs: {
+            include: { fleetVehicle: true, driver: true },
+            orderBy: { departureDate: 'asc' },
+          },
           payments: { orderBy: { createdAt: 'desc' } },
         },
       })
