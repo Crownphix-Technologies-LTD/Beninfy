@@ -31,7 +31,11 @@ export type PaystackVerifyResponse = {
 
 export type PaymentSettlement =
   | { ok: true; status: 'paid'; bookingId: string; reference: string; providerReference?: string }
-  | { ok: false; status: 'pending' | 'failed' | 'amount_mismatch' | 'availability_conflict' | 'not_found'; message: string }
+  | {
+      ok: false
+      status: 'pending' | 'failed' | 'amount_mismatch' | 'availability_conflict' | 'not_found'
+      message: string
+    }
 
 const PAYSTACK_STILL_PENDING_STATUSES = new Set(['ongoing', 'pending', 'processing', 'queued'])
 
@@ -112,10 +116,13 @@ export async function initializePaystackTransaction({
 }
 
 export async function verifyPaystackTransaction(secret: string, reference: string) {
-  const res = await fetch(`${PAYSTACK_BASE_URL}/transaction/verify/${encodeURIComponent(reference)}`, {
-    headers: { Authorization: `Bearer ${secret}` },
-    cache: 'no-store',
-  })
+  const res = await fetch(
+    `${PAYSTACK_BASE_URL}/transaction/verify/${encodeURIComponent(reference)}`,
+    {
+      headers: { Authorization: `Bearer ${secret}` },
+      cache: 'no-store',
+    }
+  )
 
   const json = (await res.json().catch(() => ({}))) as PaystackVerifyResponse
   if (!res.ok || !json.status) {
@@ -140,7 +147,10 @@ export function verifyPaystackWebhookIp(requestIp: string) {
   return allowedIps.includes(requestIp)
 }
 
-export async function settlePaymentFromPaystack(reference: string, verified: PaystackVerifyResponse): Promise<PaymentSettlement> {
+export async function settlePaymentFromPaystack(
+  reference: string,
+  verified: PaystackVerifyResponse
+): Promise<PaymentSettlement> {
   const payment = await prisma.payment.findUnique({
     where: { reference },
     include: { booking: true },
@@ -166,7 +176,11 @@ export async function settlePaymentFromPaystack(reference: string, verified: Pay
         message: transaction?.gateway_response || 'Payment was not successful',
       })
     }
-    return { ok: false, status: nextStatus, message: transaction?.gateway_response || 'Payment was not successful' }
+    return {
+      ok: false,
+      status: nextStatus,
+      message: transaction?.gateway_response || 'Payment was not successful',
+    }
   }
 
   const expectedAmount = payment.amountNGN * 100
@@ -182,7 +196,11 @@ export async function settlePaymentFromPaystack(reference: string, verified: Pay
         message: 'Payment amount does not match booking total',
       })
     }
-    return { ok: false, status: 'amount_mismatch', message: 'Payment amount does not match booking total' }
+    return {
+      ok: false,
+      status: 'amount_mismatch',
+      message: 'Payment amount does not match booking total',
+    }
   }
 
   const reservation = await markPaymentPaidAndReserveBooking({
@@ -209,9 +227,15 @@ export async function settlePaymentFromPaystack(reference: string, verified: Pay
     return { ok: false, status: reservation.status, message: reservation.message }
   }
 
-  if (payment.status !== 'paid') {
+  if (payment.status !== 'paid' && !reservation.alreadySettled) {
     await notifyPaymentSuccess(payment.bookingId, payment.id)
   }
 
-  return { ok: true, status: 'paid', bookingId: payment.bookingId, reference, providerReference: transaction.reference }
+  return {
+    ok: true,
+    status: 'paid',
+    bookingId: payment.bookingId,
+    reference,
+    providerReference: transaction.reference,
+  }
 }

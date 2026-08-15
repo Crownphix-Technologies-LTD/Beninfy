@@ -1,5 +1,6 @@
 export type AppRole =
   | 'user'
+  | 'driver'
   | 'admin'
   | 'super_admin'
   | 'operations_admin'
@@ -42,7 +43,7 @@ const ALL_PERMISSIONS: AdminPermission[] = [
   'settings',
 ]
 
-const ROLE_PERMISSIONS: Record<Exclude<AppRole, 'user'>, AdminPermission[]> = {
+const ROLE_PERMISSIONS: Record<Exclude<AppRole, 'user' | 'driver'>, AdminPermission[]> = {
   super_admin: ALL_PERMISSIONS,
   admin: ALL_PERMISSIONS,
   operations_admin: ['overview', 'bookings', 'vehicles', 'fleet', 'drivers', 'routes', 'tours', 'border_fees', 'settings'],
@@ -55,6 +56,7 @@ const ROLE_PERMISSIONS: Record<Exclude<AppRole, 'user'>, AdminPermission[]> = {
 
 export const ADMIN_ROLE_LABELS: Record<AppRole, string> = {
   user: 'User',
+  driver: 'Driver',
   admin: 'Admin',
   super_admin: 'Super admin',
   operations_admin: 'Operations admin',
@@ -65,12 +67,16 @@ export const ADMIN_ROLE_LABELS: Record<AppRole, string> = {
   content_admin: 'Content admin',
 }
 
-export function isAdminRole(role: unknown): role is Exclude<AppRole, 'user'> {
+export function isAdminRole(role: unknown): role is Exclude<AppRole, 'user' | 'driver'> {
   return typeof role === 'string' && role in ROLE_PERMISSIONS
 }
 
 export function isCustomerRole(role: unknown): role is 'user' {
   return role === 'user'
+}
+
+export function isDriverRole(role: unknown): role is 'driver' {
+  return role === 'driver'
 }
 
 export function adminRoleCan(role: unknown, permission: AdminPermission) {

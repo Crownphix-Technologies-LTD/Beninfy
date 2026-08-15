@@ -10,7 +10,11 @@ import { findRoute } from '@/data/routes'
 import { getRouteDropoffPrice, requiresLagosPickupArea } from '@/data/pricing'
 import { getRouteBorderFee } from '@/data/borderFees'
 import { vehicles as catalogVehicles } from '@/data/vehicles'
-import { assertFleetVehicleAvailable, assertVehicleTypeAvailable, findAvailableFleetVehicle } from '@/lib/availability'
+import {
+  assertFleetVehicleAvailable,
+  assertVehicleTypeAvailable,
+  findAvailableFleetVehicle,
+} from '@/lib/availability'
 import { normalizeCouponCode, validateCouponCode } from '@/lib/coupons'
 import { notifyAutoAccountCreated, notifyBookingCreatedPending } from '@/lib/notifications'
 import { refreshStalePaystackPayments } from '@/lib/paymentMaintenance'
@@ -22,7 +26,10 @@ const createSchema = z.object({
   from: z.string().min(1),
   to: z.string().min(1),
   date: z.string().refine((s) => !Number.isNaN(Date.parse(s)), 'Invalid date'),
-  returnDate: z.string().refine((s) => !Number.isNaN(Date.parse(s)), 'Invalid return date').optional(),
+  returnDate: z
+    .string()
+    .refine((s) => !Number.isNaN(Date.parse(s)), 'Invalid return date')
+    .optional(),
   tripType: z.enum(['one-way', 'round-trip']).default('one-way'),
   vehicleId: z.string().min(1),
   fleetVehicleId: z.string().min(1).optional(),
@@ -33,15 +40,20 @@ const createSchema = z.object({
   passengerPhone: z.string().trim().max(40).optional(),
   passportId: z.string().trim().max(80).optional(),
   nationality: z.string().trim().max(80).optional(),
-  travelers: z.array(z.object({
-    fullName: z.string().trim().min(1).max(100),
-    email: z.string().trim().email().optional().or(z.literal('')),
-    phone: z.string().trim().max(40).optional().or(z.literal('')),
-    passportId: z.string().trim().min(1).max(80),
-    nationality: z.string().trim().min(1).max(80),
-    lead: z.boolean().optional(),
-    sequence: z.number().int().positive().optional(),
-  })).max(50).optional(),
+  travelers: z
+    .array(
+      z.object({
+        fullName: z.string().trim().min(1).max(100),
+        email: z.string().trim().email().optional().or(z.literal('')),
+        phone: z.string().trim().max(40).optional().or(z.literal('')),
+        passportId: z.string().trim().min(1).max(80),
+        nationality: z.string().trim().min(1).max(80),
+        lead: z.boolean().optional(),
+        sequence: z.number().int().positive().optional(),
+      })
+    )
+    .max(50)
+    .optional(),
   pickupAddress: z.string().trim().max(240).optional(),
   dropoffAddress: z.string().trim().max(240).optional(),
   specialRequirements: z.string().trim().max(1000).optional(),
@@ -72,10 +84,15 @@ export async function POST(req: Request) {
   const body = await req.json().catch(() => null)
   const parsed = createSchema.safeParse(body)
   if (!parsed.success) {
-    return NextResponse.json({ error: 'Invalid input', issues: parsed.error.flatten() }, { status: 400 })
+    return NextResponse.json(
+      { error: 'Invalid input', issues: parsed.error.flatten() },
+      { status: 400 }
+    )
   }
   const data = parsed.data
-  const leadPassengerEmail = (data.passengerEmail || session?.user?.email || '').trim().toLowerCase()
+  const leadPassengerEmail = (data.passengerEmail || session?.user?.email || '')
+    .trim()
+    .toLowerCase()
   if (!leadPassengerEmail) {
     return NextResponse.json({ error: 'Lead passenger email is required' }, { status: 400 })
   }
@@ -100,17 +117,26 @@ export async function POST(req: Request) {
       })
     : null
   if (existingLeadUser && isAdminRole(existingLeadUser.role)) {
-    return NextResponse.json({ error: 'Use a customer email address for booking checkout' }, { status: 403 })
+    return NextResponse.json(
+      { error: 'Use a customer email address for booking checkout' },
+      { status: 403 }
+    )
   }
   const departureDate = new Date(data.date)
   const returnDate = data.returnDate ? new Date(data.returnDate) : null
 
   if (data.tripType === 'round-trip') {
     if (!returnDate) {
-      return NextResponse.json({ error: 'Return date is required for round trips' }, { status: 400 })
+      return NextResponse.json(
+        { error: 'Return date is required for round trips' },
+        { status: 400 }
+      )
     }
     if (returnDate < departureDate) {
-      return NextResponse.json({ error: 'Return date must be on or after departure date' }, { status: 400 })
+      return NextResponse.json(
+        { error: 'Return date must be on or after departure date' },
+        { status: 400 }
+      )
     }
   }
 
@@ -149,7 +175,10 @@ export async function POST(req: Request) {
     requiresLagosPickupArea(matchedRoute.id as RouteId, vehicle.id as VehicleId, vehicle.name) &&
     !data.pickupArea
   ) {
-    return NextResponse.json({ error: 'Pickup area is required for Lagos saloon pricing' }, { status: 400 })
+    return NextResponse.json(
+      { error: 'Pickup area is required for Lagos saloon pricing' },
+      { status: 400 }
+    )
   }
   if (!matchedRoute) {
     return NextResponse.json({ error: 'This route is not available for booking' }, { status: 400 })
@@ -161,8 +190,14 @@ export async function POST(req: Request) {
         select: { id: true, vehicleId: true, label: true },
       })
     : null
-  if (data.fleetVehicleId && (!selectedFleetVehicle || selectedFleetVehicle.vehicleId !== vehicle.id)) {
-    return NextResponse.json({ error: 'Selected fleet unit does not belong to this vehicle category' }, { status: 400 })
+  if (
+    data.fleetVehicleId &&
+    (!selectedFleetVehicle || selectedFleetVehicle.vehicleId !== vehicle.id)
+  ) {
+    return NextResponse.json(
+      { error: 'Selected fleet unit does not belong to this vehicle category' },
+      { status: 400 }
+    )
   }
   const dropoffFare = getRouteDropoffPrice(
     matchedRoute.id as RouteId,
@@ -172,7 +207,10 @@ export async function POST(req: Request) {
     routePriceOverrides
   )
   if (dropoffFare === null) {
-    return NextResponse.json({ error: 'This vehicle is not priced for the selected route' }, { status: 400 })
+    return NextResponse.json(
+      { error: 'This vehicle is not priced for the selected route' },
+      { status: 400 }
+    )
   }
   const legCount = data.tripType === 'round-trip' ? 2 : 1
   const rideFare = dropoffFare * legCount
@@ -181,128 +219,141 @@ export async function POST(req: Request) {
   const normalizedCouponCode = data.couponCode ? normalizeCouponCode(data.couponCode) : ''
 
   try {
-    const booking = await prisma.$transaction(async (tx) => {
-      const bookingUser = session?.user?.id
-        ? await tx.user.update({
-            where: { id: session.user.id },
-            data: {
-              name: session.user.name || leadPassengerName || undefined,
-              phone: data.passengerPhone || undefined,
-            },
-          })
-        : await tx.user.upsert({
-            where: { email: leadPassengerEmail },
-            update: {
-              name: leadPassengerName || undefined,
-              phone: data.passengerPhone || undefined,
-            },
-            create: {
-              email: leadPassengerEmail,
-              name: leadPassengerName,
-              phone: data.passengerPhone || null,
-            },
-          })
-      const datesToCheck = data.tripType === 'round-trip' && returnDate ? [departureDate, returnDate] : [departureDate]
-      const availability = await assertVehicleTypeAvailable(vehicle.id, datesToCheck, tx)
-      if (!availability.ok) {
-        throw new BookingAvailabilityError(availability.error, availability.status)
-      }
-
-      if (selectedFleetVehicle) {
-        const fleetAvailability = await assertFleetVehicleAvailable(selectedFleetVehicle.id, vehicle.id, datesToCheck, tx)
-        if (!fleetAvailability.ok) {
-          throw new BookingAvailabilityError(fleetAvailability.error, fleetAvailability.status)
+    const booking = await prisma.$transaction(
+      async (tx) => {
+        const bookingUser = session?.user?.id
+          ? await tx.user.update({
+              where: { id: session.user.id },
+              data: {
+                name: session.user.name || leadPassengerName || undefined,
+                phone: data.passengerPhone || undefined,
+              },
+            })
+          : await tx.user.upsert({
+              where: { email: leadPassengerEmail },
+              update: {
+                name: leadPassengerName || undefined,
+                phone: data.passengerPhone || undefined,
+              },
+              create: {
+                email: leadPassengerEmail,
+                name: leadPassengerName,
+                phone: data.passengerPhone || null,
+              },
+            })
+        const datesToCheck =
+          data.tripType === 'round-trip' && returnDate
+            ? [departureDate, returnDate]
+            : [departureDate]
+        const availability = await assertVehicleTypeAvailable(vehicle.id, datesToCheck, tx)
+        if (!availability.ok) {
+          throw new BookingAvailabilityError(availability.error, availability.status)
         }
-      }
-
-      const reservedFleetVehicles = new Map<string, { id: string; label: string }>()
-      for (const date of datesToCheck) {
-        const key = dateKey(date)
-        if (reservedFleetVehicles.has(key)) continue
 
         if (selectedFleetVehicle) {
-          reservedFleetVehicles.set(key, selectedFleetVehicle)
-          continue
-        }
-
-        const fleetVehicle = await findAvailableFleetVehicle(vehicle.id, date, tx)
-        if (!fleetVehicle) {
-          throw new BookingAvailabilityError(
-            `All ${vehicle.name} units are booked on ${key}. Please choose another vehicle or date.`
+          const fleetAvailability = await assertFleetVehicleAvailable(
+            selectedFleetVehicle.id,
+            vehicle.id,
+            datesToCheck,
+            tx
           )
+          if (!fleetAvailability.ok) {
+            throw new BookingAvailabilityError(fleetAvailability.error, fleetAvailability.status)
+          }
         }
-        reservedFleetVehicles.set(key, fleetVehicle)
-      }
-      const couponValidation = normalizedCouponCode
-        ? await validateCouponCode(normalizedCouponCode, subtotalNGN, tx)
-        : null
 
-      if (couponValidation && !couponValidation.ok) {
-        throw new BookingAvailabilityError(couponValidation.error, 400)
-      }
+        const reservedFleetVehicles = new Map<string, { id: string; label: string }>()
+        for (const date of datesToCheck) {
+          const key = dateKey(date)
+          if (reservedFleetVehicles.has(key)) continue
 
-      const appliedCoupon = couponValidation?.ok ? couponValidation : null
-      const discountNGN = appliedCoupon?.discountNGN ?? 0
-      const priceNGN = Math.max(0, subtotalNGN - discountNGN)
+          if (selectedFleetVehicle) {
+            reservedFleetVehicles.set(key, selectedFleetVehicle)
+            continue
+          }
 
-      if (appliedCoupon) {
-        await tx.coupon.update({
-          where: { id: appliedCoupon.coupon.id },
-          data: { redeemedCount: { increment: 1 } },
-        })
-      }
+          const fleetVehicle = await findAvailableFleetVehicle(vehicle.id, date, tx)
+          if (!fleetVehicle) {
+            throw new BookingAvailabilityError(
+              `All ${vehicle.name} units are booked on ${key}. Please choose another vehicle or date.`
+            )
+          }
+          reservedFleetVehicles.set(key, fleetVehicle)
+        }
+        const couponValidation = normalizedCouponCode
+          ? await validateCouponCode(normalizedCouponCode, subtotalNGN, tx)
+          : null
 
-      return tx.booking.create({
-        data: {
-          userId: bookingUser.id,
-          from: data.from,
-          to: data.to,
-          date: departureDate,
-          returnDate,
-          tripType: data.tripType === 'round-trip' ? 'round_trip' : 'one_way',
-          passengerName: leadPassengerName,
-          passengerEmail: leadPassengerEmail,
-          passengerPhone: data.passengerPhone || null,
-          passportId: data.passportId || null,
-          nationality: data.nationality || null,
-          travelers: data.travelers?.length ? data.travelers : undefined,
-          pickupAddress: data.pickupAddress || null,
-          dropoffAddress: data.dropoffAddress || null,
-          specialRequirements: data.specialRequirements || null,
-          vehicleId: vehicle.id,
-          passengers: data.passengers,
-          priceNGN,
-          discountNGN,
-          couponId: appliedCoupon?.coupon.id,
-          couponCode: appliedCoupon?.coupon.code,
-          legs: {
-            create: [
-              {
-                direction: 'outbound',
-                from: data.from,
-                to: data.to,
-                departureDate,
-                vehicleId: vehicle.id,
-                fleetVehicleId: reservedFleetVehicles.get(dateKey(departureDate))?.id,
-                status: 'payment_pending',
-              },
-              ...(data.tripType === 'round-trip' && returnDate
-                ? [{
-                    direction: 'return',
-                    from: data.to,
-                    to: data.from,
-                    departureDate: returnDate,
-                    vehicleId: vehicle.id,
-                    fleetVehicleId: reservedFleetVehicles.get(dateKey(returnDate))?.id,
-                    status: 'payment_pending',
-                  }]
-                : []),
-            ],
+        if (couponValidation && !couponValidation.ok) {
+          throw new BookingAvailabilityError(couponValidation.error, 400)
+        }
+
+        const appliedCoupon = couponValidation?.ok ? couponValidation : null
+        const discountNGN = appliedCoupon?.discountNGN ?? 0
+        const priceNGN = Math.max(0, subtotalNGN - discountNGN)
+
+        if (appliedCoupon) {
+          await tx.coupon.update({
+            where: { id: appliedCoupon.coupon.id },
+            data: { redeemedCount: { increment: 1 } },
+          })
+        }
+
+        return tx.booking.create({
+          data: {
+            userId: bookingUser.id,
+            from: data.from,
+            to: data.to,
+            date: departureDate,
+            returnDate,
+            tripType: data.tripType === 'round-trip' ? 'round_trip' : 'one_way',
+            passengerName: leadPassengerName,
+            passengerEmail: leadPassengerEmail,
+            passengerPhone: data.passengerPhone || null,
+            passportId: data.passportId || null,
+            nationality: data.nationality || null,
+            travelers: data.travelers?.length ? data.travelers : undefined,
+            pickupAddress: data.pickupAddress || null,
+            dropoffAddress: data.dropoffAddress || null,
+            specialRequirements: data.specialRequirements || null,
+            vehicleId: vehicle.id,
+            passengers: data.passengers,
+            priceNGN,
+            discountNGN,
+            couponId: appliedCoupon?.coupon.id,
+            couponCode: appliedCoupon?.coupon.code,
+            legs: {
+              create: [
+                {
+                  direction: 'outbound',
+                  from: data.from,
+                  to: data.to,
+                  departureDate,
+                  vehicleId: vehicle.id,
+                  fleetVehicleId: reservedFleetVehicles.get(dateKey(departureDate))?.id,
+                  status: 'payment_pending',
+                },
+                ...(data.tripType === 'round-trip' && returnDate
+                  ? [
+                      {
+                        direction: 'return',
+                        from: data.to,
+                        to: data.from,
+                        departureDate: returnDate,
+                        vehicleId: vehicle.id,
+                        fleetVehicleId: reservedFleetVehicles.get(dateKey(returnDate))?.id,
+                        status: 'payment_pending',
+                      },
+                    ]
+                  : []),
+              ],
+            },
           },
-        },
-        include: { legs: true },
-      })
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+          include: { legs: true },
+        })
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+    )
 
     await notifyBookingCreatedPending(booking.id)
     if (!session?.user?.id && !existingLeadUser && booking.userId) {
@@ -324,15 +375,33 @@ export async function POST(req: Request) {
   }
 }
 
-export async function GET() {
+export async function GET(req: Request) {
   const customer = await requireCustomer()
   if (!customer.ok) return customer.response
   const { session } = customer
   await refreshStalePaystackPayments({ take: 50 })
+
+  const url = new URL(req.url)
+  const requestedLimit = Number(url.searchParams.get('limit') ?? 50)
+  const limit = Number.isFinite(requestedLimit)
+    ? Math.min(Math.max(Math.trunc(requestedLimit), 1), 100)
+    : 50
+  const cursor = url.searchParams.get('cursor') || undefined
   const bookings = await prisma.booking.findMany({
     where: { userId: session.user!.id },
     orderBy: { createdAt: 'desc' },
+    take: limit + 1,
+    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
     include: { legs: true },
   })
-  return NextResponse.json({ bookings })
+  const hasNextPage = bookings.length > limit
+  const page = hasNextPage ? bookings.slice(0, limit) : bookings
+
+  return NextResponse.json({
+    bookings: page,
+    pageInfo: {
+      hasNextPage,
+      nextCursor: hasNextPage ? (page.at(-1)?.id ?? null) : null,
+    },
+  })
 }
