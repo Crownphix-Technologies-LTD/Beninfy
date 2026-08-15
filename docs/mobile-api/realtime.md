@@ -23,8 +23,9 @@ Postgres Changes:
 
 Future chat:
 
-- Do not reuse GPS channels for chat.
-- Chat needs separate authorization, retention, moderation, and delivery rules.
+- Chat uses a separate `trip:{bookingLegId}:chat` channel.
+- PostgreSQL remains authoritative for chat history.
+- Realtime chat events are acceleration only; reconnect must use REST history.
 
 ## Channel Model
 
@@ -38,6 +39,12 @@ Driver presence:
 
 ```text
 driver:{driverId}:presence
+```
+
+Trip chat:
+
+```text
+trip:{bookingLegId}:chat
 ```
 
 The IDs are internal opaque database IDs. Do not put emails, phone numbers, plate numbers, or passenger names in channel names.
@@ -88,6 +95,23 @@ Lifecycle:
 
 Do not send full Prisma models over realtime channels.
 
+Chat:
+
+```json
+{
+  "event": "chat.message_created",
+  "version": 1,
+  "bookingLegId": "leg-id",
+  "conversationId": "conversation-id",
+  "message": {
+    "id": "message-id",
+    "senderType": "driver",
+    "text": "Plain text message",
+    "createdAt": "2026-08-15T12:00:00.000Z"
+  }
+}
+```
+
 ## Reconnect Strategy
 
 Flutter must call the snapshot endpoint after reconnecting. Realtime messages may be missed. The latest snapshot tells the app current lifecycle state, tracking state, freshness, and last known location.
@@ -110,3 +134,5 @@ Planned:
 - map display
 - chat
 - push notifications
+
+Phase 6 implemented chat persistence, REST APIs, and signed chat channel metadata. Actual Supabase Broadcast publish remains planned until the realtime provider is wired in staging.

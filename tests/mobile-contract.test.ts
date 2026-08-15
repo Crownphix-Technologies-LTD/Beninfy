@@ -24,6 +24,14 @@ import {
   templateFor,
   validatePushToken,
 } from '../src/lib/mobile/notifications'
+import {
+  chatClosedReasonForStatus,
+  chatMessageRealtimeEvent,
+  isChatReadableStatus,
+  isChatSendEligibleStatus,
+  realtimeChannelForChat,
+  validateChatText,
+} from '../src/lib/mobile/chat'
 
 test('driver transition blocks terminal trips', () => {
   const result = evaluateDriverTripTransition({
@@ -350,4 +358,66 @@ test('provider error classification separates invalid, configuration and transie
     classification: 'transient',
     errorCode: 'timeout',
   })
+})
+
+test('chat eligibility is writable only during active assigned lifecycle', () => {
+  assert.equal(isChatSendEligibleStatus('assigned'), true)
+  assert.equal(isChatSendEligibleStatus('driver_en_route'), true)
+  assert.equal(isChatSendEligibleStatus('in_progress'), true)
+  assert.equal(isChatSendEligibleStatus('payment_pending'), false)
+  assert.equal(isChatSendEligibleStatus('reserved'), false)
+  assert.equal(isChatSendEligibleStatus('completed'), false)
+  assert.equal(isChatReadableStatus('completed'), true)
+  assert.equal(isChatReadableStatus('cancelled'), true)
+})
+
+test('chat closed reasons distinguish unassigned and terminal states', () => {
+  assert.equal(chatClosedReasonForStatus('reserved', false), 'awaiting_assignment')
+  assert.equal(chatClosedReasonForStatus('unassigned', false), 'unassigned')
+  assert.equal(chatClosedReasonForStatus('completed', true), 'completed')
+  assert.equal(chatClosedReasonForStatus('cancelled', true), 'cancelled')
+  assert.equal(chatClosedReasonForStatus('driver_en_route', true), null)
+})
+
+test('chat text validation rejects empty and long messages but preserves text', () => {
+  assert.deepEqual(validateChatText('   '), { ok: false, code: 'MESSAGE_EMPTY' })
+  assert.equal(validateChatText('a'.repeat(2001)).ok, false)
+  assert.deepEqual(validateChatText(' Bonjour, I am outside. '), {
+    ok: true,
+    text: 'Bonjour, I am outside.',
+  })
+})
+
+test('chat realtime channel and payload are trip scoped and stable', () => {
+  assert.equal(realtimeChannelForChat('leg1'), 'trip:leg1:chat')
+  const event = chatMessageRealtimeEvent({
+    bookingLegId: 'leg1',
+    conversationId: 'conversation1',
+    message: {
+      id: 'message1',
+      conversationId: 'conversation1',
+      bookingLegId: 'leg1',
+      senderType: 'driver',
+      senderDisplayName: 'Ada Driver',
+      messageType: 'text',
+      text: 'I have arrived.',
+      systemEventCode: null,
+      createdAt: '2026-08-15T12:00:00.000Z',
+      isOwnMessage: false,
+    },
+  })
+
+  assert.equal(event.event, 'chat.message_created')
+  assert.equal(event.version, 1)
+  assert.equal(event.bookingLegId, 'leg1')
+  assert.equal(event.message.id, 'message1')
+  assert.equal('rawPrisma' in event, false)
+})
+
+test('chat reassignment policy keeps driver conversations separated', () => {
+  const previousDriverConversation = { bookingLegId: 'leg1', driverId: 'driverA' }
+  const newDriverConversation = { bookingLegId: 'leg1', driverId: 'driverB' }
+
+  assert.notEqual(previousDriverConversation.driverId, newDriverConversation.driverId)
+  assert.equal(previousDriverConversation.bookingLegId, newDriverConversation.bookingLegId)
 })

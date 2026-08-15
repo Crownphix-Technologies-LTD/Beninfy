@@ -18,6 +18,7 @@ export type NotificationType =
   | 'booking.confirmed'
   | 'payment.confirmed'
   | 'payment.failed'
+  | 'chat.new_message'
   | 'trip.driver_assigned'
   | 'trip.assignment_removed'
   | 'trip.assignment_changed'
@@ -33,6 +34,8 @@ type PushPayload = {
   bookingId?: string
   bookingLegId?: string
   paymentId?: string
+  conversationId?: string
+  messageId?: string
 }
 
 type ProviderSendInput = {
@@ -89,6 +92,16 @@ const templates: Record<
     fr: {
       title: 'Paiement non finalise',
       body: 'Votre paiement n a pas ete finalise. Veuillez reessayer ou contacter le support.',
+    },
+  },
+  'chat.new_message': {
+    en: {
+      title: 'New trip message',
+      body: 'You have a new Beninfy trip message.',
+    },
+    fr: {
+      title: 'Nouveau message de trajet',
+      body: 'Vous avez un nouveau message pour votre trajet Beninfy.',
     },
   },
   'trip.driver_assigned': {
