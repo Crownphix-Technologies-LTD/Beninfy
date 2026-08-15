@@ -32,6 +32,13 @@ import {
   realtimeChannelForChat,
   validateChatText,
 } from '../src/lib/mobile/chat'
+import {
+  bookingPayable,
+  canRetryPayment,
+  mobilePaymentState,
+  normalizeMobilePaymentProvider,
+  toMobilePaymentDto,
+} from '../src/lib/mobile/payments'
 
 test('driver transition blocks terminal trips', () => {
   const result = evaluateDriverTripTransition({
@@ -420,4 +427,67 @@ test('chat reassignment policy keeps driver conversations separated', () => {
 
   assert.notEqual(previousDriverConversation.driverId, newDriverConversation.driverId)
   assert.equal(previousDriverConversation.bookingLegId, newDriverConversation.bookingLegId)
+})
+
+test('mobile payment state is derived from backend booking and payment status', () => {
+  assert.equal(
+    mobilePaymentState({ bookingStatus: 'ops_review', paymentStatus: 'paid' }),
+    'ops_review'
+  )
+  assert.equal(mobilePaymentState({ bookingStatus: 'pending', paymentStatus: 'paid' }), 'paid')
+  assert.equal(
+    mobilePaymentState({ bookingStatus: 'pending', paymentStatus: 'amount_mismatch' }),
+    'amount_mismatch'
+  )
+  assert.equal(mobilePaymentState({ bookingStatus: 'pending', paymentStatus: 'failed' }), 'failed')
+  assert.equal(
+    mobilePaymentState({ bookingStatus: 'pending', paymentStatus: 'pending' }),
+    'pending'
+  )
+})
+
+test('mobile payment retry is blocked for authoritative terminal booking states', () => {
+  assert.equal(canRetryPayment({ bookingStatus: 'confirmed', paymentStatus: 'paid' }), false)
+  assert.equal(canRetryPayment({ bookingStatus: 'completed', paymentStatus: 'paid' }), false)
+  assert.equal(canRetryPayment({ bookingStatus: 'ops_review', paymentStatus: 'paid' }), false)
+  assert.equal(canRetryPayment({ bookingStatus: 'pending', paymentStatus: 'failed' }), true)
+})
+
+test('mobile payment DTO exposes safe money and checkout fields only', () => {
+  const dto = toMobilePaymentDto({
+    booking: { id: 'booking1', status: 'pending', priceNGN: 180000 },
+    payment: {
+      id: 'payment1',
+      bookingId: 'booking1',
+      amountNGN: 180000,
+      status: 'pending',
+      reference: 'BFY-M-123',
+      provider: 'paystack',
+      providerReference: 'BFY-M-123',
+      providerCheckoutUrl: 'https://checkout.example',
+      providerAccessCode: 'access-code',
+      currencyCode: 'NGN',
+      checkoutAmount: 180000,
+      expiresAt: new Date('2026-08-15T12:30:00.000Z'),
+      paidAt: null,
+      failureCode: null,
+      createdAt: new Date('2026-08-15T12:00:00.000Z'),
+      updatedAt: new Date('2026-08-15T12:00:00.000Z'),
+    },
+  })
+
+  assert.equal(dto.amount.value, 180000)
+  assert.equal(dto.amount.currency, 'NGN')
+  assert.equal(dto.amount.minorValue, 18000000)
+  assert.equal(dto.checkout?.authorizationUrl, 'https://checkout.example')
+  assert.equal('secret' in dto, false)
+  assert.equal('webhookSignature' in dto, false)
+})
+
+test('mobile booking payability and provider normalization are conservative', () => {
+  assert.equal(bookingPayable({ status: 'pending', priceNGN: 1 }), true)
+  assert.equal(bookingPayable({ status: 'confirmed', priceNGN: 1 }), false)
+  assert.equal(bookingPayable({ status: 'pending', priceNGN: 0 }), false)
+  assert.equal(normalizeMobilePaymentProvider('payonus'), 'payonus')
+  assert.equal(normalizeMobilePaymentProvider('unknown'), 'paystack')
 })

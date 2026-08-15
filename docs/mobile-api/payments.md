@@ -19,12 +19,13 @@ Webhook route is SYSTEM/WEBHOOK only:
 
 - `/api/payments/webhook`
 
-Planned mobile endpoints:
+Implemented mobile booking payment endpoints:
 
-| Endpoint | Status | Notes |
-| --- | --- | --- |
-| `POST /api/mobile/v1/payments/initiate` | PLANNED | Own booking only; returns mobile-safe provider payload. |
-| `POST /api/mobile/v1/payments/verify` | PLANNED | Own payment only; no provider raw payload. |
-| `GET /api/mobile/v1/payments` | PLANNED | Paginated own payments. |
+| Endpoint                                                          | Status      | Notes                                                        |
+| ----------------------------------------------------------------- | ----------- | ------------------------------------------------------------ |
+| `GET /api/mobile/v1/customer/bookings/:bookingId/payment`         | IMPLEMENTED | Own booking only; returns authoritative mobile-safe status.  |
+| `POST /api/mobile/v1/customer/bookings/:bookingId/payment`        | IMPLEMENTED | Own booking only; returns mobile-safe provider handoff.      |
+| `POST /api/mobile/v1/customer/bookings/:bookingId/payment/verify` | IMPLEMENTED | Own booking/payment only; server-side provider verification. |
+| `GET /api/mobile/v1/payments`                                     | PLANNED     | Standalone paginated payment history is not required yet.    |
 
 Payment settlement should continue to use `src/lib/paymentSettlement.ts`.

@@ -33,6 +33,14 @@ export type MobileErrorCode =
   | 'MESSAGE_NOT_FOUND'
   | 'MESSAGE_EMPTY'
   | 'MESSAGE_TOO_LONG'
+  | 'PAYMENT_NOT_FOUND'
+  | 'PAYMENT_FAILED'
+  | 'PAYMENT_CANCELLED'
+  | 'PAYMENT_EXPIRED'
+  | 'PAYMENT_AMOUNT_MISMATCH'
+  | 'PAYMENT_ALREADY_COMPLETED'
+  | 'BOOKING_NOT_PAYABLE'
+  | 'PAYMENT_PROVIDER_UNAVAILABLE'
   | 'INTERNAL_ERROR'
 
 export type MobileErrorBody = {
@@ -138,6 +146,20 @@ export function mobileErrorFromCode(code: MobileErrorCode, message?: string) {
       return mobileError(code, message ?? 'Message cannot be empty', 400)
     case 'MESSAGE_TOO_LONG':
       return mobileError(code, message ?? 'Message is too long', 400)
+    case 'PAYMENT_NOT_FOUND':
+      return mobileError(code, message ?? 'Payment not found', 404)
+    case 'PAYMENT_ALREADY_COMPLETED':
+      return mobileError(code, message ?? 'Payment has already been completed', 409)
+    case 'BOOKING_NOT_PAYABLE':
+      return mobileError(code, message ?? 'Booking is not payable', 409)
+    case 'PAYMENT_PROVIDER_UNAVAILABLE':
+      return mobileError(code, message ?? 'Payment provider is unavailable', 503)
+    case 'PAYMENT_AMOUNT_MISMATCH':
+      return mobileError(code, message ?? 'Payment amount needs review', 409)
+    case 'PAYMENT_FAILED':
+    case 'PAYMENT_CANCELLED':
+    case 'PAYMENT_EXPIRED':
+      return mobileError(code, message ?? 'Payment was not completed', 409)
     case 'VALIDATION_ERROR':
       return mobileValidationError(message)
     case 'INTERNAL_ERROR':

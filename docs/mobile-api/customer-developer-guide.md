@@ -18,6 +18,9 @@ Current customer mobile API base:
 - `GET /customer/bookings`
 - `GET /customer/bookings/:bookingId`
 - `POST /customer/bookings`
+- `GET /customer/bookings/:bookingId/payment`
+- `POST /customer/bookings/:bookingId/payment`
+- `POST /customer/bookings/:bookingId/payment/verify`
 
 ## Identity Rule
 
@@ -45,6 +48,15 @@ The mobile booking endpoint accepts booking details, but the backend remains aut
 
 Flutter must not calculate or submit a trusted final fare.
 
-## Not Yet Complete
+## Payments
 
-Mobile payment integration is not complete in this phase. Do not treat payment handoff as production-ready for Flutter until the mobile payment endpoints are explicitly implemented and documented.
+Mobile payment handoff is implemented through backend-created Paystack or PayOnUs attempts.
+
+Flutter must:
+
+- request payment initiation from the backend
+- present the returned hosted checkout/provider config
+- fetch backend payment status after return/restart
+- never mark a payment as paid locally
+
+See `docs/mobile-api/mobile-payments.md`.
