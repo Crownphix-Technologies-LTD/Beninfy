@@ -1,4 +1,9 @@
 import { isEmailConfigured, sendEmail } from '@/lib/email'
+import {
+  notifyAssignmentPush,
+  notifyPaymentConfirmedPush,
+  notifyPaymentFailedPush,
+} from '@/lib/mobile/notifications'
 import { prisma } from '@/lib/prisma'
 import { siteConfig } from '@/lib/config'
 
@@ -24,8 +29,7 @@ type EmailShellOptions = {
 }
 
 function adminEmails() {
-  const configured = process.env.ADMIN_NOTIFICATION_EMAILS
-    ?.split(',')
+  const configured = process.env.ADMIN_NOTIFICATION_EMAILS?.split(',')
     .map((email) => email.trim())
     .filter(Boolean)
 
@@ -221,7 +225,12 @@ function adminEmailShell(title: string, intro: string, items: Array<[string, unk
   })
 }
 
-function customerEmailShell(title: string, intro: string, items: Array<[string, unknown]>, notice?: { title: string; copy: string }) {
+function customerEmailShell(
+  title: string,
+  intro: string,
+  items: Array<[string, unknown]>,
+  notice?: { title: string; copy: string }
+) {
   return emailShell(title, intro, detailBody(items, notice), {
     eyebrow: 'Customer Update',
     ctaLabel: 'Open dashboard',
@@ -275,7 +284,12 @@ async function safeSendEmail(options: {
   }
 }
 
-async function sendAdminEmail(subject: string, title: string, intro: string, items: Array<[string, unknown]>) {
+async function sendAdminEmail(
+  subject: string,
+  title: string,
+  intro: string,
+  items: Array<[string, unknown]>
+) {
   await safeSendEmail({
     to: adminEmails(),
     subject,
@@ -303,7 +317,11 @@ async function getBookingEmailData(bookingId: string) {
 }
 
 function bookingReference(booking: NonNullable<BookingEmailData>) {
-  return booking.paymentId || booking.payments[0]?.reference || `BFY-${booking.id.slice(-8).toUpperCase()}`
+  return (
+    booking.paymentId ||
+    booking.payments[0]?.reference ||
+    `BFY-${booking.id.slice(-8).toUpperCase()}`
+  )
 }
 
 function bookingRows(booking: NonNullable<BookingEmailData>) {
@@ -314,7 +332,14 @@ function bookingRows(booking: NonNullable<BookingEmailData>) {
     ['Route', `${booking.from} to ${booking.to}`],
     ['Trip type', booking.tripType === 'round_trip' ? 'Round trip' : 'One way'],
     ['Departure date', formatDate(booking.date)],
-    ['Return date', returnLeg ? formatDate(returnLeg.departureDate) : booking.returnDate ? formatDate(booking.returnDate) : 'Not applicable'],
+    [
+      'Return date',
+      returnLeg
+        ? formatDate(returnLeg.departureDate)
+        : booking.returnDate
+          ? formatDate(booking.returnDate)
+          : 'Not applicable',
+    ],
     ['Passengers', booking.passengers],
     ['Lead passenger', booking.passengerName || booking.user?.name],
     ['Passenger email', booking.passengerEmail || booking.user?.email],
@@ -344,7 +369,10 @@ export async function notifyBookingCreatedPending(bookingId: string) {
 }
 
 export async function notifyAutoAccountCreated(userId: string, bookingId?: string) {
-  const user = await prisma.user.findUnique({ where: { id: userId }, select: { name: true, email: true } })
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { name: true, email: true },
+  })
   if (!user?.email) return
 
   const items: Array<[string, unknown]> = [
@@ -361,7 +389,11 @@ export async function notifyAutoAccountCreated(userId: string, bookingId?: strin
       'We created a Beninfy customer account with your booking email so you can manage your trip details.',
       items
     ),
-    text: textFromPairs('Your Beninfy Account Is Ready', 'We created a Beninfy customer account with your booking email so you can manage your trip details.', items),
+    text: textFromPairs(
+      'Your Beninfy Account Is Ready',
+      'We created a Beninfy customer account with your booking email so you can manage your trip details.',
+      items
+    ),
   })
 }
 
@@ -386,7 +418,11 @@ export async function notifyPaymentSuccess(bookingId: string, paymentId: string)
           copy: 'Please keep your travel documents ready before departure. Late cancellations under 24 hours may attract the full one-way trip cost as a cancellation fee.',
         }
       ),
-      text: textFromPairs('Booking Confirmed', 'Your payment was received and your Beninfy ride is now confirmed.', items),
+      text: textFromPairs(
+        'Booking Confirmed',
+        'Your payment was received and your Beninfy ride is now confirmed.',
+        items
+      ),
     })
   }
 
@@ -401,6 +437,14 @@ export async function notifyPaymentSuccess(bookingId: string, paymentId: string)
       ['Provider reference', payment?.providerReference],
     ]
   )
+
+  await notifyPaymentConfirmedPush(bookingId, paymentId).catch((error) => {
+    console.warn('Payment confirmation push notification failed', {
+      bookingId,
+      paymentId,
+      error: error instanceof Error ? error.message : 'unknown',
+    })
+  })
 }
 
 export async function notifyPaymentIssue(input: {
@@ -423,6 +467,16 @@ export async function notifyPaymentIssue(input: {
       ...(booking ? bookingRows(booking) : []),
     ]
   )
+
+  if (input.bookingId && input.status === 'failed') {
+    await notifyPaymentFailedPush(input.bookingId).catch((error) => {
+      console.warn('Payment failure push notification failed', {
+        bookingId: input.bookingId,
+        reference: input.reference,
+        error: error instanceof Error ? error.message : 'unknown',
+      })
+    })
+  }
 }
 
 export async function notifyBookingStatusChanged(bookingId: string, status: string) {
@@ -450,10 +504,18 @@ export async function notifyBookingStatusChanged(bookingId: string, status: stri
     })
   }
 
-  await sendAdminEmail(`Booking status updated: ${status}`, title, 'A booking status was updated in the backoffice.', items)
+  await sendAdminEmail(
+    `Booking status updated: ${status}`,
+    title,
+    'A booking status was updated in the backoffice.',
+    items
+  )
 }
 
-export async function notifyBookingAssignmentChanged(bookingLegId: string) {
+export async function notifyBookingAssignmentChanged(
+  bookingLegId: string,
+  previousDriverId?: string | null
+) {
   const leg = await prisma.bookingLeg.findUnique({
     where: { id: bookingLegId },
     include: {
@@ -500,7 +562,11 @@ export async function notifyBookingAssignmentChanged(bookingLegId: string) {
           copy: 'Our operations team may still contact you by phone or WhatsApp to confirm pickup timing, documents, and border coordination.',
         }
       ),
-      text: textFromPairs('Trip Assignment Updated', 'Your trip assignment has been updated by Beninfy operations.', items),
+      text: textFromPairs(
+        'Trip Assignment Updated',
+        'Your trip assignment has been updated by Beninfy operations.',
+        items
+      ),
     })
   }
 
@@ -513,15 +579,35 @@ export async function notifyBookingAssignmentChanged(bookingLegId: string) {
         'You have been assigned to a Beninfy trip. Please review the trip details and coordinate with operations.',
         items
       ),
-      text: textFromPairs('New Driver Assignment', 'You have been assigned to a Beninfy trip.', items),
+      text: textFromPairs(
+        'New Driver Assignment',
+        'You have been assigned to a Beninfy trip.',
+        items
+      ),
     })
   }
 
-  await sendAdminEmail('Booking assignment updated', 'Booking Assignment Updated', 'A booking leg assignment was updated.', items)
+  await sendAdminEmail(
+    'Booking assignment updated',
+    'Booking Assignment Updated',
+    'A booking leg assignment was updated.',
+    items
+  )
+
+  await notifyAssignmentPush({ bookingLegId, previousDriverId }).catch((error) => {
+    console.warn('Assignment push notification failed', {
+      bookingLegId,
+      previousDriverId,
+      error: error instanceof Error ? error.message : 'unknown',
+    })
+  })
 }
 
 export async function notifyUserRegistered(userId: string) {
-  const user = await prisma.user.findUnique({ where: { id: userId }, select: { name: true, email: true } })
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { name: true, email: true },
+  })
   if (!user?.email) return
 
   const items: Array<[string, unknown]> = [
@@ -539,11 +625,19 @@ export async function notifyUserRegistered(userId: string) {
     text: textFromPairs('Welcome To Beninfy', 'Your Beninfy account has been created.', items),
   })
 
-  await sendAdminEmail('New Beninfy user registered', 'New User Registered', 'A new customer account was created.', items)
+  await sendAdminEmail(
+    'New Beninfy user registered',
+    'New User Registered',
+    'A new customer account was created.',
+    items
+  )
 }
 
 export async function notifyAdminUserCreated(userId: string) {
-  const user = await prisma.user.findUnique({ where: { id: userId }, select: { name: true, email: true, role: true } })
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { name: true, email: true, role: true },
+  })
   if (!user?.email) return
   const items: Array<[string, unknown]> = [
     ['Name', user.name],
@@ -559,14 +653,26 @@ export async function notifyAdminUserCreated(userId: string) {
       'A Beninfy backoffice account has been created for you. Please sign in and change your password if required by operations.',
       items
     ),
-    text: textFromPairs('Backoffice Account Created', 'A Beninfy backoffice account has been created for you.', items),
+    text: textFromPairs(
+      'Backoffice Account Created',
+      'A Beninfy backoffice account has been created for you.',
+      items
+    ),
   })
 
-  await sendAdminEmail('Backoffice user created', 'Backoffice User Created', 'A backoffice account was created.', items)
+  await sendAdminEmail(
+    'Backoffice user created',
+    'Backoffice User Created',
+    'A backoffice account was created.',
+    items
+  )
 }
 
 export async function notifyPasswordChanged(userId: string, mode: 'self' | 'admin_reset') {
-  const user = await prisma.user.findUnique({ where: { id: userId }, select: { name: true, email: true, role: true } })
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { name: true, email: true, role: true },
+  })
   if (!user?.email) return
   const items: Array<[string, unknown]> = [
     ['Name', user.name],
@@ -586,25 +692,71 @@ export async function notifyPasswordChanged(userId: string, mode: 'self' | 'admi
     text: textFromPairs('Password Changed', 'Your Beninfy account password was changed.', items),
   })
 
-  await sendAdminEmail('Beninfy password changed', 'Password Changed', 'An account password was changed.', items)
+  await sendAdminEmail(
+    'Beninfy password changed',
+    'Password Changed',
+    'An account password was changed.',
+    items
+  )
 }
 
-export async function notifyCouponChanged(action: 'created' | 'updated' | 'deleted', details: Array<[string, unknown]>) {
-  await sendAdminEmail(`Coupon ${action}`, `Coupon ${action}`, `A coupon was ${action} in the backoffice.`, details)
+export async function notifyCouponChanged(
+  action: 'created' | 'updated' | 'deleted',
+  details: Array<[string, unknown]>
+) {
+  await sendAdminEmail(
+    `Coupon ${action}`,
+    `Coupon ${action}`,
+    `A coupon was ${action} in the backoffice.`,
+    details
+  )
 }
 
-export async function notifyDriverChanged(action: 'created' | 'updated' | 'deleted', details: Array<[string, unknown]>) {
-  await sendAdminEmail(`Driver ${action}`, `Driver ${action}`, `A driver record was ${action} in the backoffice.`, details)
+export async function notifyDriverChanged(
+  action: 'created' | 'updated' | 'deleted',
+  details: Array<[string, unknown]>
+) {
+  await sendAdminEmail(
+    `Driver ${action}`,
+    `Driver ${action}`,
+    `A driver record was ${action} in the backoffice.`,
+    details
+  )
 }
 
-export async function notifyFleetVehicleChanged(action: 'created' | 'updated' | 'deleted', details: Array<[string, unknown]>) {
-  await sendAdminEmail(`Fleet unit ${action}`, `Fleet Unit ${action}`, `A fleet unit was ${action} in the backoffice.`, details)
+export async function notifyFleetVehicleChanged(
+  action: 'created' | 'updated' | 'deleted',
+  details: Array<[string, unknown]>
+) {
+  await sendAdminEmail(
+    `Fleet unit ${action}`,
+    `Fleet Unit ${action}`,
+    `A fleet unit was ${action} in the backoffice.`,
+    details
+  )
 }
 
-export async function notifyRoutePriceChanged(action: 'created' | 'updated' | 'deleted', details: Array<[string, unknown]>) {
-  await sendAdminEmail(`Route price ${action}`, `Route Price ${action}`, `A route price was ${action} in the backoffice.`, details)
+export async function notifyRoutePriceChanged(
+  action: 'created' | 'updated' | 'deleted',
+  details: Array<[string, unknown]>
+) {
+  await sendAdminEmail(
+    `Route price ${action}`,
+    `Route Price ${action}`,
+    `A route price was ${action} in the backoffice.`,
+    details
+  )
 }
 
-export async function notifyBackofficeRecordChanged(entity: string, action: 'created' | 'updated' | 'deleted', details: Array<[string, unknown]>) {
-  await sendAdminEmail(`${entity} ${action}`, `${entity} ${action}`, `A ${entity.toLowerCase()} record was ${action} in the backoffice.`, details)
+export async function notifyBackofficeRecordChanged(
+  entity: string,
+  action: 'created' | 'updated' | 'deleted',
+  details: Array<[string, unknown]>
+) {
+  await sendAdminEmail(
+    `${entity} ${action}`,
+    `${entity} ${action}`,
+    `A ${entity.toLowerCase()} record was ${action} in the backoffice.`,
+    details
+  )
 }

@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client'
 import { writeAuditLog } from '@/lib/auditLog'
 import type { MobileErrorCode } from '@/lib/mobile/errors'
 import type { MobilePrincipal } from '@/lib/mobile/auth'
+import { notifyTripLifecyclePush } from '@/lib/mobile/notifications'
 import { prisma } from '@/lib/prisma'
 import {
   DRIVER_ACTION_TRANSITIONS,
@@ -291,6 +292,19 @@ export async function applyDriverTripAction({
       reasonCode: reasonCode || null,
       bookingCompleted: update.completedBooking,
     },
+  })
+
+  await notifyTripLifecyclePush({
+    bookingId: leg.bookingId,
+    bookingLegId: leg.id,
+    nextStatus: transition.nextStatus,
+    driverId: principal.driverId,
+  }).catch((error) => {
+    console.warn('Trip lifecycle push notification failed', {
+      bookingLegId: leg.id,
+      nextStatus: transition.nextStatus,
+      error: error instanceof Error ? error.message : 'unknown',
+    })
   })
 
   return {
