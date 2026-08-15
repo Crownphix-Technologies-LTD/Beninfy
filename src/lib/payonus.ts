@@ -206,7 +206,11 @@ export async function settlePaymentFromPayOnUs(
     const nextStatus = data?.paymentStatus?.toUpperCase() === 'FAILED' ? 'failed' : 'pending'
     await prisma.payment.update({
       where: { id: payment.id },
-      data: { status: nextStatus, providerReference: data?.onusReference ?? onusReference },
+      data: {
+        status: nextStatus,
+        providerReference: data?.onusReference ?? onusReference,
+        failureCode: nextStatus === 'failed' ? 'PAYMENT_FAILED' : null,
+      },
     })
     if (nextStatus === 'failed') {
       await failBookingPayment(payment.bookingId)
@@ -232,7 +236,11 @@ export async function settlePaymentFromPayOnUs(
   if (paidAmount + 0.01 < payment.amountNGN || currency !== 'NGN') {
     await prisma.payment.update({
       where: { id: payment.id },
-      data: { status: 'amount_mismatch', providerReference: data?.onusReference ?? onusReference },
+      data: {
+        status: 'amount_mismatch',
+        providerReference: data?.onusReference ?? onusReference,
+        failureCode: 'PAYMENT_AMOUNT_MISMATCH',
+      },
     })
     await failBookingPayment(payment.bookingId)
     if (payment.status !== 'amount_mismatch') {
@@ -260,6 +268,8 @@ export async function settlePaymentFromPayOnUs(
       providerReference,
       currencyCode: 'NGN',
       checkoutAmount: payment.amountNGN,
+      paidAt: new Date(),
+      failureCode: null,
     },
   })
 
@@ -314,7 +324,11 @@ export async function settlePaymentFromPayOnUsWebhook(
     const nextStatus = payload.paymentStatus?.toUpperCase() === 'FAILED' ? 'failed' : 'pending'
     await prisma.payment.update({
       where: { id: payment.id },
-      data: { status: nextStatus, providerReference: onusReference ?? payment.providerReference },
+      data: {
+        status: nextStatus,
+        providerReference: onusReference ?? payment.providerReference,
+        failureCode: nextStatus === 'failed' ? 'PAYMENT_FAILED' : null,
+      },
     })
     if (nextStatus === 'failed') {
       await failBookingPayment(payment.bookingId)
@@ -338,6 +352,7 @@ export async function settlePaymentFromPayOnUsWebhook(
       data: {
         status: 'amount_mismatch',
         providerReference: onusReference ?? payment.providerReference,
+        failureCode: 'PAYMENT_AMOUNT_MISMATCH',
       },
     })
     await failBookingPayment(payment.bookingId)
@@ -365,6 +380,8 @@ export async function settlePaymentFromPayOnUsWebhook(
       providerReference: onusReference ?? payment.providerReference,
       currencyCode: 'NGN',
       checkoutAmount: payment.amountNGN,
+      paidAt: new Date(),
+      failureCode: null,
     },
   })
 

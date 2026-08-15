@@ -163,7 +163,13 @@ export async function settlePaymentFromPaystack(
   const transaction = verified.data
   if (transaction?.status !== 'success') {
     const nextStatus = normalizeUnpaidPaystackStatus(transaction?.status)
-    await prisma.payment.update({ where: { reference }, data: { status: nextStatus } })
+    await prisma.payment.update({
+      where: { reference },
+      data: {
+        status: nextStatus,
+        failureCode: nextStatus === 'failed' ? 'PAYMENT_FAILED' : null,
+      },
+    })
     if (nextStatus === 'failed') {
       await failBookingPayment(payment.bookingId)
     }
@@ -185,7 +191,10 @@ export async function settlePaymentFromPaystack(
 
   const expectedAmount = payment.amountNGN * 100
   if (transaction.amount !== expectedAmount || transaction.currency !== 'NGN') {
-    await prisma.payment.update({ where: { reference }, data: { status: 'amount_mismatch' } })
+    await prisma.payment.update({
+      where: { reference },
+      data: { status: 'amount_mismatch', failureCode: 'PAYMENT_AMOUNT_MISMATCH' },
+    })
     await failBookingPayment(payment.bookingId)
     if (payment.status !== 'amount_mismatch') {
       await notifyPaymentIssue({
@@ -211,6 +220,8 @@ export async function settlePaymentFromPaystack(
       providerReference: transaction.reference ?? payment.providerReference,
       currencyCode: 'NGN',
       checkoutAmount: payment.amountNGN,
+      paidAt: new Date(),
+      failureCode: null,
     },
   })
 
