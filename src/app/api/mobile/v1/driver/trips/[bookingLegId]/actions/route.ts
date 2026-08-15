@@ -3,14 +3,19 @@ import { checkRateLimit, requestIp } from '@/lib/rateLimit'
 import { requireMobilePrincipal } from '@/lib/mobile/auth'
 import { mobileError, mobileErrorFromCode, mobileValidationError } from '@/lib/mobile/errors'
 import { applyDriverTripAction, isDriverTripAction } from '@/lib/mobile/tripTransitions'
+import { DRIVER_TRIP_ACTIONS } from '@/lib/tripLifecycle'
 
 export const runtime = 'nodejs'
 
 const schema = z.object({
-  action: z.enum(['accept', 'dispatch', 'complete', 'cancel']),
+  action: z.enum(DRIVER_TRIP_ACTIONS),
+  reasonCode: z.string().trim().max(80).optional(),
 })
 
-export async function POST(req: Request, { params }: { params: Promise<{ bookingLegId: string }> }) {
+export async function POST(
+  req: Request,
+  { params }: { params: Promise<{ bookingLegId: string }> }
+) {
   const guard = await requireMobilePrincipal(req, 'DRIVER')
   if (!guard.ok) return mobileErrorFromCode(guard.code ?? 'UNAUTHENTICATED')
   const { bookingLegId } = await params
@@ -22,13 +27,18 @@ export async function POST(req: Request, { params }: { params: Promise<{ booking
     windowMs: 15 * 60 * 1000,
   })
   if (!rateLimit.allowed) {
-    return mobileError('RATE_LIMITED', 'Too many trip action attempts', 429, { retryAfter: rateLimit.retryAfter })
+    return mobileError('RATE_LIMITED', 'Too many trip action attempts', 429, {
+      retryAfter: rateLimit.retryAfter,
+    })
   }
 
   const body = await req.json().catch(() => null)
   const parsed = schema.safeParse(body)
   if (!parsed.success || !isDriverTripAction(parsed.data.action)) {
-    return mobileValidationError('Invalid trip action', parsed.success ? undefined : parsed.error.flatten())
+    return mobileValidationError(
+      'Invalid trip action',
+      parsed.success ? undefined : parsed.error.flatten()
+    )
   }
 
   const result = await applyDriverTripAction({
@@ -36,6 +46,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ booking
     principal: guard.principal,
     bookingLegId,
     action: parsed.data.action,
+    reasonCode: parsed.data.reasonCode,
   })
   if (!result.ok) return mobileErrorFromCode(result.code, result.message)
 
@@ -44,5 +55,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ booking
     bookingLegId,
     previousStatus: result.previousStatus,
     status: result.nextStatus,
+    allowedActions: result.allowedActions,
+    idempotent: result.idempotent,
   })
 }

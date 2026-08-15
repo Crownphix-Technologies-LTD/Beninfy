@@ -3,11 +3,12 @@ import { z } from 'zod'
 import { requireAdminPermission } from '@/lib/admin'
 import { notifyBookingAssignmentChanged } from '@/lib/notifications'
 import { prisma } from '@/lib/prisma'
+import { BOOKING_LEG_STATUSES, NON_BLOCKING_LEG_STATUSES } from '@/lib/tripLifecycle'
 
 const patchSchema = z.object({
   fleetVehicleId: z.string().nullable().optional(),
   driverId: z.string().nullable().optional(),
-  status: z.enum(['payment_pending', 'reserved', 'unassigned', 'assigned', 'dispatched', 'completed', 'cancelled']).optional(),
+  status: z.enum(BOOKING_LEG_STATUSES).optional(),
   notes: z.string().nullable().optional(),
 })
 
@@ -25,7 +26,11 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const { id } = await params
   const body = await req.json().catch(() => null)
   const parsed = patchSchema.safeParse(body)
-  if (!parsed.success) return NextResponse.json({ error: 'Invalid input', issues: parsed.error.flatten() }, { status: 400 })
+  if (!parsed.success)
+    return NextResponse.json(
+      { error: 'Invalid input', issues: parsed.error.flatten() },
+      { status: 400 }
+    )
 
   const leg = await prisma.bookingLeg.findUnique({ where: { id } })
   if (!leg) return NextResponse.json({ error: 'Booking leg not found' }, { status: 404 })
@@ -34,9 +39,14 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const data = parsed.data
 
   if (data.fleetVehicleId) {
-    const fleetVehicle = await prisma.fleetVehicle.findUnique({ where: { id: data.fleetVehicleId } })
+    const fleetVehicle = await prisma.fleetVehicle.findUnique({
+      where: { id: data.fleetVehicleId },
+    })
     if (!fleetVehicle || fleetVehicle.vehicleId !== leg.vehicleId) {
-      return NextResponse.json({ error: 'Fleet vehicle does not match the booked vehicle type' }, { status: 400 })
+      return NextResponse.json(
+        { error: 'Fleet vehicle does not match the booked vehicle type' },
+        { status: 400 }
+      )
     }
     if (fleetVehicle.status !== 'available') {
       return NextResponse.json({ error: 'Fleet vehicle is not available' }, { status: 409 })
@@ -46,10 +56,14 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         id: { not: id },
         fleetVehicleId: data.fleetVehicleId,
         departureDate: { gte: startsAt, lte: endsAt },
-        status: { notIn: ['payment_pending', 'cancelled', 'completed'] },
+        status: { notIn: NON_BLOCKING_LEG_STATUSES },
       },
     })
-    if (conflict) return NextResponse.json({ error: 'Fleet vehicle is already assigned on this date' }, { status: 409 })
+    if (conflict)
+      return NextResponse.json(
+        { error: 'Fleet vehicle is already assigned on this date' },
+        { status: 409 }
+      )
   }
 
   if (data.driverId) {
@@ -62,18 +76,28 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         id: { not: id },
         driverId: data.driverId,
         departureDate: { gte: startsAt, lte: endsAt },
-        status: { notIn: ['payment_pending', 'cancelled', 'completed'] },
+        status: { notIn: NON_BLOCKING_LEG_STATUSES },
       },
     })
-    if (conflict) return NextResponse.json({ error: 'Driver is already assigned on this date' }, { status: 409 })
+    if (conflict)
+      return NextResponse.json(
+        { error: 'Driver is already assigned on this date' },
+        { status: 409 }
+      )
   }
 
+  const now = new Date()
+  const nextStatus = data.status ?? (data.fleetVehicleId || data.driverId ? 'assigned' : undefined)
   const bookingLeg = await prisma.bookingLeg.update({
     where: { id },
     data: {
       fleetVehicleId: data.fleetVehicleId,
       driverId: data.driverId,
-      status: data.status ?? (data.fleetVehicleId || data.driverId ? 'assigned' : undefined),
+      status: nextStatus,
+      assignedAt: data.driverId || nextStatus === 'assigned' ? (leg.assignedAt ?? now) : undefined,
+      completedAt: nextStatus === 'completed' ? (leg.completedAt ?? now) : undefined,
+      cancelledAt: nextStatus === 'cancelled' ? (leg.cancelledAt ?? now) : undefined,
+      cancelledBy: nextStatus === 'cancelled' ? 'admin' : undefined,
       notes: data.notes,
     },
     include: {
@@ -89,6 +113,24 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     data.notes !== undefined
   ) {
     await notifyBookingAssignmentChanged(bookingLeg.id)
+  }
+
+  if (bookingLeg.status === 'completed') {
+    const incompleteLegs = await prisma.bookingLeg.count({
+      where: {
+        bookingId: bookingLeg.bookingId,
+        status: { not: 'completed' },
+      },
+    })
+    if (incompleteLegs === 0) {
+      await prisma.booking.updateMany({
+        where: {
+          id: bookingLeg.bookingId,
+          status: { notIn: ['cancelled', 'completed'] },
+        },
+        data: { status: 'completed' },
+      })
+    }
   }
 
   return NextResponse.json({ bookingLeg })

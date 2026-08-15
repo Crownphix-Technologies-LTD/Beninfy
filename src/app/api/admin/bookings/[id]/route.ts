@@ -17,6 +17,12 @@ function legStatusForBookingStatus(status: z.infer<typeof patchSchema>['status']
   return 'payment_pending'
 }
 
+function legTimestampData(status: z.infer<typeof patchSchema>['status'], now: Date) {
+  if (status === 'cancelled') return { cancelledAt: now, cancelledBy: 'admin' }
+  if (status === 'completed') return { completedAt: now }
+  return {}
+}
+
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const guard = await requireAdminPermission('bookings')
   if (!guard.ok) return guard.response
@@ -26,6 +32,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   if (!parsed.success) return NextResponse.json({ error: 'Invalid input' }, { status: 400 })
   const current = await prisma.booking.findUnique({ where: { id }, select: { status: true } })
   if (!current) return NextResponse.json({ error: 'Booking not found' }, { status: 404 })
+  const now = new Date()
   const booking = await prisma.booking.update({
     where: { id },
     data: {
@@ -33,7 +40,10 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       legs: {
         updateMany: {
           where: {},
-          data: { status: legStatusForBookingStatus(parsed.data.status) },
+          data: {
+            status: legStatusForBookingStatus(parsed.data.status),
+            ...legTimestampData(parsed.data.status, now),
+          },
         },
       },
     },
@@ -61,7 +71,15 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
   const { id } = await params
   const booking = await prisma.booking.findUnique({
     where: { id },
-    select: { id: true, from: true, to: true, date: true, status: true, priceNGN: true, passengerEmail: true },
+    select: {
+      id: true,
+      from: true,
+      to: true,
+      date: true,
+      status: true,
+      priceNGN: true,
+      passengerEmail: true,
+    },
   })
   await prisma.payment.deleteMany({ where: { bookingId: id } })
   await prisma.booking.delete({ where: { id } })

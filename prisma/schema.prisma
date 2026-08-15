@@ -228,6 +228,18 @@ model BookingLeg {
   driverId        String?
   driver          Driver? @relation(fields: [driverId], references: [id])
   status          String   @default("unassigned")
+  assignedAt      DateTime?
+  acceptedAt      DateTime?
+  declinedAt      DateTime?
+  enRouteAt       DateTime?
+  arrivedAt       DateTime?
+  passengerOnboardAt DateTime?
+  startedAt       DateTime?
+  completedAt     DateTime?
+  cancelledAt     DateTime?
+  cancelledBy     String?
+  cancellationReasonCode String?
+  declineReasonCode String?
   notes           String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt

@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/prisma'
 import type { Prisma } from '@prisma/client'
+import { NON_BLOCKING_LEG_STATUSES } from '@/lib/tripLifecycle'
 
 type PrismaClientLike = typeof prisma | Prisma.TransactionClient
 
@@ -10,8 +11,6 @@ function dayWindow(date: Date) {
   endsAt.setHours(23, 59, 59, 999)
   return { startsAt, endsAt }
 }
-
-const NON_BLOCKING_LEG_STATUSES = ['payment_pending', 'cancelled', 'completed']
 
 export async function getAvailableFleetVehicleCount(
   vehicleId: string,
@@ -100,11 +99,19 @@ export async function assertFleetVehicleAvailable(
   })
 
   if (!fleetVehicle || fleetVehicle.vehicleId !== vehicleId) {
-    return { ok: false as const, status: 400, error: 'Selected fleet unit does not belong to this vehicle category.' }
+    return {
+      ok: false as const,
+      status: 400,
+      error: 'Selected fleet unit does not belong to this vehicle category.',
+    }
   }
 
   if (fleetVehicle.status !== 'available') {
-    return { ok: false as const, status: 409, error: `${fleetVehicle.label} is not available for booking.` }
+    return {
+      ok: false as const,
+      status: 409,
+      error: `${fleetVehicle.label} is not available for booking.`,
+    }
   }
 
   for (const date of dates) {
@@ -117,7 +124,11 @@ export async function assertFleetVehicleAvailable(
       },
     })
     if (blocked > 0) {
-      return { ok: false as const, status: 409, error: `${fleetVehicle.label} is blocked on ${date.toISOString().slice(0, 10)}.` }
+      return {
+        ok: false as const,
+        status: 409,
+        error: `${fleetVehicle.label} is blocked on ${date.toISOString().slice(0, 10)}.`,
+      }
     }
 
     const booked = await client.bookingLeg.count({
@@ -128,17 +139,26 @@ export async function assertFleetVehicleAvailable(
       },
     })
     if (booked > 0) {
-      return { ok: false as const, status: 409, error: `${fleetVehicle.label} is already booked on ${date.toISOString().slice(0, 10)}.` }
+      return {
+        ok: false as const,
+        status: 409,
+        error: `${fleetVehicle.label} is already booked on ${date.toISOString().slice(0, 10)}.`,
+      }
     }
   }
 
   return { ok: true as const, fleetVehicle }
 }
 
-export async function assertVehicleTypeAvailable(vehicleId: string, dates: Date[], client: PrismaClientLike = prisma) {
+export async function assertVehicleTypeAvailable(
+  vehicleId: string,
+  dates: Date[],
+  client: PrismaClientLike = prisma
+) {
   const vehicle = await client.vehicle.findUnique({ where: { id: vehicleId } })
   if (!vehicle) return { ok: false as const, status: 404, error: 'Vehicle not found' }
-  if (!vehicle.available) return { ok: false as const, status: 409, error: 'Vehicle type is unavailable for booking' }
+  if (!vehicle.available)
+    return { ok: false as const, status: 409, error: 'Vehicle type is unavailable for booking' }
 
   for (const date of dates) {
     const availability = await getAvailableFleetVehicleCount(vehicleId, date, client)

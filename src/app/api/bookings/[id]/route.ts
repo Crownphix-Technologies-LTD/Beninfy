@@ -26,9 +26,22 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
   if (booking.status === 'completed') {
     return NextResponse.json({ error: 'Cannot cancel a completed booking' }, { status: 409 })
   }
+  const now = new Date()
   const updated = await prisma.booking.update({
     where: { id },
-    data: { status: 'cancelled' },
+    data: {
+      status: 'cancelled',
+      legs: {
+        updateMany: {
+          where: { status: { notIn: ['completed', 'cancelled'] } },
+          data: {
+            status: 'cancelled',
+            cancelledAt: now,
+            cancelledBy: 'customer',
+          },
+        },
+      },
+    },
   })
   return NextResponse.json({ booking: updated })
 }

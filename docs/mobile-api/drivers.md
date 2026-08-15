@@ -30,19 +30,14 @@ Do not run the migration against production until staging data and driver onboar
 
 ## Planned Endpoints
 
-| Endpoint | Status | Notes |
-| --- | --- | --- |
-| `GET /api/mobile/v1/driver/profile` | IMPLEMENTED | Derived from authenticated driver principal. |
-| `GET /api/mobile/v1/driver/trips` | IMPLEMENTED | Assigned `BookingLeg` records only. |
-| `GET /api/mobile/v1/driver/trips/:bookingLegId` | IMPLEMENTED | Own assigned leg only. |
-| `POST /api/mobile/v1/driver/trips/:bookingLegId/actions` | IMPLEMENTED | Minimal server-authoritative lifecycle transitions. |
-| `POST /api/mobile/v1/driver/location` | PLANNED | Not in Phase 2. |
+| Endpoint                                                 | Status      | Notes                                                  |
+| -------------------------------------------------------- | ----------- | ------------------------------------------------------ |
+| `GET /api/mobile/v1/driver/profile`                      | IMPLEMENTED | Derived from authenticated driver principal.           |
+| `GET /api/mobile/v1/driver/trips`                        | IMPLEMENTED | Assigned `BookingLeg` records only.                    |
+| `GET /api/mobile/v1/driver/trips/:bookingLegId`          | IMPLEMENTED | Own assigned leg only.                                 |
+| `POST /api/mobile/v1/driver/trips/:bookingLegId/actions` | IMPLEMENTED | Production server-authoritative lifecycle transitions. |
+| `POST /api/mobile/v1/driver/location`                    | PLANNED     | Not in Phase 3.                                        |
 
 Driver requests must never succeed simply because the client supplied a `driverId`.
 
-Implemented actions:
-
-- `accept`: `reserved` or `unassigned` -> `assigned`
-- `dispatch`: `assigned` -> `dispatched`, requires assigned fleet vehicle
-- `complete`: `dispatched` -> `completed`, requires assigned fleet vehicle
-- `cancel`: `reserved`, `unassigned`, `assigned`, or `dispatched` -> `cancelled`
+Implemented actions are documented in `trip-lifecycle.md`. Driver `decline` and `cancel` release the driver assignment and return the leg to operations; they do not cancel the customer booking.

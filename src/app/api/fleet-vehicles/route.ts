@@ -2,8 +2,7 @@ import { NextResponse } from 'next/server'
 import type { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { getFleetVehicleDisplayLabel } from '@/lib/fleetDisplay'
-
-const NON_BLOCKING_LEG_STATUSES = ['payment_pending', 'cancelled', 'completed']
+import { NON_BLOCKING_LEG_STATUSES } from '@/lib/tripLifecycle'
 
 function parseTripDate(value: string | null) {
   if (!value) return null
@@ -133,7 +132,8 @@ export async function GET(req: Request) {
     },
     {
       headers: {
-        'Cache-Control': datesToCheck.length > 0 ? 'no-store' : 'public, s-maxage=60, stale-while-revalidate=600',
+        'Cache-Control':
+          datesToCheck.length > 0 ? 'no-store' : 'public, s-maxage=60, stale-while-revalidate=600',
       },
     }
   )
