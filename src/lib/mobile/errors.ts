@@ -12,6 +12,9 @@ export type MobileErrorCode =
   | 'TRIP_NOT_FOUND'
   | 'TRIP_NOT_ASSIGNED'
   | 'TRIP_NOT_AVAILABLE'
+  | 'TRIP_ALREADY_COMPLETED'
+  | 'TRIP_TERMINAL'
+  | 'ACTION_NOT_ALLOWED'
   | 'INVALID_TRANSITION'
   | 'PAYMENT_REQUIRED'
   | 'DRIVER_NOT_ASSIGNED'
@@ -31,7 +34,7 @@ export function mobileError(
   code: MobileErrorCode,
   message: string,
   status: number,
-  details?: unknown,
+  details?: unknown
 ) {
   const body: MobileErrorBody = {
     error: {
@@ -67,7 +70,11 @@ export function mobileErrorFromCode(code: MobileErrorCode, message?: string) {
     case 'ACCOUNT_DISABLED':
       return mobileError(code, message ?? 'This account is disabled', 403)
     case 'DRIVER_NOT_LINKED':
-      return mobileError(code, message ?? 'Driver account is not linked to an operational driver record', 403)
+      return mobileError(
+        code,
+        message ?? 'Driver account is not linked to an operational driver record',
+        403
+      )
     case 'DRIVER_INACTIVE':
       return mobileError(code, message ?? 'Driver account is not active', 403)
     case 'BOOKING_NOT_FOUND':
@@ -78,6 +85,12 @@ export function mobileErrorFromCode(code: MobileErrorCode, message?: string) {
       return mobileError(code, message ?? 'Trip is not assigned to this driver', 403)
     case 'TRIP_NOT_AVAILABLE':
       return mobileError(code, message ?? 'Trip is not available', 409)
+    case 'TRIP_ALREADY_COMPLETED':
+      return mobileError(code, message ?? 'Trip is already completed', 409)
+    case 'TRIP_TERMINAL':
+      return mobileError(code, message ?? 'Trip is already terminal', 409)
+    case 'ACTION_NOT_ALLOWED':
+      return mobileError(code, message ?? 'Trip action is not allowed', 409)
     case 'INVALID_TRANSITION':
       return mobileError(code, message ?? 'Trip transition is not allowed', 409)
     case 'PAYMENT_REQUIRED':

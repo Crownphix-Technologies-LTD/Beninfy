@@ -1,72 +1,69 @@
-import { prisma } from '@/lib/prisma'
+import { Prisma } from '@prisma/client'
 import { writeAuditLog } from '@/lib/auditLog'
+import type { MobileErrorCode } from '@/lib/mobile/errors'
 import type { MobilePrincipal } from '@/lib/mobile/auth'
+import { prisma } from '@/lib/prisma'
+import {
+  DRIVER_ACTION_TRANSITIONS,
+  type DriverTripAction,
+  allowedDriverTripActions,
+  evaluateDriverTripTransition,
+  isDriverTripAction,
+  shouldCompleteBooking,
+} from '@/lib/tripLifecycle'
 
-export type DriverTripAction = 'accept' | 'dispatch' | 'complete' | 'cancel'
+export { evaluateDriverTripTransition, isDriverTripAction, type DriverTripAction }
 
 type TransitionResult =
-  | { ok: true; previousStatus: string; nextStatus: string }
   | {
-      ok: false
-      code:
-        | 'TRIP_NOT_FOUND'
-        | 'TRIP_NOT_ASSIGNED'
-        | 'DRIVER_INACTIVE'
-        | 'VEHICLE_NOT_ASSIGNED'
-        | 'INVALID_TRANSITION'
-      message: string
+      ok: true
+      previousStatus: string
+      nextStatus: string
+      allowedActions: DriverTripAction[]
+      idempotent: boolean
+      event: {
+        type: 'booking_leg_transition'
+        bookingId: string
+        bookingLegId: string
+        action: DriverTripAction
+        previousStatus: string
+        nextStatus: string
+        actorType: 'driver'
+        actorId: string
+        driverId: string
+      }
     }
+  | { ok: false; code: MobileErrorCode; message: string }
 
-const TERMINAL_STATUSES = new Set(['completed', 'cancelled'])
+type LifecycleTimestampField =
+  | 'acceptedAt'
+  | 'declinedAt'
+  | 'enRouteAt'
+  | 'arrivedAt'
+  | 'passengerOnboardAt'
+  | 'startedAt'
+  | 'completedAt'
+  | 'cancelledAt'
 
-const NEXT_STATUS_BY_ACTION: Record<
-  DriverTripAction,
-  { from: string[]; to: string; vehicleRequired?: boolean }
-> = {
-  accept: { from: ['reserved', 'unassigned'], to: 'assigned' },
-  dispatch: { from: ['assigned'], to: 'dispatched', vehicleRequired: true },
-  complete: { from: ['dispatched'], to: 'completed', vehicleRequired: true },
-  cancel: { from: ['reserved', 'unassigned', 'assigned', 'dispatched'], to: 'cancelled' },
+function timestampData(field: LifecycleTimestampField | undefined, now: Date) {
+  return field ? { [field]: now } : {}
 }
 
-export function isDriverTripAction(value: string): value is DriverTripAction {
-  return value in NEXT_STATUS_BY_ACTION
-}
+async function syncBookingCompletion(bookingId: string, tx: Prisma.TransactionClient) {
+  const legs = await tx.bookingLeg.findMany({
+    where: { bookingId },
+    select: { status: true },
+  })
+  if (!shouldCompleteBooking(legs.map((leg) => leg.status))) return false
 
-export function evaluateDriverTripTransition({
-  status,
-  action,
-  hasFleetVehicle,
-}: {
-  status: string
-  action: DriverTripAction
-  hasFleetVehicle: boolean
-}) {
-  if (TERMINAL_STATUSES.has(status)) {
-    return {
-      ok: false as const,
-      code: 'INVALID_TRANSITION' as const,
-      message: 'Trip is already in a terminal state',
-    }
-  }
-
-  const transition = NEXT_STATUS_BY_ACTION[action]
-  if (!transition.from.includes(status)) {
-    return {
-      ok: false as const,
-      code: 'INVALID_TRANSITION' as const,
-      message: `Cannot ${action} a trip with status ${status}`,
-    }
-  }
-  if (transition.vehicleRequired && !hasFleetVehicle) {
-    return {
-      ok: false as const,
-      code: 'VEHICLE_NOT_ASSIGNED' as const,
-      message: 'A fleet vehicle must be assigned first',
-    }
-  }
-
-  return { ok: true as const, nextStatus: transition.to }
+  await tx.booking.updateMany({
+    where: {
+      id: bookingId,
+      status: { notIn: ['cancelled', 'completed'] },
+    },
+    data: { status: 'completed' },
+  })
+  return true
 }
 
 export async function applyDriverTripAction({
@@ -74,16 +71,24 @@ export async function applyDriverTripAction({
   principal,
   bookingLegId,
   action,
+  reasonCode,
 }: {
   req: Request
   principal: MobilePrincipal
   bookingLegId: string
   action: DriverTripAction
+  reasonCode?: string | null
 }): Promise<TransitionResult> {
   const leg = await prisma.bookingLeg.findUnique({
     where: { id: bookingLegId },
     include: {
       driver: true,
+      booking: {
+        select: {
+          id: true,
+          status: true,
+        },
+      },
     },
   })
   if (!leg) return { ok: false, code: 'TRIP_NOT_FOUND', message: 'Trip not found' }
@@ -93,35 +98,150 @@ export async function applyDriverTripAction({
   if (!leg.driver || leg.driver.status !== 'available') {
     return { ok: false, code: 'DRIVER_INACTIVE', message: 'Driver is not active' }
   }
+
+  if (action === 'accept' && leg.status === 'assigned' && leg.acceptedAt) {
+    return {
+      ok: true,
+      previousStatus: leg.status,
+      nextStatus: leg.status,
+      allowedActions: allowedDriverTripActions({
+        status: leg.status,
+        hasDriver: Boolean(leg.driverId),
+        hasFleetVehicle: Boolean(leg.fleetVehicleId),
+        bookingStatus: leg.booking.status,
+      }),
+      idempotent: true,
+      event: {
+        type: 'booking_leg_transition',
+        bookingId: leg.bookingId,
+        bookingLegId: leg.id,
+        action,
+        previousStatus: leg.status,
+        nextStatus: leg.status,
+        actorType: 'driver',
+        actorId: principal.userId,
+        driverId: principal.driverId,
+      },
+    }
+  }
+
   const transition = evaluateDriverTripTransition({
     status: leg.status,
     action,
+    hasDriver: Boolean(leg.driverId),
     hasFleetVehicle: Boolean(leg.fleetVehicleId),
+    bookingStatus: leg.booking.status,
   })
   if (!transition.ok) return transition
 
-  const transitionRule = NEXT_STATUS_BY_ACTION[action]
-  const update = await prisma.bookingLeg.updateMany({
-    where: {
-      id: leg.id,
-      driverId: principal.driverId,
-      status: { in: transitionRule.from },
-      ...(transitionRule.vehicleRequired ? { fleetVehicleId: { not: null } } : {}),
+  if (transition.idempotent) {
+    return {
+      ok: true,
+      previousStatus: leg.status,
+      nextStatus: leg.status,
+      allowedActions: allowedDriverTripActions({
+        status: leg.status,
+        hasDriver: Boolean(leg.driverId),
+        hasFleetVehicle: Boolean(leg.fleetVehicleId),
+        bookingStatus: leg.booking.status,
+      }),
+      idempotent: true,
+      event: {
+        type: 'booking_leg_transition',
+        bookingId: leg.bookingId,
+        bookingLegId: leg.id,
+        action,
+        previousStatus: leg.status,
+        nextStatus: leg.status,
+        actorType: 'driver',
+        actorId: principal.userId,
+        driverId: principal.driverId,
+      },
+    }
+  }
+
+  const rule = DRIVER_ACTION_TRANSITIONS[action]
+  const now = new Date()
+  const updateData: Prisma.BookingLegUpdateManyMutationInput = {
+    status: transition.nextStatus,
+    ...timestampData(transition.timestampField, now),
+    ...(transition.releaseDriver
+      ? {
+          driverId: null,
+          declineReasonCode: reasonCode || undefined,
+        }
+      : {}),
+  }
+
+  const update = await prisma.$transaction(
+    async (tx) => {
+      const changed = await tx.bookingLeg.updateMany({
+        where: {
+          id: leg.id,
+          driverId: principal.driverId,
+          status: { in: rule.from },
+          ...(rule.vehicleRequired ? { fleetVehicleId: { not: null } } : {}),
+          ...(rule.bookingConfirmedRequired
+            ? { booking: { is: { status: { in: ['confirmed', 'completed'] } } } }
+            : {}),
+        },
+        data: updateData,
+      })
+
+      if (changed.count !== 1) return { changed: false as const, completedBooking: false }
+      const completedBooking =
+        transition.nextStatus === 'completed'
+          ? await syncBookingCompletion(leg.bookingId, tx)
+          : false
+      return { changed: true as const, completedBooking }
     },
-    data: { status: transition.nextStatus },
-  })
-  if (update.count !== 1) {
+    { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+  )
+
+  if (!update.changed) {
     const current = await prisma.bookingLeg.findUnique({
       where: { id: leg.id },
-      select: { status: true, fleetVehicleId: true },
+      select: {
+        status: true,
+        fleetVehicleId: true,
+        driverId: true,
+        booking: { select: { status: true } },
+      },
     })
     if (!current) return { ok: false, code: 'TRIP_NOT_FOUND', message: 'Trip not found' }
     const currentTransition = evaluateDriverTripTransition({
       status: current.status,
       action,
+      hasDriver: Boolean(current.driverId),
       hasFleetVehicle: Boolean(current.fleetVehicleId),
+      bookingStatus: current.booking.status,
     })
     if (!currentTransition.ok) return currentTransition
+    if (currentTransition.idempotent) {
+      return {
+        ok: true,
+        previousStatus: current.status,
+        nextStatus: current.status,
+        allowedActions: allowedDriverTripActions({
+          status: current.status,
+          hasDriver: Boolean(current.driverId),
+          hasFleetVehicle: Boolean(current.fleetVehicleId),
+          bookingStatus: current.booking.status,
+        }),
+        idempotent: true,
+        event: {
+          type: 'booking_leg_transition',
+          bookingId: leg.bookingId,
+          bookingLegId: leg.id,
+          action,
+          previousStatus: current.status,
+          nextStatus: current.status,
+          actorType: 'driver',
+          actorId: principal.userId,
+          driverId: principal.driverId,
+        },
+      }
+    }
     return {
       ok: false,
       code: 'INVALID_TRANSITION',
@@ -142,11 +262,38 @@ export async function applyDriverTripAction({
     entityType: 'BookingLeg',
     entityId: leg.id,
     metadata: {
+      actorType: 'driver',
+      actorId: principal.userId,
       driverId: principal.driverId,
+      bookingId: leg.bookingId,
       previousStatus: leg.status,
       nextStatus: transition.nextStatus,
+      reasonCode: reasonCode || null,
+      bookingCompleted: update.completedBooking,
     },
   })
 
-  return { ok: true, previousStatus: leg.status, nextStatus: transition.nextStatus }
+  return {
+    ok: true,
+    previousStatus: leg.status,
+    nextStatus: transition.nextStatus,
+    allowedActions: allowedDriverTripActions({
+      status: transition.nextStatus,
+      hasDriver: !transition.releaseDriver,
+      hasFleetVehicle: Boolean(leg.fleetVehicleId),
+      bookingStatus: update.completedBooking ? 'completed' : leg.booking.status,
+    }),
+    idempotent: false,
+    event: {
+      type: 'booking_leg_transition',
+      bookingId: leg.bookingId,
+      bookingLegId: leg.id,
+      action,
+      previousStatus: leg.status,
+      nextStatus: transition.nextStatus,
+      actorType: 'driver',
+      actorId: principal.userId,
+      driverId: principal.driverId,
+    },
+  }
 }

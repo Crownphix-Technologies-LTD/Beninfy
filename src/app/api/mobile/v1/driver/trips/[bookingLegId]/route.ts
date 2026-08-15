@@ -17,6 +17,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ bookingL
       fleetVehicle: true,
       booking: {
         select: {
+          status: true,
           passengerName: true,
           passengerPhone: true,
           pickupAddress: true,

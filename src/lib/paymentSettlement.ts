@@ -1,7 +1,6 @@
 import { prisma } from '@/lib/prisma'
 import { Prisma } from '@prisma/client'
-
-const ACTIVE_LEG_STATUSES = ['reserved', 'unassigned', 'assigned', 'dispatched']
+import { ACTIVE_BLOCKING_LEG_STATUSES } from '@/lib/tripLifecycle'
 
 function dayWindow(date: Date) {
   const startsAt = new Date(date)
@@ -97,7 +96,7 @@ export async function markPaymentPaidAndReserveBooking({
               bookingId: { not: bookingId },
               fleetVehicleId: leg.fleetVehicleId,
               departureDate: { gte: startsAt, lte: endsAt },
-              status: { in: ACTIVE_LEG_STATUSES },
+              status: { in: ACTIVE_BLOCKING_LEG_STATUSES },
             },
             select: { id: true },
           })
@@ -196,6 +195,7 @@ export async function markPaymentPaidAndReserveBooking({
 }
 
 export function failBookingPayment(bookingId: string) {
+  const now = new Date()
   return prisma.$transaction([
     prisma.booking.updateMany({
       where: {
@@ -213,6 +213,8 @@ export function failBookingPayment(bookingId: string) {
       },
       data: {
         status: 'cancelled',
+        cancelledAt: now,
+        cancelledBy: 'system',
       },
     }),
   ])

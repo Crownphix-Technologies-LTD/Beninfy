@@ -14,7 +14,10 @@ export async function GET(req: Request) {
   if (!guard.principal.driverId) return mobileErrorFromCode('DRIVER_NOT_LINKED')
 
   const url = new URL(req.url)
-  const limit = Math.min(MAX_LIMIT, Math.max(1, Number(url.searchParams.get('limit') ?? DEFAULT_LIMIT)))
+  const limit = Math.min(
+    MAX_LIMIT,
+    Math.max(1, Number(url.searchParams.get('limit') ?? DEFAULT_LIMIT))
+  )
   const cursor = url.searchParams.get('cursor') || undefined
 
   const trips = await prisma.bookingLeg.findMany({
@@ -26,6 +29,7 @@ export async function GET(req: Request) {
       fleetVehicle: true,
       booking: {
         select: {
+          status: true,
           passengerName: true,
           passengerPhone: true,
           pickupAddress: true,
@@ -41,7 +45,7 @@ export async function GET(req: Request) {
     trips: page.map(toDriverTripSummaryDto),
     pageInfo: {
       hasMore,
-      nextCursor: hasMore ? page[page.length - 1]?.id ?? null : null,
+      nextCursor: hasMore ? (page[page.length - 1]?.id ?? null) : null,
     },
   })
 }

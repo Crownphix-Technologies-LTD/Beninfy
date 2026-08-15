@@ -1,3 +1,12 @@
+import {
+  type CustomerLegState,
+  type DriverLegState,
+  type DriverTripAction,
+  allowedDriverTripActions,
+  customerLegState,
+  driverLegState,
+} from '@/lib/tripLifecycle'
+
 export type MobileBookingStatus = 'pending' | 'confirmed' | 'ops_review' | 'cancelled' | 'completed'
 
 export type MobileBookingLegStatus =
@@ -6,6 +15,10 @@ export type MobileBookingLegStatus =
   | 'unassigned'
   | 'assigned'
   | 'dispatched'
+  | 'driver_en_route'
+  | 'driver_arrived'
+  | 'passenger_onboard'
+  | 'in_progress'
   | 'completed'
   | 'cancelled'
 
@@ -43,6 +56,7 @@ export type BookingLegDto = {
   to: string
   departureDate: string
   status: MobileBookingLegStatus
+  customerStatus: CustomerLegState
   vehicleCategoryId: string
   fleetVehicle: FleetVehicleDto | null
   driver: DriverProfileDto | null
@@ -81,6 +95,8 @@ export type DriverTripSummaryDto = {
   to: string
   departureDate: string
   status: MobileBookingLegStatus
+  driverStatus: DriverLegState
+  allowedActions: DriverTripAction[]
   passengerName: string | null
   passengerPhone: string | null
   pickupAddress: string | null
@@ -92,6 +108,17 @@ export type DriverTripDetailDto = DriverTripSummaryDto & {
   passengers: number
   travelers: unknown
   specialRequirements: string | null
+  timestamps: {
+    assignedAt: string | null
+    acceptedAt: string | null
+    declinedAt: string | null
+    enRouteAt: string | null
+    arrivedAt: string | null
+    passengerOnboardAt: string | null
+    startedAt: string | null
+    completedAt: string | null
+    cancelledAt: string | null
+  }
 }
 
 export type PaymentDto = {
@@ -110,6 +137,7 @@ export type PaymentDto = {
 export type TripTrackingDto = {
   legId: string
   status: MobileBookingLegStatus
+  customerStatus: CustomerLegState
   lastKnownLocation: {
     latitude: number
     longitude: number
@@ -228,6 +256,7 @@ export function toBookingLegDto(leg: {
     to: leg.to,
     departureDate: toIso(leg.departureDate),
     status: leg.status as MobileBookingLegStatus,
+    customerStatus: customerLegState(leg.status),
     vehicleCategoryId: leg.vehicleId,
     fleetVehicle: leg.fleetVehicle ? toFleetVehicleDto(leg.fleetVehicle) : null,
     driver: leg.driver ? toDriverProfileDto(leg.driver) : null,
@@ -261,19 +290,21 @@ export function toCustomerBookingSummaryDto(booking: {
     passengers: booking.passengers,
     status: booking.status as MobileBookingStatus,
     priceNGN: booking.priceNGN,
-    paymentStatus: latestPayment ? latestPayment.status as MobilePaymentStatus : null,
+    paymentStatus: latestPayment ? (latestPayment.status as MobilePaymentStatus) : null,
   }
 }
 
-export function toCustomerBookingDetailDto(booking: Parameters<typeof toCustomerBookingSummaryDto>[0] & {
-  pickupAddress: string | null
-  dropoffAddress: string | null
-  passengerName: string | null
-  passengerEmail: string | null
-  passengerPhone: string | null
-  legs: Parameters<typeof toBookingLegDto>[0][]
-  payments: Parameters<typeof toPaymentDto>[0][]
-}): CustomerBookingDetailDto {
+export function toCustomerBookingDetailDto(
+  booking: Parameters<typeof toCustomerBookingSummaryDto>[0] & {
+    pickupAddress: string | null
+    dropoffAddress: string | null
+    passengerName: string | null
+    passengerEmail: string | null
+    passengerPhone: string | null
+    legs: Parameters<typeof toBookingLegDto>[0][]
+    payments: Parameters<typeof toPaymentDto>[0][]
+  }
+): CustomerBookingDetailDto {
   return {
     ...toCustomerBookingSummaryDto(booking),
     pickupAddress: booking.pickupAddress,
@@ -294,8 +325,10 @@ export function toDriverTripSummaryDto(leg: {
   to: string
   departureDate: Dateish
   status: string
+  driverId?: string | null
   fleetVehicle: Parameters<typeof toFleetVehicleDto>[0] | null
   booking: {
+    status?: string
     passengerName: string | null
     passengerPhone: string | null
     pickupAddress: string | null
@@ -311,6 +344,13 @@ export function toDriverTripSummaryDto(leg: {
     to: leg.to,
     departureDate: toIso(leg.departureDate),
     status: leg.status as MobileBookingLegStatus,
+    driverStatus: driverLegState(leg.status),
+    allowedActions: allowedDriverTripActions({
+      status: leg.status,
+      hasDriver: Boolean(leg.driverId),
+      hasFleetVehicle: Boolean(leg.fleetVehicle),
+      bookingStatus: leg.booking.status ?? 'confirmed',
+    }),
     passengerName: leg.booking.passengerName,
     passengerPhone: leg.booking.passengerPhone,
     pickupAddress: leg.booking.pickupAddress,
@@ -319,17 +359,39 @@ export function toDriverTripSummaryDto(leg: {
   }
 }
 
-export function toDriverTripDetailDto(leg: Parameters<typeof toDriverTripSummaryDto>[0] & {
-  booking: Parameters<typeof toDriverTripSummaryDto>[0]['booking'] & {
-    passengers: number
-    travelers: unknown
-    specialRequirements: string | null
+export function toDriverTripDetailDto(
+  leg: Parameters<typeof toDriverTripSummaryDto>[0] & {
+    assignedAt?: Dateish | null
+    acceptedAt?: Dateish | null
+    declinedAt?: Dateish | null
+    enRouteAt?: Dateish | null
+    arrivedAt?: Dateish | null
+    passengerOnboardAt?: Dateish | null
+    startedAt?: Dateish | null
+    completedAt?: Dateish | null
+    cancelledAt?: Dateish | null
+    booking: Parameters<typeof toDriverTripSummaryDto>[0]['booking'] & {
+      passengers: number
+      travelers: unknown
+      specialRequirements: string | null
+    }
   }
-}): DriverTripDetailDto {
+): DriverTripDetailDto {
   return {
     ...toDriverTripSummaryDto(leg),
     passengers: leg.booking.passengers,
     travelers: leg.booking.travelers,
     specialRequirements: leg.booking.specialRequirements,
+    timestamps: {
+      assignedAt: leg.assignedAt ? toIso(leg.assignedAt) : null,
+      acceptedAt: leg.acceptedAt ? toIso(leg.acceptedAt) : null,
+      declinedAt: leg.declinedAt ? toIso(leg.declinedAt) : null,
+      enRouteAt: leg.enRouteAt ? toIso(leg.enRouteAt) : null,
+      arrivedAt: leg.arrivedAt ? toIso(leg.arrivedAt) : null,
+      passengerOnboardAt: leg.passengerOnboardAt ? toIso(leg.passengerOnboardAt) : null,
+      startedAt: leg.startedAt ? toIso(leg.startedAt) : null,
+      completedAt: leg.completedAt ? toIso(leg.completedAt) : null,
+      cancelledAt: leg.cancelledAt ? toIso(leg.cancelledAt) : null,
+    },
   }
 }
