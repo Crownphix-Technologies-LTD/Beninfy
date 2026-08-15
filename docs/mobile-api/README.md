@@ -40,6 +40,9 @@ Additional references:
 - `api-readiness.md`
 - `routes.md`
 - `pricing.md`
+- `coupons.md`
+- `cancellations.md`
+- `settings.md`
 - `cors.md`
 - `phase-2-migration.md`
 - `staging-environment.md`

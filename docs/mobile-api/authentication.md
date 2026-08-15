@@ -29,6 +29,7 @@ Refresh token:
 | `POST /api/mobile/v1/auth/login`            | IMPLEMENTED | PUBLIC customer or driver login             |
 | `POST /api/mobile/v1/auth/refresh`          | IMPLEMENTED | PUBLIC with valid refresh token             |
 | `POST /api/mobile/v1/auth/logout`           | IMPLEMENTED | Refresh token revocation                    |
+| `POST /api/mobile/v1/auth/logout-all`       | IMPLEMENTED | Revoke all mobile sessions for principal    |
 | `GET /api/mobile/v1/auth/me`                | IMPLEMENTED | CUSTOMER or DRIVER                          |
 | `POST /api/mobile/v1/auth/onboarding/phone` | IMPLEMENTED | CUSTOMER collects phone and sends email OTP |
 | `POST /api/mobile/v1/auth/email/send-otp`   | IMPLEMENTED | CUSTOMER resend email OTP                   |
@@ -86,6 +87,41 @@ Reset links use a single-use hashed token. A successful reset updates the passwo
 beninfy://reset-password?token=<token>
 ```
 
+## Authenticated Password Change
+
+Customer password change is implemented at:
+
+```text
+POST /api/mobile/v1/customer/change-password
+```
+
+Request:
+
+```json
+{
+  "currentPassword": "old-password",
+  "newPassword": "new-strong-password",
+  "device": {
+    "deviceId": "ios-device-id",
+    "platform": "ios"
+  }
+}
+```
+
+The backend verifies the current password, enforces the same mobile password policy, updates the password hash, increments `sessionVersion`, revokes existing mobile sessions, and returns replacement mobile tokens for the current device.
+
+Errors include `CURRENT_PASSWORD_INVALID` and `PASSWORD_INVALID`.
+
+## Logout All Devices
+
+```text
+POST /api/mobile/v1/auth/logout-all
+```
+
+Requires an authenticated mobile bearer token. The backend revokes all active `MobileSession` rows for the authenticated user and increments `sessionVersion`, so previous refresh tokens and still-unexpired access tokens fail backend session validation.
+
+Flutter must clear local credentials and route to sign-in after success.
+
 ## Revocation
 
 Mobile auth should support:
@@ -95,3 +131,4 @@ Mobile auth should support:
 - Device/session revocation
 - Role/account disabled checks on every refresh
 - Immediate logout after password reset or admin disablement
+- Literal logout-all for all mobile devices

@@ -13,11 +13,15 @@ Current customer mobile API base:
 - `GET /auth/me`
 - `POST /auth/refresh`
 - `POST /auth/logout`
+- `POST /auth/logout-all`
 - `POST /auth/onboarding/phone`
 - `POST /auth/email/send-otp`
 - `POST /auth/email/verify-otp`
 - `POST /auth/forgot-password`
 - `POST /auth/reset-password`
+- `POST /customer/change-password`
+- `GET /customer/settings`
+- `PATCH /customer/settings`
 - `GET /routes`
 - `GET /routes/:routeId`
 - `GET /vehicles`
@@ -29,6 +33,8 @@ Current customer mobile API base:
 - `GET /customer/bookings`
 - `GET /customer/bookings/:bookingId`
 - `POST /customer/bookings`
+- `GET /customer/booking-cancellation-reasons`
+- `POST /customer/bookings/:bookingId/cancel`
 - `GET /customer/bookings/:bookingId/payment`
 - `POST /customer/bookings/:bookingId/payment`
 - `POST /customer/bookings/:bookingId/payment/verify`
@@ -91,3 +97,36 @@ Flutter must:
 - never mark a payment as paid locally
 
 See `docs/mobile-api/mobile-payments.md`.
+
+## Cancel Booking
+
+Flutter flow:
+
+1. Customer opens an eligible booking.
+2. Fetch or use cached `GET /customer/booking-cancellation-reasons`.
+3. Customer chooses a reason and optional note.
+4. `POST /customer/bookings/:bookingId/cancel`.
+5. Update local booking state from the backend response.
+
+Do not guess cancellation eligibility on the client.
+
+## Account Settings
+
+Change password:
+
+1. Customer enters current password and new password.
+2. `POST /customer/change-password`.
+3. Backend returns replacement tokens.
+4. Flutter replaces local access/refresh tokens.
+
+Logout all:
+
+1. `POST /auth/logout-all`.
+2. Flutter clears local credentials.
+3. Route to sign-in.
+
+Locale:
+
+1. User changes app language.
+2. Update Flutter UI locale locally.
+3. `PATCH /customer/settings` with `locale: "en"` or `locale: "fr"`.

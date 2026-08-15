@@ -37,6 +37,8 @@ Implemented mobile endpoints:
 - `GET /api/mobile/v1/customer/bookings`
 - `GET /api/mobile/v1/customer/bookings/:bookingId`
 - `POST /api/mobile/v1/customer/bookings`
+- `POST /api/mobile/v1/customer/bookings/:bookingId/cancel`
+- `GET /api/mobile/v1/customer/booking-cancellation-reasons`
 
 The Phase 2 creation endpoint adapts the existing web booking route to avoid duplicating pricing and fleet availability rules. It still needs a Phase 3 service extraction and idempotency key support before heavy mobile traffic.
 
@@ -50,3 +52,5 @@ Before creating a booking, Flutter should:
 6. Create the booking with `POST /api/mobile/v1/customer/bookings` using the same selection fields.
 
 The booking creation endpoint remains authoritative and can reject a stale quote if the selected vehicle becomes unavailable.
+
+Customer cancellation is whole-booking only in this phase. Partial return-leg cancellation after an outbound leg has completed is not supported.

@@ -12,6 +12,11 @@ export type MobileErrorCode =
   | 'INVALID_TRIP_VIEW'
   | 'VALIDATION_ERROR'
   | 'BOOKING_NOT_FOUND'
+  | 'BOOKING_NOT_CANCELLABLE'
+  | 'BOOKING_ALREADY_CANCELLED'
+  | 'INVALID_CANCELLATION_REASON'
+  | 'TRIP_ALREADY_STARTED'
+  | 'PARTIAL_CANCELLATION_NOT_SUPPORTED'
   | 'TRIP_NOT_FOUND'
   | 'TRIP_NOT_ASSIGNED'
   | 'TRIP_NOT_AVAILABLE'
@@ -66,6 +71,7 @@ export type MobileErrorCode =
   | 'RESET_TOKEN_INVALID'
   | 'RESET_TOKEN_EXPIRED'
   | 'PASSWORD_INVALID'
+  | 'CURRENT_PASSWORD_INVALID'
   | 'INTERNAL_ERROR'
 
 export type MobileErrorBody = {
@@ -131,6 +137,16 @@ export function mobileErrorFromCode(code: MobileErrorCode, message?: string) {
       return mobileError(code, message ?? 'Trip view is invalid', 400)
     case 'BOOKING_NOT_FOUND':
       return mobileError(code, message ?? 'Booking not found', 404)
+    case 'BOOKING_NOT_CANCELLABLE':
+      return mobileError(code, message ?? 'Booking cannot be cancelled', 409)
+    case 'BOOKING_ALREADY_CANCELLED':
+      return mobileError(code, message ?? 'Booking is already cancelled', 409)
+    case 'INVALID_CANCELLATION_REASON':
+      return mobileError(code, message ?? 'Cancellation reason is invalid', 400)
+    case 'TRIP_ALREADY_STARTED':
+      return mobileError(code, message ?? 'Trip has already started', 409)
+    case 'PARTIAL_CANCELLATION_NOT_SUPPORTED':
+      return mobileError(code, message ?? 'Partial cancellation is not supported', 409)
     case 'TRIP_NOT_FOUND':
       return mobileError(code, message ?? 'Trip not found', 404)
     case 'TRIP_NOT_ASSIGNED':
@@ -235,6 +251,8 @@ export function mobileErrorFromCode(code: MobileErrorCode, message?: string) {
       return mobileError(code, message ?? 'Password reset token has expired', 410)
     case 'PASSWORD_INVALID':
       return mobileError(code, message ?? 'Password does not meet the required policy', 400)
+    case 'CURRENT_PASSWORD_INVALID':
+      return mobileError(code, message ?? 'Current password is invalid', 401)
     case 'VALIDATION_ERROR':
       return mobileValidationError(message)
     case 'INTERNAL_ERROR':

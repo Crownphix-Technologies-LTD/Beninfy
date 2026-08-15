@@ -62,6 +62,14 @@ import {
   isDriverDutyStatus,
   normalizeDriverTripView,
 } from '../src/lib/mobile/driverOperations'
+import {
+  CANCELLATION_NOTE_MAX_LENGTH,
+  cancellationReasonCatalogue,
+  customerCancellationEligibility,
+  isCustomerCancellationBlockedByLegStatus,
+  isCustomerCancellationReason,
+  normalizeCustomerSettingsLocale,
+} from '../src/lib/mobile/customerAccount'
 import { routes } from '../src/data/routes'
 import { vehicles } from '../src/data/vehicles'
 
@@ -722,4 +730,65 @@ test('driver trip view sorting is operationally useful', () => {
     { departureDate: 'desc' },
     { id: 'desc' },
   ])
+})
+
+test('customer cancellation reason catalogue is stable and localized by key', () => {
+  assert.equal(isCustomerCancellationReason('change_of_plans'), true)
+  assert.equal(isCustomerCancellationReason('wrong_booking_details'), true)
+  assert.equal(isCustomerCancellationReason('random_reason'), false)
+  assert.equal(CANCELLATION_NOTE_MAX_LENGTH, 500)
+  assert.deepEqual(cancellationReasonCatalogue()[0], {
+    code: 'change_of_plans',
+    labelKey: 'bookingCancellation.change_of_plans',
+  })
+})
+
+test('customer cancellation policy rejects active and partial round-trip cases', () => {
+  assert.equal(isCustomerCancellationBlockedByLegStatus('driver_en_route'), true)
+  assert.equal(isCustomerCancellationBlockedByLegStatus('assigned'), false)
+  assert.deepEqual(
+    customerCancellationEligibility({
+      bookingStatus: 'confirmed',
+      legStatuses: ['assigned', 'reserved'],
+    }),
+    { ok: true, idempotent: false }
+  )
+  assert.deepEqual(
+    customerCancellationEligibility({
+      bookingStatus: 'confirmed',
+      legStatuses: ['driver_arrived'],
+    }),
+    { ok: false, code: 'TRIP_ALREADY_STARTED' }
+  )
+  assert.deepEqual(
+    customerCancellationEligibility({
+      bookingStatus: 'confirmed',
+      legStatuses: ['completed', 'assigned'],
+    }),
+    { ok: false, code: 'PARTIAL_CANCELLATION_NOT_SUPPORTED' }
+  )
+})
+
+test('customer cancellation treats duplicate cancellation as idempotent success', () => {
+  assert.deepEqual(
+    customerCancellationEligibility({
+      bookingStatus: 'cancelled',
+      legStatuses: ['cancelled'],
+    }),
+    { ok: true, idempotent: true }
+  )
+  assert.deepEqual(
+    customerCancellationEligibility({
+      bookingStatus: 'completed',
+      legStatuses: ['completed'],
+    }),
+    { ok: false, code: 'BOOKING_NOT_CANCELLABLE' }
+  )
+})
+
+test('customer settings locale accepts only supported mobile locales', () => {
+  assert.equal(normalizeCustomerSettingsLocale('en'), 'en')
+  assert.equal(normalizeCustomerSettingsLocale('fr'), 'fr')
+  assert.equal(normalizeCustomerSettingsLocale('pt'), null)
+  assert.equal(normalizeCustomerSettingsLocale(undefined), null)
 })
