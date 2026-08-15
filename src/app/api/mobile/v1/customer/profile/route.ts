@@ -25,10 +25,13 @@ export async function PATCH(req: Request) {
   const body = await req.json().catch(() => null)
   const parsed = patchSchema.safeParse(body)
   if (!parsed.success) return mobileValidationError('Invalid input', parsed.error.flatten())
+  if (Object.prototype.hasOwnProperty.call(parsed.data, 'phone')) {
+    return mobileErrorFromCode('PHONE_VERIFICATION_REQUIRED')
+  }
 
   const user = await prisma.user.update({
     where: { id: guard.principal.userId },
-    data: parsed.data,
+    data: { name: parsed.data.name },
   })
 
   return Response.json({ user: toCustomerProfileDto(user) })

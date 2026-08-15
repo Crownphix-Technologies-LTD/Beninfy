@@ -397,6 +397,72 @@ export async function notifyAutoAccountCreated(userId: string, bookingId?: strin
   })
 }
 
+export async function notifyMobileEmailOtp(input: {
+  email: string
+  code: string
+  expiresAt: Date
+  locale?: 'en' | 'fr'
+}) {
+  const intro =
+    input.locale === 'fr'
+      ? 'Utilisez ce code pour confirmer votre adresse email Beninfy et terminer la configuration de votre compte mobile.'
+      : 'Use this code to confirm your Beninfy email address and complete your mobile account setup.'
+  const title = input.locale === 'fr' ? 'Confirmez votre email' : 'Confirm Your Email'
+  const items: Array<[string, unknown]> = [
+    ['Verification code', input.code],
+    ['Expires', formatDate(input.expiresAt)],
+    ['Account email', input.email],
+  ]
+
+  await safeSendEmail({
+    to: input.email,
+    subject: input.locale === 'fr' ? 'Votre code Beninfy' : 'Your Beninfy verification code',
+    html: accountEmailShell(title, intro, items),
+    text: textFromPairs(title, intro, items),
+  })
+}
+
+export async function notifyMobilePasswordReset(input: {
+  email: string
+  webUrl: string
+  appDeepLink: string
+  expiresAt: Date
+  locale?: 'en' | 'fr'
+}) {
+  const title = input.locale === 'fr' ? 'Réinitialisation du mot de passe' : 'Password Reset'
+  const intro =
+    input.locale === 'fr'
+      ? 'Nous avons reçu une demande de réinitialisation du mot de passe de votre compte Beninfy.'
+      : 'We received a request to reset the password for your Beninfy account.'
+  const items: Array<[string, unknown]> = [
+    ['Reset link', input.webUrl],
+    ['Mobile app link', input.appDeepLink],
+    ['Expires', formatDate(input.expiresAt)],
+  ]
+
+  await safeSendEmail({
+    to: input.email,
+    subject:
+      input.locale === 'fr'
+        ? 'Réinitialisez votre mot de passe Beninfy'
+        : 'Reset your Beninfy password',
+    html: emailShell(
+      title,
+      intro,
+      detailBody(items, {
+        title: 'Security note',
+        copy: 'If you did not request this password reset, ignore this email. The link expires automatically and can be used only once.',
+      }),
+      {
+        eyebrow: 'Account Security',
+        ctaLabel: input.locale === 'fr' ? 'Réinitialiser' : 'Reset password',
+        ctaHref: input.webUrl,
+      }
+    ),
+    text: textFromPairs(title, intro, items),
+  })
+}
+
 export async function notifyPaymentSuccess(bookingId: string, paymentId: string) {
   const booking = await getBookingEmailData(bookingId)
   if (!booking) return

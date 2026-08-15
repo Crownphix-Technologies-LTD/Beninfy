@@ -13,6 +13,11 @@ Current customer mobile API base:
 - `GET /auth/me`
 - `POST /auth/refresh`
 - `POST /auth/logout`
+- `POST /auth/onboarding/phone`
+- `POST /auth/email/send-otp`
+- `POST /auth/email/verify-otp`
+- `POST /auth/forgot-password`
+- `POST /auth/reset-password`
 - `GET /customer/profile`
 - `PATCH /customer/profile`
 - `GET /customer/bookings`
@@ -33,6 +38,18 @@ Authorization: Bearer <accessToken>
 ```
 
 Customers can only read their own bookings.
+
+## Onboarding Rule
+
+Phone is collected after registration, but verification is done by email OTP.
+
+Flutter should route by the backend `onboarding.status`:
+
+- `phone_required`: show phone collection.
+- `email_verification_required`: show six-digit email OTP screen.
+- `complete`: show customer home.
+
+Bookings, payments, and tracking require `complete`. `/auth/me`, OTP routes, refresh, logout, and account recovery remain available during onboarding.
 
 ## Booking Creation
 

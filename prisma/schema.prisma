@@ -11,25 +11,68 @@ datasource db {
 }
 
 model User {
-  id             String          @id @default(cuid())
-  name           String?
-  email          String?         @unique
-  emailVerified  DateTime?
-  image          String?
-  phone          String?
-  hashedPassword String?
-  role           String          @default("user")
-  sessionVersion Int             @default(0)
-  disabledAt     DateTime?
-  bookings       Booking[]
-  driver         Driver?
-  mobileSessions MobileSession[]
-  pushDevices    PushDevice[]
-  notifications  Notification[]
-  accounts       Account[]
-  sessions       Session[]
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
+  id                  String               @id @default(cuid())
+  name                String?
+  email               String?              @unique
+  emailVerified       DateTime?
+  image               String?
+  phone               String?
+  hashedPassword      String?
+  role                String               @default("user")
+  sessionVersion      Int                  @default(0)
+  disabledAt          DateTime?
+  locale              String?
+  termsAcceptedAt     DateTime?
+  privacyAcceptedAt   DateTime?
+  termsVersion        String?
+  privacyVersion      String?
+  bookings            Booking[]
+  driver              Driver?
+  mobileSessions      MobileSession[]
+  otpChallenges       OtpChallenge[]
+  passwordResetTokens PasswordResetToken[]
+  pushDevices         PushDevice[]
+  notifications       Notification[]
+  accounts            Account[]
+  sessions            Session[]
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+}
+
+model OtpChallenge {
+  id                String    @id @default(cuid())
+  userId            String
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  purpose           String
+  target            String
+  targetNormalized  String
+  codeHash          String
+  attempts          Int       @default(0)
+  maxAttempts       Int       @default(5)
+  expiresAt         DateTime
+  resendAvailableAt DateTime
+  consumedAt        DateTime?
+  invalidatedAt     DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([userId, purpose, consumedAt, invalidatedAt, expiresAt])
+  @@index([targetNormalized, purpose, createdAt])
+  @@index([expiresAt])
+}
+
+model PasswordResetToken {
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash  String    @unique
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([userId, consumedAt, expiresAt])
+  @@index([expiresAt])
 }
 
 model MobileSession {

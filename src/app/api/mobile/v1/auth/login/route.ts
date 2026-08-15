@@ -11,12 +11,14 @@ const schema = z.object({
   email: z.string().trim().email(),
   password: z.string().min(1).max(100),
   principalType: z.enum(['CUSTOMER', 'DRIVER']).optional(),
-  device: z.object({
-    deviceId: z.string().trim().max(120).optional(),
-    platform: z.string().trim().max(40).optional(),
-    deviceName: z.string().trim().max(120).optional(),
-    appVersion: z.string().trim().max(40).optional(),
-  }).optional(),
+  device: z
+    .object({
+      deviceId: z.string().trim().max(120).optional(),
+      platform: z.string().trim().max(40).optional(),
+      deviceName: z.string().trim().max(120).optional(),
+      appVersion: z.string().trim().max(40).optional(),
+    })
+    .optional(),
 })
 
 export async function POST(req: Request) {
@@ -31,7 +33,9 @@ export async function POST(req: Request) {
     windowMs: 15 * 60 * 1000,
   })
   if (!rateLimit.allowed) {
-    return mobileError('RATE_LIMITED', 'Too many login attempts', 429, { retryAfter: rateLimit.retryAfter })
+    return mobileError('RATE_LIMITED', 'Too many login attempts', 429, {
+      retryAfter: rateLimit.retryAfter,
+    })
   }
 
   const result = await authenticateMobileLogin({
@@ -48,10 +52,13 @@ export async function POST(req: Request) {
   })
   if (!user) return mobileErrorFromCode('UNAUTHENTICATED')
 
+  const profile = toCustomerProfileDto(user)
   return Response.json({
     principalType: result.principalType,
-    user: toCustomerProfileDto(user),
-    driver: result.principalType === 'DRIVER' && user.driver ? toDriverProfileDto(user.driver) : null,
+    user: profile,
+    onboarding: result.principalType === 'CUSTOMER' ? profile.onboarding : null,
+    driver:
+      result.principalType === 'DRIVER' && user.driver ? toDriverProfileDto(user.driver) : null,
     accessToken: result.accessToken,
     refreshToken: result.refreshToken,
     tokenType: result.tokenType,

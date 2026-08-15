@@ -39,6 +39,14 @@ import {
   normalizeMobilePaymentProvider,
   toMobilePaymentDto,
 } from '../src/lib/mobile/payments'
+import {
+  hashOtpCode,
+  normalizeMobileLocale,
+  normalizeMobilePhone,
+  toMobileOnboardingDto,
+  validateMobilePassword,
+  verifyOtpCode,
+} from '../src/lib/mobile/onboarding'
 
 test('driver transition blocks terminal trips', () => {
   const result = evaluateDriverTripTransition({
@@ -490,4 +498,73 @@ test('mobile booking payability and provider normalization are conservative', ()
   assert.equal(bookingPayable({ status: 'pending', priceNGN: 0 }), false)
   assert.equal(normalizeMobilePaymentProvider('payonus'), 'payonus')
   assert.equal(normalizeMobilePaymentProvider('unknown'), 'paystack')
+})
+
+test('customer mobile onboarding exposes stable routing states', () => {
+  assert.deepEqual(toMobileOnboardingDto({ phone: null, emailVerified: null }), {
+    status: 'phone_required',
+    nextStep: 'collect_phone',
+    phoneRequired: true,
+    emailVerified: false,
+  })
+  assert.deepEqual(toMobileOnboardingDto({ phone: '+22951019134', emailVerified: null }), {
+    status: 'email_verification_required',
+    nextStep: 'verify_email_otp',
+    phoneRequired: false,
+    emailVerified: false,
+  })
+  assert.deepEqual(toMobileOnboardingDto({ phone: '+22951019134', emailVerified: new Date() }), {
+    status: 'complete',
+    nextStep: 'customer_home',
+    phoneRequired: false,
+    emailVerified: true,
+  })
+})
+
+test('customer onboarding accepts supported Benin and Nigeria phone formats', () => {
+  assert.equal(normalizeMobilePhone('+229 51 01 91 34'), '+22951019134')
+  assert.equal(normalizeMobilePhone('08012345678'), '+2348012345678')
+  assert.equal(normalizeMobilePhone('+234 801 234 5678'), '+2348012345678')
+  assert.equal(normalizeMobilePhone('+233201234567'), null)
+})
+
+test('customer onboarding locale is explicit and conservative', () => {
+  assert.equal(normalizeMobileLocale('fr'), 'fr')
+  assert.equal(normalizeMobileLocale('en'), 'en')
+  assert.equal(normalizeMobileLocale('pt'), 'en')
+  assert.equal(normalizeMobileLocale(undefined), 'en')
+})
+
+test('email OTP hashes are deterministic and do not verify wrong codes', () => {
+  process.env.MOBILE_ONBOARDING_SECRET = 'test-onboarding-secret'
+  const expectedHash = hashOtpCode({
+    userId: 'user_1',
+    targetNormalized: 'customer@example.com',
+    code: '123456',
+  })
+
+  assert.equal(
+    verifyOtpCode({
+      expectedHash,
+      userId: 'user_1',
+      targetNormalized: 'customer@example.com',
+      code: '123456',
+    }),
+    true
+  )
+  assert.equal(
+    verifyOtpCode({
+      expectedHash,
+      userId: 'user_1',
+      targetNormalized: 'customer@example.com',
+      code: '654321',
+    }),
+    false
+  )
+})
+
+test('mobile password policy is stable for registration and reset', () => {
+  assert.equal(validateMobilePassword('1234567'), false)
+  assert.equal(validateMobilePassword('stronger-password'), true)
+  assert.equal(validateMobilePassword('x'.repeat(101)), false)
 })
