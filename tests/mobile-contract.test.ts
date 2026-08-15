@@ -47,6 +47,16 @@ import {
   validateMobilePassword,
   verifyOtpCode,
 } from '../src/lib/mobile/onboarding'
+import {
+  calculateFareBreakdown,
+  mobileMoney,
+  mobileRouteDetail,
+  normalizeDiscoverySelection,
+  toMobileRouteDto,
+  toMobileVehicleDto,
+} from '../src/lib/mobile/bookingDiscovery'
+import { routes } from '../src/data/routes'
+import { vehicles } from '../src/data/vehicles'
 
 test('driver transition blocks terminal trips', () => {
   const result = evaluateDriverTripTransition({
@@ -567,4 +577,80 @@ test('mobile password policy is stable for registration and reset', () => {
   assert.equal(validateMobilePassword('1234567'), false)
   assert.equal(validateMobilePassword('stronger-password'), true)
   assert.equal(validateMobilePassword('x'.repeat(101)), false)
+})
+
+test('mobile route discovery DTO is customer safe and stable', () => {
+  const dto = toMobileRouteDto(routes[0])
+
+  assert.equal(dto.id, 'lagos-cotonou')
+  assert.equal(dto.origin.city, 'Lagos')
+  assert.equal(dto.destination.city, 'Cotonou')
+  assert.equal(dto.displayName, 'Lagos to Cotonou')
+  assert.equal(dto.available, true)
+  assert.equal('internalCost' in dto, false)
+})
+
+test('mobile route detail returns null for unknown routes', () => {
+  assert.equal(mobileRouteDetail('lagos-cotonou')?.id, 'lagos-cotonou')
+  assert.equal(mobileRouteDetail('unknown-route'), null)
+})
+
+test('mobile vehicle discovery DTO exposes capacity and safe pricing fields', () => {
+  const dto = toMobileVehicleDto(vehicles[0])
+
+  assert.equal(dto.id, 'saloon')
+  assert.equal(dto.capacity, 3)
+  assert.equal(dto.available, true)
+  assert.equal('plateNumber' in dto, false)
+  assert.equal('notes' in dto, false)
+})
+
+test('mobile discovery selection validates round trip return dates', () => {
+  const missingReturn = normalizeDiscoverySelection({
+    routeId: 'lagos-cotonou',
+    vehicleId: 'saloon',
+    tripType: 'round-trip',
+    departureDate: '2026-08-20T09:00:00.000Z',
+  })
+
+  assert.equal(missingReturn.ok, false)
+  if (!missingReturn.ok) assert.equal(missingReturn.code, 'INVALID_RETURN_DATE')
+
+  const valid = normalizeDiscoverySelection({
+    routeId: 'lagos-cotonou',
+    vehicleId: 'saloon',
+    tripType: 'round-trip',
+    departureDate: '2026-08-20T09:00:00.000Z',
+    returnDate: '2026-08-22T09:00:00.000Z',
+  })
+
+  assert.equal(valid.ok, true)
+  if (valid.ok) assert.equal(valid.data.datesToCheck.length, 2)
+})
+
+test('mobile fare breakdown doubles only ride fare for round trips', () => {
+  assert.deepEqual(
+    calculateFareBreakdown({
+      oneWayDropoffFare: 180000,
+      tripType: 'round-trip',
+      borderFeeNGN: 40000,
+    }),
+    {
+      oneWayDropoffFare: 180000,
+      legCount: 2,
+      rideFareNGN: 360000,
+      borderFeeNGN: 40000,
+      subtotalNGN: 400000,
+    }
+  )
+})
+
+test('mobile money uses NGN and kobo minor values', () => {
+  const money = mobileMoney(180000)
+
+  assert.equal(money.currency, 'NGN')
+  assert.equal(money.value, 180000)
+  assert.equal(money.minorUnit, 'kobo')
+  assert.equal(money.minorValue, 18000000)
+  assert.match(money.formatted, /180,000/)
 })

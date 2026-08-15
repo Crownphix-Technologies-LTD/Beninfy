@@ -10,12 +10,12 @@ Current public/web sources:
 - API/admin-backed route data: `/api/admin/routes` for admin only
 - Customer-facing route pages under `src/app/[locale]/routes/...`
 
-Planned mobile endpoint:
+Implemented mobile endpoints:
 
 | Endpoint | Status | Notes |
 | --- | --- | --- |
-| `GET /api/mobile/v1/routes` | PLANNED | Public stable route DTOs. |
-| `GET /api/mobile/v1/routes/:id` | PLANNED | Public route detail and available vehicle categories. |
+| `GET /api/mobile/v1/routes` | IMPLEMENTED | Public stable route DTOs and supported booking locations. |
+| `GET /api/mobile/v1/routes/:routeId` | IMPLEMENTED | Public route detail by id. |
 
 Mobile route DTOs should include only customer-safe fields:
 
@@ -28,3 +28,26 @@ Mobile route DTOs should include only customer-safe fields:
 - route media URL
 
 Pricing must be fetched or calculated server-side. Flutter must not keep an authoritative price table.
+
+`GET /api/mobile/v1/routes` success response:
+
+```json
+{
+  "routes": [
+    {
+      "id": "lagos-cotonou",
+      "origin": { "city": "Lagos", "code": "LOS", "country": "Nigeria" },
+      "destination": { "city": "Cotonou", "code": "COT", "country": "Benin Republic" },
+      "displayName": "Lagos to Cotonou",
+      "durationHours": 3.5,
+      "popular": true,
+      "image": "/images/routes/lagos-cotonou.jpg",
+      "description": "...",
+      "descriptionFr": "...",
+      "borderCrossings": ["Seme-Krake"],
+      "available": true
+    }
+  ],
+  "locations": [{ "city": "Lagos", "country": "Nigeria" }]
+}
+```

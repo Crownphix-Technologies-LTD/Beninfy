@@ -18,6 +18,12 @@ Current customer mobile API base:
 - `POST /auth/email/verify-otp`
 - `POST /auth/forgot-password`
 - `POST /auth/reset-password`
+- `GET /routes`
+- `GET /routes/:routeId`
+- `GET /vehicles`
+- `POST /availability`
+- `POST /pricing/quote`
+- `POST /coupons/validate`
 - `GET /customer/profile`
 - `PATCH /customer/profile`
 - `GET /customer/bookings`
@@ -64,6 +70,14 @@ The mobile booking endpoint accepts booking details, but the backend remains aut
 - payment amount
 
 Flutter must not calculate or submit a trusted final fare.
+
+Before booking creation, Flutter should call the discovery flow:
+
+- `GET /routes` for supported corridors.
+- `GET /vehicles` for bookable categories and passenger capacities.
+- `POST /availability` for category/fleet availability on the selected trip dates.
+- `POST /pricing/quote` for the authoritative display quote.
+- `POST /coupons/validate` only when a customer applies a coupon.
 
 ## Payments
 
