@@ -55,6 +55,13 @@ import {
   toMobileRouteDto,
   toMobileVehicleDto,
 } from '../src/lib/mobile/bookingDiscovery'
+import {
+  classifyDriverTripView,
+  driverTripOrderByForView,
+  driverTripWhereForView,
+  isDriverDutyStatus,
+  normalizeDriverTripView,
+} from '../src/lib/mobile/driverOperations'
 import { routes } from '../src/data/routes'
 import { vehicles } from '../src/data/vehicles'
 
@@ -653,4 +660,66 @@ test('mobile money uses NGN and kobo minor values', () => {
   assert.equal(money.minorUnit, 'kobo')
   assert.equal(money.minorValue, 18000000)
   assert.match(money.formatted, /180,000/)
+})
+
+test('driver duty status allows only driver-controlled states', () => {
+  assert.equal(isDriverDutyStatus('available'), true)
+  assert.equal(isDriverDutyStatus('off_duty'), true)
+  assert.equal(isDriverDutyStatus('inactive'), false)
+  assert.equal(isDriverDutyStatus('online'), false)
+})
+
+test('driver trip view normalization is stable', () => {
+  assert.deepEqual(normalizeDriverTripView(null), { ok: true, view: 'all' })
+  assert.deepEqual(normalizeDriverTripView('upcoming'), { ok: true, view: 'upcoming' })
+  assert.deepEqual(normalizeDriverTripView('active'), { ok: true, view: 'active' })
+  assert.deepEqual(normalizeDriverTripView('completed'), { ok: true, view: 'completed' })
+  assert.deepEqual(normalizeDriverTripView('unknown'), {
+    ok: false,
+    code: 'INVALID_TRIP_VIEW',
+  })
+})
+
+test('driver trip lifecycle states classify into mobile dashboard views', () => {
+  assert.equal(classifyDriverTripView('assigned'), 'upcoming')
+  assert.equal(classifyDriverTripView('driver_en_route'), 'active')
+  assert.equal(classifyDriverTripView('driver_arrived'), 'active')
+  assert.equal(classifyDriverTripView('passenger_onboard'), 'active')
+  assert.equal(classifyDriverTripView('in_progress'), 'active')
+  assert.equal(classifyDriverTripView('completed'), 'completed')
+  assert.equal(classifyDriverTripView('cancelled'), 'all')
+  assert.equal(classifyDriverTripView('unassigned'), 'all')
+})
+
+test('driver trip view query scopes by authenticated driver and status', () => {
+  assert.deepEqual(driverTripWhereForView('driver1', 'upcoming'), {
+    driverId: 'driver1',
+    status: { in: ['assigned'] },
+  })
+  assert.deepEqual(driverTripWhereForView('driver1', 'active'), {
+    driverId: 'driver1',
+    status: {
+      in: ['dispatched', 'driver_en_route', 'driver_arrived', 'passenger_onboard', 'in_progress'],
+    },
+  })
+  assert.deepEqual(driverTripWhereForView('driver1', 'completed'), {
+    driverId: 'driver1',
+    status: { in: ['completed'] },
+  })
+})
+
+test('driver trip view sorting is operationally useful', () => {
+  assert.deepEqual(driverTripOrderByForView('upcoming'), [
+    { departureDate: 'asc' },
+    { id: 'asc' },
+  ])
+  assert.deepEqual(driverTripOrderByForView('active'), [
+    { departureDate: 'asc' },
+    { id: 'asc' },
+  ])
+  assert.deepEqual(driverTripOrderByForView('completed'), [
+    { completedAt: 'desc' },
+    { departureDate: 'desc' },
+    { id: 'desc' },
+  ])
 })

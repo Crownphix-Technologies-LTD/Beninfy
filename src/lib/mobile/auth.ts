@@ -107,13 +107,13 @@ function resolvePrincipal(
   const canBeDriver = user.role === 'driver' || Boolean(user.driver)
   if (requestedType === 'DRIVER' || user.role === 'driver') {
     if (!user.driver) return { error: 'DRIVER_NOT_LINKED' as const }
-    if (user.driver.status !== 'available') return { error: 'DRIVER_INACTIVE' as const }
+    if (user.driver.status === 'inactive') return { error: 'DRIVER_INACTIVE' as const }
     return { type: 'DRIVER' as const, driverId: user.driver.id }
   }
 
   if (canBeDriver && requestedType !== 'CUSTOMER') {
     if (!user.driver) return { error: 'DRIVER_NOT_LINKED' as const }
-    if (user.driver.status !== 'available') return { error: 'DRIVER_INACTIVE' as const }
+    if (user.driver.status === 'inactive') return { error: 'DRIVER_INACTIVE' as const }
     return { type: 'DRIVER' as const, driverId: user.driver.id }
   }
 
