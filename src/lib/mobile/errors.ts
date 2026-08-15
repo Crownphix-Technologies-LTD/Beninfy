@@ -20,6 +20,11 @@ export type MobileErrorCode =
   | 'DRIVER_NOT_ASSIGNED'
   | 'VEHICLE_NOT_ASSIGNED'
   | 'RATE_LIMITED'
+  | 'TRACKING_NOT_ALLOWED'
+  | 'TRACKING_NOT_ACTIVE'
+  | 'LOCATION_INVALID'
+  | 'LOCATION_STALE'
+  | 'LOCATION_RATE_LIMITED'
   | 'INTERNAL_ERROR'
 
 export type MobileErrorBody = {
@@ -99,6 +104,16 @@ export function mobileErrorFromCode(code: MobileErrorCode, message?: string) {
       return mobileError(code, message ?? 'Vehicle is not assigned', 409)
     case 'RATE_LIMITED':
       return mobileError(code, message ?? 'Too many requests', 429)
+    case 'TRACKING_NOT_ALLOWED':
+      return mobileError(code, message ?? 'Tracking is not allowed for this trip', 403)
+    case 'TRACKING_NOT_ACTIVE':
+      return mobileError(code, message ?? 'Tracking is not active for this trip', 409)
+    case 'LOCATION_INVALID':
+      return mobileError(code, message ?? 'Location payload is invalid', 400)
+    case 'LOCATION_STALE':
+      return mobileError(code, message ?? 'Location update is stale', 409)
+    case 'LOCATION_RATE_LIMITED':
+      return mobileError(code, message ?? 'Too many location updates', 429)
     case 'VALIDATION_ERROR':
       return mobileValidationError(message)
     case 'INTERNAL_ERROR':

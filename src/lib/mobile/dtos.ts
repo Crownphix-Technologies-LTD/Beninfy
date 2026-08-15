@@ -6,6 +6,13 @@ import {
   customerLegState,
   driverLegState,
 } from '@/lib/tripLifecycle'
+import {
+  type TrackingStatus,
+  realtimeChannelForTrip,
+  signRealtimeScope,
+  toLocationDto,
+  trackingStatusFor,
+} from '@/lib/mobile/tracking'
 
 export type MobileBookingStatus = 'pending' | 'confirmed' | 'ops_review' | 'cancelled' | 'completed'
 
@@ -146,6 +153,27 @@ export type TripTrackingDto = {
   } | null
   vehicle: FleetVehicleDto | null
   driver: Pick<DriverProfileDto, 'id' | 'name' | 'phone'> | null
+}
+
+export type TrackingSnapshotDto = {
+  bookingId: string
+  bookingLegId: string
+  trackingStatus: TrackingStatus
+  operationalStatus: MobileBookingLegStatus
+  customerStatus: CustomerLegState
+  driverStatus: DriverLegState
+  locationFresh: boolean
+  lastLocation: ReturnType<typeof toLocationDto>
+  driver: Pick<DriverProfileDto, 'id' | 'name' | 'phone'> | null
+  vehicle: FleetVehicleDto | null
+  realtime: {
+    provider: 'supabase-broadcast'
+    channel: string
+    token: string
+    permission: 'subscribe' | 'publish'
+    expiresAt: string
+    events: string[]
+  } | null
 }
 
 type Dateish = Date | string
@@ -392,6 +420,128 @@ export function toDriverTripDetailDto(
       startedAt: leg.startedAt ? toIso(leg.startedAt) : null,
       completedAt: leg.completedAt ? toIso(leg.completedAt) : null,
       cancelledAt: leg.cancelledAt ? toIso(leg.cancelledAt) : null,
+    },
+  }
+}
+
+export function toCustomerTrackingSnapshotDto({
+  bookingId,
+  principalId,
+  leg,
+}: {
+  bookingId: string
+  principalId: string
+  leg: {
+    id: string
+    bookingId: string
+    status: string
+    driverId: string | null
+    fleetVehicle: Parameters<typeof toFleetVehicleDto>[0] | null
+    driver: Parameters<typeof toDriverProfileDto>[0] | null
+    latestLocation: Parameters<typeof toLocationDto>[0] | null
+  }
+}): TrackingSnapshotDto {
+  const trackingStatus = trackingStatusFor({
+    legStatus: leg.status,
+    hasDriver: Boolean(leg.driverId),
+    lastLocationReceivedAt: leg.latestLocation?.receivedAt,
+    lastLocationExpiresAt: leg.latestLocation?.expiresAt,
+  })
+  const channel = realtimeChannelForTrip(leg.id)
+  const realtime =
+    leg.driverId && trackingStatus !== 'ended'
+      ? signRealtimeScope({
+          principalType: 'customer',
+          principalId,
+          bookingLegId: leg.id,
+          channel,
+          permission: 'subscribe',
+        })
+      : null
+
+  return {
+    bookingId,
+    bookingLegId: leg.id,
+    trackingStatus,
+    operationalStatus: leg.status as MobileBookingLegStatus,
+    customerStatus: customerLegState(leg.status),
+    driverStatus: driverLegState(leg.status),
+    locationFresh: trackingStatus === 'live',
+    lastLocation:
+      trackingStatus === 'live' || trackingStatus === 'stale'
+        ? toLocationDto(leg.latestLocation)
+        : null,
+    driver: leg.driver
+      ? { id: leg.driver.id, name: leg.driver.name, phone: leg.driver.phone }
+      : null,
+    vehicle: leg.fleetVehicle ? toFleetVehicleDto(leg.fleetVehicle) : null,
+    realtime: realtime
+      ? {
+          ...realtime,
+          events: [
+            'trip.location.updated',
+            'trip.driver_en_route',
+            'trip.driver_arrived',
+            'trip.passenger_onboard',
+            'trip.in_progress',
+            'trip.completed',
+            'trip.cancelled',
+            'trip.assignment_changed',
+          ],
+        }
+      : null,
+  }
+}
+
+export function toDriverTrackingSnapshotDto({
+  principalId,
+  leg,
+}: {
+  principalId: string
+  leg: {
+    id: string
+    bookingId: string
+    status: string
+    driverId: string | null
+    fleetVehicle: Parameters<typeof toFleetVehicleDto>[0] | null
+    driver: Parameters<typeof toDriverProfileDto>[0] | null
+    latestLocation: Parameters<typeof toLocationDto>[0] | null
+  }
+}): TrackingSnapshotDto {
+  const trackingStatus = trackingStatusFor({
+    legStatus: leg.status,
+    hasDriver: Boolean(leg.driverId),
+    lastLocationReceivedAt: leg.latestLocation?.receivedAt,
+    lastLocationExpiresAt: leg.latestLocation?.expiresAt,
+  })
+  const channel = realtimeChannelForTrip(leg.id)
+  const realtime = signRealtimeScope({
+    principalType: 'driver',
+    principalId,
+    bookingLegId: leg.id,
+    channel,
+    permission: 'publish',
+  })
+
+  return {
+    bookingId: leg.bookingId,
+    bookingLegId: leg.id,
+    trackingStatus,
+    operationalStatus: leg.status as MobileBookingLegStatus,
+    customerStatus: customerLegState(leg.status),
+    driverStatus: driverLegState(leg.status),
+    locationFresh: trackingStatus === 'live',
+    lastLocation:
+      trackingStatus === 'live' || trackingStatus === 'stale'
+        ? toLocationDto(leg.latestLocation)
+        : null,
+    driver: leg.driver
+      ? { id: leg.driver.id, name: leg.driver.name, phone: leg.driver.phone }
+      : null,
+    vehicle: leg.fleetVehicle ? toFleetVehicleDto(leg.fleetVehicle) : null,
+    realtime: {
+      ...realtime,
+      events: ['trip.location.updated'],
     },
   }
 }
