@@ -7,6 +7,9 @@ export type MobileErrorCode =
   | 'ACCOUNT_DISABLED'
   | 'DRIVER_NOT_LINKED'
   | 'DRIVER_INACTIVE'
+  | 'INVALID_DRIVER_STATUS'
+  | 'ACTIVE_TRIP_PREVENTS_OFF_DUTY'
+  | 'INVALID_TRIP_VIEW'
   | 'VALIDATION_ERROR'
   | 'BOOKING_NOT_FOUND'
   | 'TRIP_NOT_FOUND'
@@ -120,6 +123,12 @@ export function mobileErrorFromCode(code: MobileErrorCode, message?: string) {
       )
     case 'DRIVER_INACTIVE':
       return mobileError(code, message ?? 'Driver account is not active', 403)
+    case 'INVALID_DRIVER_STATUS':
+      return mobileError(code, message ?? 'Driver status is invalid', 400)
+    case 'ACTIVE_TRIP_PREVENTS_OFF_DUTY':
+      return mobileError(code, message ?? 'An active trip prevents going off duty', 409)
+    case 'INVALID_TRIP_VIEW':
+      return mobileError(code, message ?? 'Trip view is invalid', 400)
     case 'BOOKING_NOT_FOUND':
       return mobileError(code, message ?? 'Booking not found', 404)
     case 'TRIP_NOT_FOUND':

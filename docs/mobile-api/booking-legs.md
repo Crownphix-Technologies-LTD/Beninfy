@@ -43,3 +43,27 @@ Body:
 Allowed actions are `accept`, `decline`, `start_en_route`, `dispatch`, `arrive`, `passenger_onboard`, `start_trip`, `complete`, and `cancel`.
 
 See `trip-lifecycle.md` for the full transition matrix.
+
+## Driver Mobile Views
+
+Driver trip tabs are backend-classified by `BookingLeg.status`.
+
+Upcoming:
+
+- `assigned`
+
+Active:
+
+- `dispatched`
+- `driver_en_route`
+- `driver_arrived`
+- `passenger_onboard`
+- `in_progress`
+
+Completed/history:
+
+- `completed`
+
+`unassigned`, `reserved`, and `payment_pending` do not appear in a driver's assigned trip views. Decline/cancel actions release the driver assignment by clearing `driverId`, so the released leg disappears from the current driver's upcoming/active lists.
+
+Driver trip responses continue to include authoritative `allowedActions`.

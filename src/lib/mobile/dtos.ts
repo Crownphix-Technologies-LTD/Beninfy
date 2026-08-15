@@ -14,6 +14,7 @@ import {
   trackingStatusFor,
 } from '@/lib/mobile/tracking'
 import { type MobileOnboardingDto, toMobileOnboardingDto } from '@/lib/mobile/onboarding'
+import { classifyDriverTripView, type DriverTripView } from '@/lib/mobile/driverOperations'
 
 export type MobileBookingStatus = 'pending' | 'confirmed' | 'ops_review' | 'cancelled' | 'completed'
 
@@ -57,6 +58,13 @@ export type DriverProfileDto = {
   phone: string
   email: string | null
   status: 'available' | 'off_duty' | 'inactive'
+  dutyStatus: 'available' | 'off_duty' | 'inactive'
+  presence: {
+    status: 'online' | 'offline'
+    lastSeenAt: string
+    lastHeartbeatAt: string | null
+    currentBookingLegId: string | null
+  } | null
 }
 
 export type BookingLegDto = {
@@ -101,6 +109,8 @@ export type DriverTripSummaryDto = {
   legId: string
   bookingId: string
   reference: string
+  view: DriverTripView
+  routeDisplayName: string
   direction: string
   from: string
   to: string
@@ -240,6 +250,12 @@ export function toDriverProfileDto(driver: {
   phone: string
   email: string | null
   status: string
+  presence?: {
+    status: string
+    lastSeenAt: Dateish
+    lastHeartbeatAt: Dateish | null
+    currentBookingLegId: string | null
+  } | null
 }): DriverProfileDto {
   return {
     id: driver.id,
@@ -247,6 +263,17 @@ export function toDriverProfileDto(driver: {
     phone: driver.phone,
     email: driver.email,
     status: driver.status as DriverProfileDto['status'],
+    dutyStatus: driver.status as DriverProfileDto['dutyStatus'],
+    presence: driver.presence
+      ? {
+          status: driver.presence.status as 'online' | 'offline',
+          lastSeenAt: toIso(driver.presence.lastSeenAt),
+          lastHeartbeatAt: driver.presence.lastHeartbeatAt
+            ? toIso(driver.presence.lastHeartbeatAt)
+            : null,
+          currentBookingLegId: driver.presence.currentBookingLegId,
+        }
+      : null,
   }
 }
 
@@ -379,6 +406,8 @@ export function toDriverTripSummaryDto(leg: {
     legId: leg.id,
     bookingId: leg.bookingId,
     reference: displayReference(leg.bookingId),
+    view: classifyDriverTripView(leg.status),
+    routeDisplayName: `${leg.from} to ${leg.to}`,
     direction: leg.direction,
     from: leg.from,
     to: leg.to,

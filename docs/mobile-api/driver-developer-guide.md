@@ -13,9 +13,13 @@ Current driver mobile API base:
 - `POST /auth/refresh`
 - `POST /auth/logout`
 - `GET /driver/profile`
-- `GET /driver/trips`
+- `PATCH /driver/availability`
+- `GET /driver/trips?view=all|upcoming|active|completed`
 - `GET /driver/trips/:bookingLegId`
 - `POST /driver/trips/:bookingLegId/actions`
+- `POST /driver/presence`
+- `GET /driver/tracking`
+- `POST /driver/trips/:bookingLegId/location`
 
 ## Identity Rule
 
@@ -28,6 +32,40 @@ Authorization: Bearer <accessToken>
 ```
 
 If a driver user is not linked to an operational `Driver` record, the API returns `DRIVER_NOT_LINKED`.
+
+If a linked driver is `inactive`, driver APIs return `DRIVER_INACTIVE`. `off_duty` drivers can still authenticate and use the app so they can return to `available`.
+
+## Duty Status
+
+Duty status is persistent operations availability:
+
+- `available`
+- `off_duty`
+- `inactive`
+
+Flutter can only request `available` or `off_duty`:
+
+```text
+PATCH /api/mobile/v1/driver/availability
+```
+
+```json
+{ "status": "off_duty" }
+```
+
+If the driver has an active trip, `off_duty` is rejected with `ACTIVE_TRIP_PREVENTS_OFF_DUTY`.
+
+Presence is separate. Continue using `/driver/presence` for online/offline heartbeat state.
+
+Dashboard flow:
+
+1. App opens.
+2. `GET /driver/profile`.
+3. Display `driver.dutyStatus` and `driver.presence.status` separately.
+4. Toggle duty with `PATCH /driver/availability`.
+5. Load `GET /driver/trips?view=active`.
+6. Load `GET /driver/trips?view=upcoming`.
+7. History uses `GET /driver/trips?view=completed`.
 
 ## Trip Actions
 
@@ -42,11 +80,6 @@ The backend decides whether each transition is valid. The app must handle standa
 
 ## Not Yet Available
 
-- GPS/live tracking
-- Realtime trip updates
-- Push notifications
-- In-app chat
 - Driver earnings
-- Richer trip lifecycle beyond the current minimal actions
 
 Prisma models are not API contracts. Use the DTOs and docs in this directory as the source of truth.

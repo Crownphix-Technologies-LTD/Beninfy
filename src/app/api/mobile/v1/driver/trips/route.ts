@@ -2,6 +2,11 @@ import { prisma } from '@/lib/prisma'
 import { requireMobilePrincipal } from '@/lib/mobile/auth'
 import { mobileErrorFromCode } from '@/lib/mobile/errors'
 import { toDriverTripSummaryDto } from '@/lib/mobile/dtos'
+import {
+  driverTripOrderByForView,
+  driverTripWhereForView,
+  normalizeDriverTripView,
+} from '@/lib/mobile/driverOperations'
 
 export const runtime = 'nodejs'
 
@@ -19,10 +24,12 @@ export async function GET(req: Request) {
     Math.max(1, Number(url.searchParams.get('limit') ?? DEFAULT_LIMIT))
   )
   const cursor = url.searchParams.get('cursor') || undefined
+  const viewResult = normalizeDriverTripView(url.searchParams.get('view'))
+  if (!viewResult.ok) return mobileErrorFromCode(viewResult.code)
 
   const trips = await prisma.bookingLeg.findMany({
-    where: { driverId: guard.principal.driverId },
-    orderBy: [{ departureDate: 'asc' }, { createdAt: 'asc' }],
+    where: driverTripWhereForView(guard.principal.driverId, viewResult.view),
+    orderBy: driverTripOrderByForView(viewResult.view),
     take: limit + 1,
     ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
     include: {
@@ -42,6 +49,7 @@ export async function GET(req: Request) {
   const page = hasMore ? trips.slice(0, limit) : trips
 
   return Response.json({
+    view: viewResult.view,
     trips: page.map(toDriverTripSummaryDto),
     pageInfo: {
       hasMore,
