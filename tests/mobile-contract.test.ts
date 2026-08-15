@@ -7,6 +7,14 @@ import {
   isVehicleBlockingLegStatus,
   shouldCompleteBooking,
 } from '../src/lib/tripLifecycle'
+import {
+  isTrackingEligibleStatus,
+  shouldReplaceLocation,
+  trackingStatusFor,
+  validateLocationInput,
+  verifyRealtimeScope,
+  signRealtimeScope,
+} from '../src/lib/mobile/tracking'
 
 test('driver transition blocks terminal trips', () => {
   const result = evaluateDriverTripTransition({
@@ -190,4 +198,77 @@ test('driver trip DTO exposes operational fields and excludes payment metadata',
   assert.equal(dto.reference, 'BFY-12345678')
   assert.equal(dto.specialRequirements, 'Call on arrival')
   assert.equal('paymentProviderMetadata' in dto, false)
+})
+
+test('location validation rejects invalid coordinates', () => {
+  const result = validateLocationInput(
+    {
+      latitude: 120,
+      longitude: 3.3,
+      capturedAt: '2026-08-13T09:00:00.000Z',
+    },
+    new Date('2026-08-13T09:00:10.000Z')
+  )
+
+  assert.equal(result.ok, false)
+  if (!result.ok) assert.equal(result.code, 'LOCATION_INVALID')
+})
+
+test('stale location update does not replace newer latest state', () => {
+  assert.equal(
+    shouldReplaceLocation({
+      existing: { capturedAt: new Date('2026-08-13T09:00:30.000Z'), sequence: 12 },
+      nextCapturedAt: new Date('2026-08-13T09:00:20.000Z'),
+      nextSequence: 11,
+    }),
+    false
+  )
+})
+
+test('tracking eligibility starts with active operational states only', () => {
+  assert.equal(isTrackingEligibleStatus('assigned'), false)
+  assert.equal(isTrackingEligibleStatus('driver_en_route'), true)
+  assert.equal(isTrackingEligibleStatus('in_progress'), true)
+  assert.equal(isTrackingEligibleStatus('completed'), false)
+})
+
+test('tracking status distinguishes live, stale, unavailable and ended', () => {
+  const now = new Date('2026-08-13T09:02:00.000Z')
+  assert.equal(
+    trackingStatusFor({
+      legStatus: 'driver_en_route',
+      hasDriver: true,
+      lastLocationReceivedAt: '2026-08-13T09:01:20.000Z',
+      now,
+    }),
+    'live'
+  )
+  assert.equal(
+    trackingStatusFor({
+      legStatus: 'driver_en_route',
+      hasDriver: true,
+      lastLocationReceivedAt: '2026-08-13T08:50:00.000Z',
+      now,
+    }),
+    'stale'
+  )
+  assert.equal(trackingStatusFor({ legStatus: 'assigned', hasDriver: true, now }), 'unavailable')
+  assert.equal(trackingStatusFor({ legStatus: 'completed', hasDriver: true, now }), 'ended')
+})
+
+test('realtime scope token is trip scoped and verifiable', () => {
+  process.env.REALTIME_AUTH_SECRET = 'test-secret-for-realtime-scope'
+  const scope = signRealtimeScope({
+    principalType: 'customer',
+    principalId: 'user1',
+    bookingLegId: 'leg1',
+    channel: 'trip:leg1:tracking',
+    permission: 'subscribe',
+    ttlSeconds: 60,
+  })
+  const verified = verifyRealtimeScope(scope.token)
+
+  assert.equal(verified?.bookingLegId, 'leg1')
+  assert.equal(verified?.channel, 'trip:leg1:tracking')
+  assert.equal(verified?.permission, 'subscribe')
 })

@@ -193,6 +193,26 @@ export async function applyDriverTripAction({
         transition.nextStatus === 'completed'
           ? await syncBookingCompletion(leg.bookingId, tx)
           : false
+      if (
+        transition.releaseDriver ||
+        transition.nextStatus === 'completed' ||
+        transition.nextStatus === 'cancelled'
+      ) {
+        await tx.driverPresence.updateMany({
+          where: {
+            driverId: principal.driverId,
+            currentBookingLegId: leg.id,
+          },
+          data: {
+            currentBookingLegId: null,
+            lastSeenAt: new Date(),
+          },
+        })
+        await tx.latestTripLocation.updateMany({
+          where: { bookingLegId: leg.id },
+          data: { expiresAt: new Date() },
+        })
+      }
       return { changed: true as const, completedBooking }
     },
     { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
