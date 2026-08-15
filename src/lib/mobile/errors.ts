@@ -28,6 +28,11 @@ export type MobileErrorCode =
   | 'PUSH_TOKEN_INVALID'
   | 'PUSH_TOKEN_NOT_FOUND'
   | 'NOTIFICATION_NOT_FOUND'
+  | 'CHAT_NOT_AVAILABLE'
+  | 'CONVERSATION_NOT_FOUND'
+  | 'MESSAGE_NOT_FOUND'
+  | 'MESSAGE_EMPTY'
+  | 'MESSAGE_TOO_LONG'
   | 'INTERNAL_ERROR'
 
 export type MobileErrorBody = {
@@ -123,6 +128,16 @@ export function mobileErrorFromCode(code: MobileErrorCode, message?: string) {
       return mobileError(code, message ?? 'Push token was not found', 404)
     case 'NOTIFICATION_NOT_FOUND':
       return mobileError(code, message ?? 'Notification not found', 404)
+    case 'CHAT_NOT_AVAILABLE':
+      return mobileError(code, message ?? 'Chat is not available for this trip', 409)
+    case 'CONVERSATION_NOT_FOUND':
+      return mobileError(code, message ?? 'Conversation not found', 404)
+    case 'MESSAGE_NOT_FOUND':
+      return mobileError(code, message ?? 'Message not found', 404)
+    case 'MESSAGE_EMPTY':
+      return mobileError(code, message ?? 'Message cannot be empty', 400)
+    case 'MESSAGE_TOO_LONG':
+      return mobileError(code, message ?? 'Message is too long', 400)
     case 'VALIDATION_ERROR':
       return mobileValidationError(message)
     case 'INTERNAL_ERROR':

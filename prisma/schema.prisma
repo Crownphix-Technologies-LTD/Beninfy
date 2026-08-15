@@ -246,6 +246,7 @@ model BookingLeg {
   declineReasonCode      String?
   notes                  String?
   latestLocation         LatestTripLocation?
+  chatConversations      TripConversation[]
   createdAt              DateTime            @default(now())
   updatedAt              DateTime            @updatedAt
 
@@ -367,6 +368,48 @@ model NotificationDelivery {
   @@index([notificationId])
   @@index([pushDeviceId])
   @@index([status, nextAttemptAt])
+}
+
+model TripConversation {
+  id                 String        @id @default(cuid())
+  bookingLegId       String
+  bookingLeg         BookingLeg    @relation(fields: [bookingLegId], references: [id], onDelete: Cascade)
+  customerUserId     String
+  driverId           String
+  status             String        @default("open")
+  closedAt           DateTime?
+  closedReason       String?
+  customerLastReadAt DateTime?
+  driverLastReadAt   DateTime?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+  messages           ChatMessage[]
+
+  @@unique([bookingLegId, driverId])
+  @@index([bookingLegId, status])
+  @@index([customerUserId, updatedAt])
+  @@index([driverId, updatedAt])
+}
+
+model ChatMessage {
+  id              String           @id @default(cuid())
+  conversationId  String
+  conversation    TripConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  bookingLegId    String
+  senderType      String
+  senderUserId    String?
+  senderDriverId  String?
+  messageType     String           @default("text")
+  text            String?
+  systemCode      String?
+  clientMessageId String?
+  createdAt       DateTime         @default(now())
+
+  @@unique([conversationId, senderType, clientMessageId])
+  @@index([conversationId, createdAt, id])
+  @@index([bookingLegId, createdAt])
+  @@index([senderUserId, createdAt])
+  @@index([senderDriverId, createdAt])
 }
 
 model Route {
