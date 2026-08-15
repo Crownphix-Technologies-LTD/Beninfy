@@ -1,0 +1,335 @@
+export type MobileBookingStatus = 'pending' | 'confirmed' | 'ops_review' | 'cancelled' | 'completed'
+
+export type MobileBookingLegStatus =
+  | 'payment_pending'
+  | 'reserved'
+  | 'unassigned'
+  | 'assigned'
+  | 'dispatched'
+  | 'completed'
+  | 'cancelled'
+
+export type MobilePaymentStatus = 'pending' | 'paid' | 'failed' | 'amount_mismatch'
+
+export type CustomerProfileDto = {
+  id: string
+  name: string | null
+  email: string
+  phone: string | null
+}
+
+export type FleetVehicleDto = {
+  id: string
+  label: string
+  plateNumber: string
+  color: string | null
+  vehicleCategoryId: string
+  status: 'available' | 'maintenance' | 'inactive'
+}
+
+export type DriverProfileDto = {
+  id: string
+  name: string
+  phone: string
+  email: string | null
+  status: 'available' | 'off_duty' | 'inactive'
+}
+
+export type BookingLegDto = {
+  id: string
+  bookingId: string
+  direction: string
+  from: string
+  to: string
+  departureDate: string
+  status: MobileBookingLegStatus
+  vehicleCategoryId: string
+  fleetVehicle: FleetVehicleDto | null
+  driver: DriverProfileDto | null
+}
+
+export type CustomerBookingSummaryDto = {
+  id: string
+  reference: string
+  from: string
+  to: string
+  date: string
+  returnDate: string | null
+  tripType: 'one-way' | 'round-trip'
+  passengers: number
+  status: MobileBookingStatus
+  priceNGN: number
+  paymentStatus: MobilePaymentStatus | null
+}
+
+export type CustomerBookingDetailDto = CustomerBookingSummaryDto & {
+  pickupAddress: string | null
+  dropoffAddress: string | null
+  passengerName: string | null
+  passengerEmail: string | null
+  passengerPhone: string | null
+  legs: BookingLegDto[]
+  payments: PaymentDto[]
+}
+
+export type DriverTripSummaryDto = {
+  legId: string
+  bookingId: string
+  reference: string
+  direction: string
+  from: string
+  to: string
+  departureDate: string
+  status: MobileBookingLegStatus
+  passengerName: string | null
+  passengerPhone: string | null
+  pickupAddress: string | null
+  dropoffAddress: string | null
+  vehicle: FleetVehicleDto | null
+}
+
+export type DriverTripDetailDto = DriverTripSummaryDto & {
+  passengers: number
+  travelers: unknown
+  specialRequirements: string | null
+}
+
+export type PaymentDto = {
+  id: string
+  bookingId: string
+  reference: string
+  provider: string
+  amountNGN: number
+  currencyCode: string
+  checkoutAmount: number | null
+  status: MobilePaymentStatus
+  createdAt: string
+  updatedAt: string
+}
+
+export type TripTrackingDto = {
+  legId: string
+  status: MobileBookingLegStatus
+  lastKnownLocation: {
+    latitude: number
+    longitude: number
+    recordedAt: string
+    accuracyMeters: number | null
+  } | null
+  vehicle: FleetVehicleDto | null
+  driver: Pick<DriverProfileDto, 'id' | 'name' | 'phone'> | null
+}
+
+type Dateish = Date | string
+
+function toIso(value: Dateish) {
+  return value instanceof Date ? value.toISOString() : new Date(value).toISOString()
+}
+
+function displayReference(id: string) {
+  return `BFY-${id.slice(-8).toUpperCase()}`
+}
+
+function normalizeTripType(value: string): 'one-way' | 'round-trip' {
+  return value === 'round_trip' || value === 'round-trip' ? 'round-trip' : 'one-way'
+}
+
+export function toCustomerProfileDto(user: {
+  id: string
+  name: string | null
+  email: string | null
+  phone: string | null
+}): CustomerProfileDto {
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email ?? '',
+    phone: user.phone,
+  }
+}
+
+export function toFleetVehicleDto(fleetVehicle: {
+  id: string
+  label: string
+  plateNumber: string
+  color: string | null
+  vehicleId: string
+  status: string
+}): FleetVehicleDto {
+  return {
+    id: fleetVehicle.id,
+    label: fleetVehicle.label,
+    plateNumber: fleetVehicle.plateNumber,
+    color: fleetVehicle.color,
+    vehicleCategoryId: fleetVehicle.vehicleId,
+    status: fleetVehicle.status as FleetVehicleDto['status'],
+  }
+}
+
+export function toDriverProfileDto(driver: {
+  id: string
+  name: string
+  phone: string
+  email: string | null
+  status: string
+}): DriverProfileDto {
+  return {
+    id: driver.id,
+    name: driver.name,
+    phone: driver.phone,
+    email: driver.email,
+    status: driver.status as DriverProfileDto['status'],
+  }
+}
+
+export function toPaymentDto(payment: {
+  id: string
+  bookingId: string
+  reference: string
+  provider: string
+  amountNGN: number
+  currencyCode: string
+  checkoutAmount: number | null
+  status: string
+  createdAt: Dateish
+  updatedAt: Dateish
+}): PaymentDto {
+  return {
+    id: payment.id,
+    bookingId: payment.bookingId,
+    reference: payment.reference,
+    provider: payment.provider,
+    amountNGN: payment.amountNGN,
+    currencyCode: payment.currencyCode,
+    checkoutAmount: payment.checkoutAmount,
+    status: payment.status as MobilePaymentStatus,
+    createdAt: toIso(payment.createdAt),
+    updatedAt: toIso(payment.updatedAt),
+  }
+}
+
+export function toBookingLegDto(leg: {
+  id: string
+  bookingId: string
+  direction: string
+  from: string
+  to: string
+  departureDate: Dateish
+  status: string
+  vehicleId: string
+  fleetVehicle: Parameters<typeof toFleetVehicleDto>[0] | null
+  driver: Parameters<typeof toDriverProfileDto>[0] | null
+}): BookingLegDto {
+  return {
+    id: leg.id,
+    bookingId: leg.bookingId,
+    direction: leg.direction,
+    from: leg.from,
+    to: leg.to,
+    departureDate: toIso(leg.departureDate),
+    status: leg.status as MobileBookingLegStatus,
+    vehicleCategoryId: leg.vehicleId,
+    fleetVehicle: leg.fleetVehicle ? toFleetVehicleDto(leg.fleetVehicle) : null,
+    driver: leg.driver ? toDriverProfileDto(leg.driver) : null,
+  }
+}
+
+export function toCustomerBookingSummaryDto(booking: {
+  id: string
+  from: string
+  to: string
+  date: Dateish
+  returnDate: Dateish | null
+  tripType: string
+  passengers: number
+  status: string
+  priceNGN: number
+  payments?: Array<{ status: string; createdAt: Dateish }>
+}): CustomerBookingSummaryDto {
+  const latestPayment = booking.payments?.slice().sort((a, b) => {
+    return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  })[0]
+
+  return {
+    id: booking.id,
+    reference: displayReference(booking.id),
+    from: booking.from,
+    to: booking.to,
+    date: toIso(booking.date),
+    returnDate: booking.returnDate ? toIso(booking.returnDate) : null,
+    tripType: normalizeTripType(booking.tripType),
+    passengers: booking.passengers,
+    status: booking.status as MobileBookingStatus,
+    priceNGN: booking.priceNGN,
+    paymentStatus: latestPayment ? latestPayment.status as MobilePaymentStatus : null,
+  }
+}
+
+export function toCustomerBookingDetailDto(booking: Parameters<typeof toCustomerBookingSummaryDto>[0] & {
+  pickupAddress: string | null
+  dropoffAddress: string | null
+  passengerName: string | null
+  passengerEmail: string | null
+  passengerPhone: string | null
+  legs: Parameters<typeof toBookingLegDto>[0][]
+  payments: Parameters<typeof toPaymentDto>[0][]
+}): CustomerBookingDetailDto {
+  return {
+    ...toCustomerBookingSummaryDto(booking),
+    pickupAddress: booking.pickupAddress,
+    dropoffAddress: booking.dropoffAddress,
+    passengerName: booking.passengerName,
+    passengerEmail: booking.passengerEmail,
+    passengerPhone: booking.passengerPhone,
+    legs: booking.legs.map(toBookingLegDto),
+    payments: booking.payments.map(toPaymentDto),
+  }
+}
+
+export function toDriverTripSummaryDto(leg: {
+  id: string
+  bookingId: string
+  direction: string
+  from: string
+  to: string
+  departureDate: Dateish
+  status: string
+  fleetVehicle: Parameters<typeof toFleetVehicleDto>[0] | null
+  booking: {
+    passengerName: string | null
+    passengerPhone: string | null
+    pickupAddress: string | null
+    dropoffAddress: string | null
+  }
+}): DriverTripSummaryDto {
+  return {
+    legId: leg.id,
+    bookingId: leg.bookingId,
+    reference: displayReference(leg.bookingId),
+    direction: leg.direction,
+    from: leg.from,
+    to: leg.to,
+    departureDate: toIso(leg.departureDate),
+    status: leg.status as MobileBookingLegStatus,
+    passengerName: leg.booking.passengerName,
+    passengerPhone: leg.booking.passengerPhone,
+    pickupAddress: leg.booking.pickupAddress,
+    dropoffAddress: leg.booking.dropoffAddress,
+    vehicle: leg.fleetVehicle ? toFleetVehicleDto(leg.fleetVehicle) : null,
+  }
+}
+
+export function toDriverTripDetailDto(leg: Parameters<typeof toDriverTripSummaryDto>[0] & {
+  booking: Parameters<typeof toDriverTripSummaryDto>[0]['booking'] & {
+    passengers: number
+    travelers: unknown
+    specialRequirements: string | null
+  }
+}): DriverTripDetailDto {
+  return {
+    ...toDriverTripSummaryDto(leg),
+    passengers: leg.booking.passengers,
+    travelers: leg.booking.travelers,
+    specialRequirements: leg.booking.specialRequirements,
+  }
+}

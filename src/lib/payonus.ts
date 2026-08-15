@@ -61,7 +61,11 @@ export type PayOnUsWebhookPayload = {
 
 export type PaymentSettlement =
   | { ok: true; status: 'paid'; bookingId: string; reference: string; providerReference?: string }
-  | { ok: false; status: 'pending' | 'failed' | 'amount_mismatch' | 'availability_conflict' | 'not_found'; message: string }
+  | {
+      ok: false
+      status: 'pending' | 'failed' | 'amount_mismatch' | 'availability_conflict' | 'not_found'
+      message: string
+    }
 
 const tokenCache = globalThis as typeof globalThis & {
   __payonusToken?: { token: string; expiresAt: number }
@@ -92,12 +96,19 @@ export function getPayOnUsEnvironment(): PayOnUsEnvironment {
 }
 
 export function getPayOnUsBaseUrl() {
-  return getPayOnUsEnvironment() === 'production' ? 'https://core.payonus.com' : 'https://core-sandbox.payonus.com'
+  return getPayOnUsEnvironment() === 'production'
+    ? 'https://core.payonus.com'
+    : 'https://core-sandbox.payonus.com'
 }
 
 export function getPaymentConfigurationError() {
   if (!paymentsEnabled()) return 'Payments are temporarily unavailable'
-  if (!getPayOnUsClientId() || !getPayOnUsClientSecret() || !getPayOnUsBusinessId() || !getPayOnUsWebhookKey()) {
+  if (
+    !getPayOnUsClientId() ||
+    !getPayOnUsClientSecret() ||
+    !getPayOnUsBusinessId() ||
+    !getPayOnUsWebhookKey()
+  ) {
     return 'PayOnUs payments are not fully configured'
   }
   return null
@@ -119,7 +130,8 @@ export async function getPayOnUsAccessToken() {
 
   const apiClientId = getPayOnUsClientId()
   const apiClientSecret = getPayOnUsClientSecret()
-  if (!apiClientId || !apiClientSecret) throw new Error('PayOnUs API credentials are not configured')
+  if (!apiClientId || !apiClientSecret)
+    throw new Error('PayOnUs API credentials are not configured')
 
   const res = await fetch(`${getPayOnUsBaseUrl()}/api/v1/access-token`, {
     method: 'POST',
@@ -169,7 +181,10 @@ function successful(status: string | undefined) {
 
 async function findPayment(reference?: string | null, providerReference?: string | null) {
   if (reference) {
-    const payment = await prisma.payment.findUnique({ where: { reference }, include: { booking: true } })
+    const payment = await prisma.payment.findUnique({
+      where: { reference },
+      include: { booking: true },
+    })
     if (payment) return payment
   }
   if (providerReference) {
@@ -205,7 +220,11 @@ export async function settlePaymentFromPayOnUs(
         message: verified.message || 'Payment is not complete yet',
       })
     }
-    return { ok: false, status: nextStatus, message: verified.message || 'Payment is not complete yet' }
+    return {
+      ok: false,
+      status: nextStatus,
+      message: verified.message || 'Payment is not complete yet',
+    }
   }
 
   const paidAmount = Number(data?.amountPaid ?? data?.amount ?? 0)
@@ -225,7 +244,11 @@ export async function settlePaymentFromPayOnUs(
         message: 'Payment amount does not match booking total',
       })
     }
-    return { ok: false, status: 'amount_mismatch', message: 'Payment amount does not match booking total' }
+    return {
+      ok: false,
+      status: 'amount_mismatch',
+      message: 'Payment amount does not match booking total',
+    }
   }
 
   const providerReference = data?.onusReference ?? onusReference
@@ -253,11 +276,17 @@ export async function settlePaymentFromPayOnUs(
     return { ok: false, status: reservation.status, message: reservation.message }
   }
 
-  if (payment.status !== 'paid') {
+  if (payment.status !== 'paid' && !reservation.alreadySettled) {
     await notifyPaymentSuccess(payment.bookingId, payment.id)
   }
 
-  return { ok: true, status: 'paid', bookingId: payment.bookingId, reference: payment.reference, providerReference }
+  return {
+    ok: true,
+    status: 'paid',
+    bookingId: payment.bookingId,
+    reference: payment.reference,
+    providerReference,
+  }
 }
 
 export function verifyPayOnUsWebhookHash(payload: PayOnUsWebhookPayload, hash: string) {
@@ -271,7 +300,9 @@ export function verifyPayOnUsWebhookHash(payload: PayOnUsWebhookPayload, hash: s
   return a.length === b.length && timingSafeEqual(a, b)
 }
 
-export async function settlePaymentFromPayOnUsWebhook(payload: PayOnUsWebhookPayload): Promise<PaymentSettlement | null> {
+export async function settlePaymentFromPayOnUsWebhook(
+  payload: PayOnUsWebhookPayload
+): Promise<PaymentSettlement | null> {
   const reference = payload.merchantCheckoutReference || payload.merchantReference
   const onusReference = payload.onusReference
   if (!reference && !onusReference) return null
@@ -304,7 +335,10 @@ export async function settlePaymentFromPayOnUsWebhook(payload: PayOnUsWebhookPay
   if (paidAmount + 0.01 < payment.amountNGN || payload.currency !== 'NGN') {
     await prisma.payment.update({
       where: { id: payment.id },
-      data: { status: 'amount_mismatch', providerReference: onusReference ?? payment.providerReference },
+      data: {
+        status: 'amount_mismatch',
+        providerReference: onusReference ?? payment.providerReference,
+      },
     })
     await failBookingPayment(payment.bookingId)
     if (payment.status !== 'amount_mismatch') {
@@ -316,7 +350,11 @@ export async function settlePaymentFromPayOnUsWebhook(payload: PayOnUsWebhookPay
         message: 'Payment amount does not match booking total',
       })
     }
-    return { ok: false, status: 'amount_mismatch', message: 'Payment amount does not match booking total' }
+    return {
+      ok: false,
+      status: 'amount_mismatch',
+      message: 'Payment amount does not match booking total',
+    }
   }
 
   const reservation = await markPaymentPaidAndReserveBooking({
@@ -343,9 +381,15 @@ export async function settlePaymentFromPayOnUsWebhook(payload: PayOnUsWebhookPay
     return { ok: false, status: reservation.status, message: reservation.message }
   }
 
-  if (payment.status !== 'paid') {
+  if (payment.status !== 'paid' && !reservation.alreadySettled) {
     await notifyPaymentSuccess(payment.bookingId, payment.id)
   }
 
-  return { ok: true, status: 'paid', bookingId: payment.bookingId, reference: payment.reference, providerReference: onusReference }
+  return {
+    ok: true,
+    status: 'paid',
+    bookingId: payment.bookingId,
+    reference: payment.reference,
+    providerReference: onusReference,
+  }
 }

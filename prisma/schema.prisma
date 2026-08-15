@@ -20,11 +20,35 @@ model User {
   hashedPassword String?
   role          String   @default("user")
   sessionVersion Int     @default(0)
+  disabledAt    DateTime?
   bookings      Booking[]
+  driver         Driver?
+  mobileSessions MobileSession[]
   accounts      Account[]
   sessions      Session[]
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+}
+
+model MobileSession {
+  id               String   @id @default(cuid())
+  userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshTokenHash String   @unique
+  deviceId         String?
+  platform         String?
+  deviceName       String?
+  appVersion       String?
+  revokedAt        DateTime?
+  expiresAt        DateTime
+  lastUsedAt       DateTime @default(now())
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([userId])
+  @@index([userId, revokedAt, expiresAt])
+  @@index([expiresAt])
+  @@index([revokedAt])
 }
 
 model RateLimitBucket {
@@ -112,6 +136,11 @@ model Booking {
   updatedAt   DateTime @updatedAt
 
   @@index([couponId])
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+  @@index([vehicleId, date])
+  @@index([passengerEmail])
+  @@index([createdAt])
 }
 
 model Vehicle {
@@ -149,10 +178,14 @@ model FleetVehicle {
   blocks          VehicleBlock[]
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+
+  @@index([vehicleId, status, label])
 }
 
 model Driver {
   id              String   @id @default(cuid())
+  userId          String?  @unique
+  user            User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
   name            String
   phone           String
   email           String?
@@ -163,6 +196,8 @@ model Driver {
   bookingLegs     BookingLeg[]
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+
+  @@index([status, name])
 }
 
 model VehicleBlock {
@@ -175,6 +210,8 @@ model VehicleBlock {
   notes           String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+
+  @@index([fleetVehicleId, startsAt, endsAt])
 }
 
 model BookingLeg {
@@ -198,7 +235,10 @@ model BookingLeg {
   @@index([bookingId])
   @@index([vehicleId, departureDate])
   @@index([fleetVehicleId, departureDate])
+  @@index([fleetVehicleId, status, departureDate])
   @@index([driverId, departureDate])
+  @@index([driverId, status, departureDate])
+  @@index([status, departureDate])
 }
 
 model Route {
@@ -306,4 +346,8 @@ model Payment {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
   booking           Booking  @relation(fields: [bookingId], references: [id])
+
+  @@index([bookingId, createdAt])
+  @@index([status, createdAt])
+  @@index([provider, status, createdAt])
 }
