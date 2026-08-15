@@ -15,6 +15,15 @@ import {
   verifyRealtimeScope,
   signRealtimeScope,
 } from '../src/lib/mobile/tracking'
+import {
+  appTypeForPrincipal,
+  classifyProviderError,
+  normalizeNotificationLanguage,
+  principalOwnsAppType,
+  pushPayloadToData,
+  templateFor,
+  validatePushToken,
+} from '../src/lib/mobile/notifications'
 
 test('driver transition blocks terminal trips', () => {
   const result = evaluateDriverTripTransition({
@@ -271,4 +280,74 @@ test('realtime scope token is trip scoped and verifiable', () => {
   assert.equal(verified?.bookingLegId, 'leg1')
   assert.equal(verified?.channel, 'trip:leg1:tracking')
   assert.equal(verified?.permission, 'subscribe')
+})
+
+test('push token registration validates basic token shape', () => {
+  assert.equal(validatePushToken('short'), false)
+  assert.equal(validatePushToken('fcm-token-value-with-enough-length'), true)
+})
+
+test('push app ownership is derived from authenticated mobile principal', () => {
+  const customer = {
+    type: 'CUSTOMER',
+    userId: 'user1',
+    email: 'customer@example.com',
+    role: 'user',
+    sessionId: 'session1',
+  } as const
+  const driver = {
+    type: 'DRIVER',
+    userId: 'user2',
+    email: 'driver@example.com',
+    role: 'driver',
+    sessionId: 'session2',
+    driverId: 'driver1',
+  } as const
+
+  assert.equal(appTypeForPrincipal(customer), 'customer')
+  assert.equal(appTypeForPrincipal(driver), 'driver')
+  assert.equal(principalOwnsAppType(customer, 'driver'), false)
+  assert.equal(principalOwnsAppType(driver, 'customer'), false)
+})
+
+test('notification localization resolves French and falls back to English', () => {
+  assert.equal(normalizeNotificationLanguage('fr-BJ'), 'fr')
+  assert.equal(normalizeNotificationLanguage('de'), 'en')
+  assert.equal(templateFor('trip.driver_arrived', 'fr')?.title, 'Chauffeur arrive')
+  assert.equal(templateFor('trip.driver_arrived', 'en')?.title, 'Driver arrived')
+})
+
+test('push payload data remains stable and string-only', () => {
+  assert.deepEqual(
+    pushPayloadToData({
+      type: 'trip.driver_arrived',
+      version: 1,
+      bookingId: 'booking1',
+      bookingLegId: 'leg1',
+    }),
+    {
+      type: 'trip.driver_arrived',
+      version: '1',
+      bookingId: 'booking1',
+      bookingLegId: 'leg1',
+    }
+  )
+})
+
+test('provider error classification separates invalid, configuration and transient failures', () => {
+  assert.deepEqual(classifyProviderError('registration-token-not-registered'), {
+    ok: false,
+    classification: 'invalid_token',
+    errorCode: 'registration-token-not-registered',
+  })
+  assert.deepEqual(classifyProviderError('unauthorized'), {
+    ok: false,
+    classification: 'configuration',
+    errorCode: 'unauthorized',
+  })
+  assert.deepEqual(classifyProviderError('timeout'), {
+    ok: false,
+    classification: 'transient',
+    errorCode: 'timeout',
+  })
 })

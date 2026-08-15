@@ -25,6 +25,9 @@ export type MobileErrorCode =
   | 'LOCATION_INVALID'
   | 'LOCATION_STALE'
   | 'LOCATION_RATE_LIMITED'
+  | 'PUSH_TOKEN_INVALID'
+  | 'PUSH_TOKEN_NOT_FOUND'
+  | 'NOTIFICATION_NOT_FOUND'
   | 'INTERNAL_ERROR'
 
 export type MobileErrorBody = {
@@ -114,6 +117,12 @@ export function mobileErrorFromCode(code: MobileErrorCode, message?: string) {
       return mobileError(code, message ?? 'Location update is stale', 409)
     case 'LOCATION_RATE_LIMITED':
       return mobileError(code, message ?? 'Too many location updates', 429)
+    case 'PUSH_TOKEN_INVALID':
+      return mobileError(code, message ?? 'Push token is invalid', 400)
+    case 'PUSH_TOKEN_NOT_FOUND':
+      return mobileError(code, message ?? 'Push token was not found', 404)
+    case 'NOTIFICATION_NOT_FOUND':
+      return mobileError(code, message ?? 'Notification not found', 404)
     case 'VALIDATION_ERROR':
       return mobileValidationError(message)
     case 'INTERNAL_ERROR':

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { requireAdminPermission } from '@/lib/admin'
+import { notifyTripLifecyclePush } from '@/lib/mobile/notifications'
 import { notifyBookingAssignmentChanged } from '@/lib/notifications'
 import { prisma } from '@/lib/prisma'
 import { BOOKING_LEG_STATUSES, NON_BLOCKING_LEG_STATUSES } from '@/lib/tripLifecycle'
@@ -112,7 +113,21 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     data.status !== undefined ||
     data.notes !== undefined
   ) {
-    await notifyBookingAssignmentChanged(bookingLeg.id)
+    await notifyBookingAssignmentChanged(bookingLeg.id, leg.driverId)
+    if (data.status !== undefined && data.status !== leg.status) {
+      await notifyTripLifecyclePush({
+        bookingId: bookingLeg.bookingId,
+        bookingLegId: bookingLeg.id,
+        nextStatus: bookingLeg.status,
+        driverId: bookingLeg.driverId,
+      }).catch((error) => {
+        console.warn('Admin trip lifecycle push notification failed', {
+          bookingLegId: bookingLeg.id,
+          nextStatus: bookingLeg.status,
+          error: error instanceof Error ? error.message : 'unknown',
+        })
+      })
+    }
   }
 
   if (bookingLeg.status === 'completed') {

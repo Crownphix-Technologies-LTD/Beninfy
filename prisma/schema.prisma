@@ -11,39 +11,41 @@ datasource db {
 }
 
 model User {
-  id            String   @id @default(cuid())
-  name          String?
-  email         String?  @unique
-  emailVerified DateTime?
-  image         String?
-  phone         String?
+  id             String          @id @default(cuid())
+  name           String?
+  email          String?         @unique
+  emailVerified  DateTime?
+  image          String?
+  phone          String?
   hashedPassword String?
-  role          String   @default("user")
-  sessionVersion Int     @default(0)
-  disabledAt    DateTime?
-  bookings      Booking[]
+  role           String          @default("user")
+  sessionVersion Int             @default(0)
+  disabledAt     DateTime?
+  bookings       Booking[]
   driver         Driver?
   mobileSessions MobileSession[]
-  accounts      Account[]
-  sessions      Session[]
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  pushDevices    PushDevice[]
+  notifications  Notification[]
+  accounts       Account[]
+  sessions       Session[]
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
 }
 
 model MobileSession {
-  id               String   @id @default(cuid())
+  id               String    @id @default(cuid())
   userId           String
-  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  refreshTokenHash String   @unique
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshTokenHash String    @unique
   deviceId         String?
   platform         String?
   deviceName       String?
   appVersion       String?
   revokedAt        DateTime?
   expiresAt        DateTime
-  lastUsedAt       DateTime @default(now())
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  lastUsedAt       DateTime  @default(now())
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   @@index([userId])
   @@index([userId, revokedAt, expiresAt])
@@ -77,19 +79,19 @@ model AuditLog {
 }
 
 model Account {
-  id                 String  @id @default(cuid())
-  userId             String
-  type               String
-  provider           String
-  providerAccountId  String
-  refresh_token      String?
-  access_token       String?
-  expires_at         Int?
-  token_type         String?
-  scope              String?
-  id_token           String?
-  session_state      String?
-  user               User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([provider, providerAccountId])
 }
@@ -103,37 +105,37 @@ model Session {
 }
 
 model Booking {
-  id          String   @id @default(cuid())
-  userId      String?
-  user        User?    @relation(fields: [userId], references: [id])
-  from        String
-  to          String
-  date        DateTime
-  returnDate  DateTime?
-  tripType    String   @default("one_way")
-  passengerName  String?
-  passengerEmail String?
-  passengerPhone String?
-  passportId     String?
-  nationality    String?
-  travelers      Json?
-  pickupAddress  String?
-  dropoffAddress String?
+  id                  String       @id @default(cuid())
+  userId              String?
+  user                User?        @relation(fields: [userId], references: [id])
+  from                String
+  to                  String
+  date                DateTime
+  returnDate          DateTime?
+  tripType            String       @default("one_way")
+  passengerName       String?
+  passengerEmail      String?
+  passengerPhone      String?
+  passportId          String?
+  nationality         String?
+  travelers           Json?
+  pickupAddress       String?
+  dropoffAddress      String?
   specialRequirements String?
-  vehicleId   String
-  vehicle     Vehicle  @relation(fields: [vehicleId], references: [id])
-  passengers  Int
-  priceNGN    Int
-  discountNGN Int      @default(0)
-  couponId    String?
-  couponCode  String?
-  coupon      Coupon?  @relation(fields: [couponId], references: [id], onDelete: SetNull)
-  status      String   @default("pending")
-  paymentId   String?
-  payments    Payment[]
-  legs        BookingLeg[]
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  vehicleId           String
+  vehicle             Vehicle      @relation(fields: [vehicleId], references: [id])
+  passengers          Int
+  priceNGN            Int
+  discountNGN         Int          @default(0)
+  couponId            String?
+  couponCode          String?
+  coupon              Coupon?      @relation(fields: [couponId], references: [id], onDelete: SetNull)
+  status              String       @default("pending")
+  paymentId           String?
+  payments            Payment[]
+  legs                BookingLeg[]
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
 
   @@index([couponId])
   @@index([userId, createdAt])
@@ -144,108 +146,108 @@ model Booking {
 }
 
 model Vehicle {
-  id              String   @id
+  id              String         @id
   name            String
   nameFr          String?
   capacity        Int
-  luggageCapacity Int      @default(0)
-  available       Boolean  @default(true)
+  luggageCapacity Int            @default(0)
+  available       Boolean        @default(true)
   image           String?
   description     String?
   descriptionFr   String?
   badge           String?
   badgeFr         String?
-  features        String[] @default([])
-  featuresFr      String[] @default([])
+  features        String[]       @default([])
+  featuresFr      String[]       @default([])
   basePriceNGN    Int?
   bookings        Booking[]
   fleetVehicles   FleetVehicle[]
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
 }
 
 model FleetVehicle {
-  id              String   @id @default(cuid())
-  vehicleId       String
-  vehicle         Vehicle  @relation(fields: [vehicleId], references: [id])
-  label           String
-  plateNumber     String   @unique
-  color           String?
-  status          String   @default("available")
-  currentCity     String?
-  notes           String?
-  bookingLegs     BookingLeg[]
-  blocks          VehicleBlock[]
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id          String         @id @default(cuid())
+  vehicleId   String
+  vehicle     Vehicle        @relation(fields: [vehicleId], references: [id])
+  label       String
+  plateNumber String         @unique
+  color       String?
+  status      String         @default("available")
+  currentCity String?
+  notes       String?
+  bookingLegs BookingLeg[]
+  blocks      VehicleBlock[]
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
 
   @@index([vehicleId, status, label])
 }
 
 model Driver {
-  id              String   @id @default(cuid())
-  userId          String?  @unique
-  user            User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  id              String               @id @default(cuid())
+  userId          String?              @unique
+  user            User?                @relation(fields: [userId], references: [id], onDelete: SetNull)
   name            String
   phone           String
   email           String?
-  status          String   @default("available")
+  status          String               @default("available")
   homeCity        String?
   licenseNumber   String?
   notes           String?
   bookingLegs     BookingLeg[]
   presence        DriverPresence?
   latestLocations LatestTripLocation[]
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
 
   @@index([status, name])
 }
 
 model VehicleBlock {
-  id              String   @id @default(cuid())
-  fleetVehicleId  String
-  fleetVehicle    FleetVehicle @relation(fields: [fleetVehicleId], references: [id], onDelete: Cascade)
-  startsAt        DateTime
-  endsAt          DateTime
-  reason          String
-  notes           String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id             String       @id @default(cuid())
+  fleetVehicleId String
+  fleetVehicle   FleetVehicle @relation(fields: [fleetVehicleId], references: [id], onDelete: Cascade)
+  startsAt       DateTime
+  endsAt         DateTime
+  reason         String
+  notes          String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
   @@index([fleetVehicleId, startsAt, endsAt])
 }
 
 model BookingLeg {
-  id              String   @id @default(cuid())
-  bookingId       String
-  booking         Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
-  direction       String
-  from            String
-  to              String
-  departureDate   DateTime
-  vehicleId       String
-  fleetVehicleId  String?
-  fleetVehicle    FleetVehicle? @relation(fields: [fleetVehicleId], references: [id])
-  driverId        String?
-  driver          Driver? @relation(fields: [driverId], references: [id])
-  status          String   @default("unassigned")
-  assignedAt      DateTime?
-  acceptedAt      DateTime?
-  declinedAt      DateTime?
-  enRouteAt       DateTime?
-  arrivedAt       DateTime?
-  passengerOnboardAt DateTime?
-  startedAt       DateTime?
-  completedAt     DateTime?
-  cancelledAt     DateTime?
-  cancelledBy     String?
+  id                     String              @id @default(cuid())
+  bookingId              String
+  booking                Booking             @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  direction              String
+  from                   String
+  to                     String
+  departureDate          DateTime
+  vehicleId              String
+  fleetVehicleId         String?
+  fleetVehicle           FleetVehicle?       @relation(fields: [fleetVehicleId], references: [id])
+  driverId               String?
+  driver                 Driver?             @relation(fields: [driverId], references: [id])
+  status                 String              @default("unassigned")
+  assignedAt             DateTime?
+  acceptedAt             DateTime?
+  declinedAt             DateTime?
+  enRouteAt              DateTime?
+  arrivedAt              DateTime?
+  passengerOnboardAt     DateTime?
+  startedAt              DateTime?
+  completedAt            DateTime?
+  cancelledAt            DateTime?
+  cancelledBy            String?
   cancellationReasonCode String?
-  declineReasonCode String?
-  notes           String?
-  latestLocation  LatestTripLocation?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  declineReasonCode      String?
+  notes                  String?
+  latestLocation         LatestTripLocation?
+  createdAt              DateTime            @default(now())
+  updatedAt              DateTime            @updatedAt
 
   @@index([bookingId])
   @@index([vehicleId, departureDate])
@@ -257,46 +259,118 @@ model BookingLeg {
 }
 
 model DriverPresence {
-  id              String   @id @default(cuid())
-  driverId        String   @unique
-  driver          Driver   @relation(fields: [driverId], references: [id], onDelete: Cascade)
-  status          String   @default("offline")
-  lastSeenAt      DateTime
-  lastHeartbeatAt DateTime?
+  id                  String    @id @default(cuid())
+  driverId            String    @unique
+  driver              Driver    @relation(fields: [driverId], references: [id], onDelete: Cascade)
+  status              String    @default("offline")
+  lastSeenAt          DateTime
+  lastHeartbeatAt     DateTime?
   currentBookingLegId String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
 
   @@index([status, lastSeenAt])
   @@index([currentBookingLegId])
 }
 
 model LatestTripLocation {
-  id              String   @id @default(cuid())
-  bookingLegId    String   @unique
-  bookingLeg      BookingLeg @relation(fields: [bookingLegId], references: [id], onDelete: Cascade)
-  driverId        String
-  driver          Driver   @relation(fields: [driverId], references: [id], onDelete: Cascade)
-  latitude        Float
-  longitude       Float
-  accuracyMeters  Float?
-  headingDegrees  Float?
+  id                   String     @id @default(cuid())
+  bookingLegId         String     @unique
+  bookingLeg           BookingLeg @relation(fields: [bookingLegId], references: [id], onDelete: Cascade)
+  driverId             String
+  driver               Driver     @relation(fields: [driverId], references: [id], onDelete: Cascade)
+  latitude             Float
+  longitude            Float
+  accuracyMeters       Float?
+  headingDegrees       Float?
   speedMetersPerSecond Float?
-  sequence        Int?
-  capturedAt      DateTime
-  receivedAt      DateTime @default(now())
-  expiresAt       DateTime
-  sourceSessionId String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  sequence             Int?
+  capturedAt           DateTime
+  receivedAt           DateTime   @default(now())
+  expiresAt            DateTime
+  sourceSessionId      String?
+  createdAt            DateTime   @default(now())
+  updatedAt            DateTime   @updatedAt
 
   @@index([driverId, receivedAt])
   @@index([expiresAt])
   @@index([bookingLegId, capturedAt])
 }
 
+model PushDevice {
+  id            String                 @id @default(cuid())
+  userId        String
+  user          User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  appType       String
+  principalType String
+  platform      String
+  token         String
+  tokenHash     String
+  deviceId      String?
+  deviceName    String?
+  appVersion    String?
+  language      String                 @default("en")
+  lastSeenAt    DateTime               @default(now())
+  revokedAt     DateTime?
+  invalidatedAt DateTime?
+  createdAt     DateTime               @default(now())
+  updatedAt     DateTime               @updatedAt
+  deliveries    NotificationDelivery[]
+
+  @@unique([appType, tokenHash])
+  @@unique([userId, appType, deviceId])
+  @@index([userId, appType, revokedAt, invalidatedAt])
+  @@index([appType, principalType, platform])
+  @@index([lastSeenAt])
+}
+
+model Notification {
+  id            String                 @id @default(cuid())
+  userId        String
+  user          User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  appType       String
+  type          String
+  language      String                 @default("en")
+  title         String
+  body          String
+  payload       Json
+  dedupeKey     String                 @unique
+  readAt        DateTime?
+  deliveryState String                 @default("pending")
+  createdAt     DateTime               @default(now())
+  updatedAt     DateTime               @updatedAt
+  deliveries    NotificationDelivery[]
+
+  @@index([userId, appType, createdAt])
+  @@index([userId, appType, readAt, createdAt])
+  @@index([deliveryState, createdAt])
+  @@index([type, createdAt])
+}
+
+model NotificationDelivery {
+  id                String       @id @default(cuid())
+  notificationId    String
+  notification      Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  pushDeviceId      String?
+  pushDevice        PushDevice?  @relation(fields: [pushDeviceId], references: [id], onDelete: SetNull)
+  provider          String
+  status            String       @default("pending")
+  attempts          Int          @default(0)
+  nextAttemptAt     DateTime?
+  lastAttemptAt     DateTime?
+  providerMessageId String?
+  errorCode         String?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  @@unique([notificationId, pushDeviceId])
+  @@index([notificationId])
+  @@index([pushDeviceId])
+  @@index([status, nextAttemptAt])
+}
+
 model Route {
-  id              String   @id
+  id              String       @id
   from            String
   fromCode        String?
   fromCountry     String?
@@ -304,26 +378,26 @@ model Route {
   toCode          String?
   toCountry       String?
   durationHours   Float
-  popular         Boolean  @default(false)
+  popular         Boolean      @default(false)
   image           String?
   description     String?
   descriptionFr   String?
-  borderCrossings String[] @default([])
+  borderCrossings String[]     @default([])
   prices          RoutePrice[]
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
 }
 
 model RoutePrice {
-  id              String   @id @default(cuid())
-  routeId         String
-  route           Route    @relation(fields: [routeId], references: [id], onDelete: Cascade)
-  vehicleId       String
-  pricingScope    String   @default("default")
-  amountNGN       Int
-  notes           String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id           String   @id @default(cuid())
+  routeId      String
+  route        Route    @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  vehicleId    String
+  pricingScope String   @default("default")
+  amountNGN    Int
+  notes        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   @@unique([routeId, vehicleId, pricingScope])
   @@index([vehicleId])
