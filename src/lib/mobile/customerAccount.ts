@@ -6,6 +6,10 @@ import { notifyTripLifecyclePush } from '@/lib/mobile/notifications'
 import { validateMobilePassword, normalizeMobileLocale } from '@/lib/mobile/onboarding'
 import { issueMobileTokens, type MobileDeviceInput, type MobilePrincipal } from '@/lib/mobile/auth'
 import type { MobileErrorCode } from '@/lib/mobile/errors'
+import {
+  createPaymentResolutionForPaidCancellation,
+  toPaymentResolutionDto,
+} from '@/lib/mobile/customerProduct'
 
 export const CUSTOMER_CANCELLATION_REASONS = [
   'change_of_plans',
@@ -92,7 +96,16 @@ export async function cancelCustomerBooking({
         },
         orderBy: { departureDate: 'asc' },
       },
-      payments: { select: { status: true } },
+      payments: {
+        select: {
+          id: true,
+          amountNGN: true,
+          status: true,
+          provider: true,
+          providerReference: true,
+          currencyCode: true,
+        },
+      },
     },
   })
 
@@ -110,9 +123,14 @@ export async function cancelCustomerBooking({
       ok: true as const,
       bookingId: booking.id,
       bookingStatus: booking.status,
-      legs: booking.legs.map((leg) => ({ id: leg.id, direction: leg.direction, status: leg.status })),
+      legs: booking.legs.map((leg) => ({
+        id: leg.id,
+        direction: leg.direction,
+        status: leg.status,
+      })),
       reasonCode,
       supportFollowUpRequired,
+      paymentResolutions: [],
       idempotent: true,
     }
   }
@@ -122,7 +140,7 @@ export async function cancelCustomerBooking({
     .map((leg) => ({ bookingLegId: leg.id, driverId: leg.driverId }))
   const now = new Date()
 
-  const updated = await prisma.$transaction(async (tx) => {
+  const txResult = await prisma.$transaction(async (tx) => {
     const result = await tx.booking.update({
       where: { id: booking.id },
       data: {
@@ -148,9 +166,19 @@ export async function cancelCustomerBooking({
         },
       },
     })
-    await expireCancelledTracking(result.legs.map((leg) => leg.id), tx)
-    return result
+    await expireCancelledTracking(
+      result.legs.map((leg) => leg.id),
+      tx
+    )
+    const paymentResolutions = await createPaymentResolutionForPaidCancellation({
+      tx,
+      bookingId: booking.id,
+      customerId: booking.userId ?? principal.userId,
+      payments: booking.payments,
+    })
+    return { booking: result, paymentResolutions }
   })
+  const updated = txResult.booking
 
   await Promise.allSettled([
     notifyBookingStatusChanged(updated.id, 'cancelled'),
@@ -171,6 +199,7 @@ export async function cancelCustomerBooking({
     legs: updated.legs,
     reasonCode,
     supportFollowUpRequired,
+    paymentResolutions: txResult.paymentResolutions.map(toPaymentResolutionDto),
     idempotent: false,
   }
 }

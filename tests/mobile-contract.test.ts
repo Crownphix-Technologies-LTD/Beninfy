@@ -70,6 +70,17 @@ import {
   isCustomerCancellationReason,
   normalizeCustomerSettingsLocale,
 } from '../src/lib/mobile/customerAccount'
+import {
+  accountDeleteConfirmation,
+  emailChangePolicy,
+  PAYMENT_RESOLUTION_STATUSES,
+  REVIEW_TAGS,
+  SAVED_PLACE_TYPES,
+  toPaymentResolutionDto,
+  toSavedPlaceDto,
+  toTravelPreferenceDto,
+  validCoordinates,
+} from '../src/lib/mobile/customerProduct'
 import { routes } from '../src/data/routes'
 import { vehicles } from '../src/data/vehicles'
 
@@ -717,14 +728,8 @@ test('driver trip view query scopes by authenticated driver and status', () => {
 })
 
 test('driver trip view sorting is operationally useful', () => {
-  assert.deepEqual(driverTripOrderByForView('upcoming'), [
-    { departureDate: 'asc' },
-    { id: 'asc' },
-  ])
-  assert.deepEqual(driverTripOrderByForView('active'), [
-    { departureDate: 'asc' },
-    { id: 'asc' },
-  ])
+  assert.deepEqual(driverTripOrderByForView('upcoming'), [{ departureDate: 'asc' }, { id: 'asc' }])
+  assert.deepEqual(driverTripOrderByForView('active'), [{ departureDate: 'asc' }, { id: 'asc' }])
   assert.deepEqual(driverTripOrderByForView('completed'), [
     { completedAt: 'desc' },
     { departureDate: 'desc' },
@@ -791,4 +796,107 @@ test('customer settings locale accepts only supported mobile locales', () => {
   assert.equal(normalizeCustomerSettingsLocale('fr'), 'fr')
   assert.equal(normalizeCustomerSettingsLocale('pt'), null)
   assert.equal(normalizeCustomerSettingsLocale(undefined), null)
+})
+
+test('saved place contract validates coordinates and stable place types', () => {
+  assert.deepEqual(SAVED_PLACE_TYPES, ['home', 'work', 'custom'])
+  assert.equal(validCoordinates(6.4281, 3.4219), true)
+  assert.equal(validCoordinates(null, null), true)
+  assert.equal(validCoordinates(91, 3), false)
+  assert.equal(validCoordinates(6, undefined), false)
+
+  assert.deepEqual(
+    toSavedPlaceDto({
+      id: 'place1',
+      type: 'home',
+      label: 'Home',
+      address: 'Victoria Island, Lagos',
+      latitude: 6.4281,
+      longitude: 3.4219,
+      country: 'Nigeria',
+      city: 'Lagos',
+      providerPlaceId: 'google1',
+      createdAt: new Date('2026-08-17T10:00:00.000Z'),
+      updatedAt: new Date('2026-08-17T10:00:00.000Z'),
+    }),
+    {
+      id: 'place1',
+      type: 'home',
+      label: 'Home',
+      address: 'Victoria Island, Lagos',
+      latitude: 6.4281,
+      longitude: 3.4219,
+      country: 'Nigeria',
+      city: 'Lagos',
+      providerPlaceId: 'google1',
+      createdAt: '2026-08-17T10:00:00.000Z',
+      updatedAt: '2026-08-17T10:00:00.000Z',
+    }
+  )
+})
+
+test('travel preference DTO returns explicit null defaults', () => {
+  assert.deepEqual(toTravelPreferenceDto(null), {
+    preferredVehicleId: null,
+    defaultPassengers: null,
+    defaultPickupInstructions: null,
+    createdAt: null,
+    updatedAt: null,
+  })
+})
+
+test('reviews and payment resolution expose stable customer-safe enums and DTOs', () => {
+  assert.equal(REVIEW_TAGS.includes('smooth_border_crossing'), true)
+  assert.equal(PAYMENT_RESOLUTION_STATUSES.includes('review_required'), true)
+  assert.deepEqual(
+    toPaymentResolutionDto({
+      id: 'resolution1',
+      paymentId: 'payment1',
+      bookingId: 'booking12345678',
+      status: 'review_required',
+      reason: 'customer_cancelled_paid_booking',
+      amountNGN: 180000,
+      currencyCode: 'NGN',
+      provider: 'paystack',
+      customerMessageCode: 'refund_review_required',
+      requestedAt: null,
+      reviewedAt: null,
+      approvedAt: null,
+      processingAt: null,
+      completedAt: null,
+      rejectedAt: null,
+      createdAt: new Date('2026-08-17T10:00:00.000Z'),
+      updatedAt: new Date('2026-08-17T10:00:00.000Z'),
+    }),
+    {
+      id: 'resolution1',
+      paymentId: 'payment1',
+      bookingId: 'booking12345678',
+      bookingReference: 'BFY-12345678',
+      status: 'review_required',
+      reason: 'customer_cancelled_paid_booking',
+      amountNGN: 180000,
+      currencyCode: 'NGN',
+      provider: 'paystack',
+      customerMessageCode: 'refund_review_required',
+      requestedAt: null,
+      reviewedAt: null,
+      approvedAt: null,
+      processingAt: null,
+      completedAt: null,
+      rejectedAt: null,
+      createdAt: '2026-08-17T10:00:00.000Z',
+      updatedAt: '2026-08-17T10:00:00.000Z',
+    }
+  )
+})
+
+test('secure account action policies are stable', () => {
+  assert.equal(accountDeleteConfirmation(), 'DELETE_MY_ACCOUNT')
+  assert.deepEqual(emailChangePolicy(), {
+    otpLength: 6,
+    expiresInSeconds: 600,
+    resendCooldownSeconds: 60,
+    maxAttempts: 5,
+  })
 })

@@ -8,29 +8,34 @@ Classification meanings:
 - `MOBILE ADAPTABLE`: Useful backend logic exists, but needs `/api/mobile/v1` contract work.
 - `MOBILE MISSING`: Required mobile capability does not exist yet.
 
-| Route                               | Classification                 | Reason                                                                                               |
-| ----------------------------------- | ------------------------------ | ---------------------------------------------------------------------------------------------------- |
-| `/api/auth/[...nextauth]`           | WEB ONLY                       | Auth.js browser/session contract.                                                                    |
-| `/api/auth/register`                | MOBILE ADAPTABLE               | Registration logic exists; mobile token issuance/error contract missing.                             |
-| `/api/profile`                      | MOBILE ADAPTABLE               | Customer session logic exists; token auth and DTO needed.                                            |
-| `/api/bookings`                     | MOBILE ADAPTABLE               | Strong booking logic; needs mobile DTO, idempotency, token auth, stable errors.                      |
-| `/api/bookings/[id]`                | MOBILE ADAPTABLE               | Own booking logic; needs mobile auth/DTO/errors.                                                     |
-| `/api/payments`                     | MOBILE ADAPTABLE               | Own payment listing; needs pagination and DTO.                                                       |
-| `/api/payments/initiate`            | MOBILE ADAPTABLE               | Provider handoff exists; mobile-safe provider payload needed.                                        |
-| `/api/payments/verify`              | MOBILE ADAPTABLE               | Settlement logic reusable; mobile error shape needed.                                                |
-| `/api/payments/webhook`             | SYSTEM/WEBHOOK                 | Provider-only.                                                                                       |
-| `/api/coupons/validate`             | MOBILE ADAPTABLE               | Needs mobile quote/coupon contract.                                                                  |
-| `/api/vehicles`                     | MOBILE ADAPTABLE               | Public catalog exists; stable DTO needed.                                                            |
-| `/api/tours`                        | MOBILE ADAPTABLE               | Public catalog exists; stable DTO/pagination needed.                                                 |
-| `/api/route-prices`                 | MOBILE ADAPTABLE               | Internal pricing shape; should be replaced by mobile quote endpoint.                                 |
-| `/api/fleet-vehicles`               | MOBILE ADAPTABLE               | Availability logic useful; expose only mobile-safe fleet details.                                    |
-| `/api/media/*`                      | MOBILE READY                   | Public media proxy is suitable if caching remains stable.                                            |
-| `/api/admin/*`                      | ADMIN ONLY                     | Requires admin roles and exposes backoffice operations.                                              |
-| `/api/mobile/v1/auth/*`             | MOBILE READY                   | Phase 2 token auth foundation.                                                                       |
-| `/api/mobile/v1/customer/profile`   | MOBILE READY                   | Token-authenticated DTO endpoint.                                                                    |
-| `/api/mobile/v1/customer/bookings*` | MOBILE ADAPTABLE               | Implemented DTO endpoints; creation still adapts web route pending service extraction.               |
-| `/api/mobile/v1/driver/profile`     | MOBILE READY                   | Token-authenticated linked driver profile.                                                           |
-| `/api/mobile/v1/driver/trips*`      | MOBILE READY                   | Assigned-driver-only trip reads and production lifecycle actions.                                    |
-| Live GPS/tracking                   | BACKEND FOUNDATION IMPLEMENTED | Latest-state location/presence APIs exist; provider realtime delivery and Flutter UI remain planned. |
-| Push notifications                  | MOBILE MISSING                 | No mobile push token/provider model exists.                                                          |
-| Chat                                | MOBILE MISSING                 | No message/conversation domain exists.                                                               |
+| Route                               | Classification                 | Reason                                                                                                 |
+| ----------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------ |
+| `/api/auth/[...nextauth]`           | WEB ONLY                       | Auth.js browser/session contract.                                                                      |
+| `/api/auth/register`                | MOBILE ADAPTABLE               | Registration logic exists; mobile token issuance/error contract missing.                               |
+| `/api/profile`                      | MOBILE ADAPTABLE               | Customer session logic exists; token auth and DTO needed.                                              |
+| `/api/bookings`                     | MOBILE ADAPTABLE               | Strong booking logic; needs mobile DTO, idempotency, token auth, stable errors.                        |
+| `/api/bookings/[id]`                | MOBILE ADAPTABLE               | Own booking logic; needs mobile auth/DTO/errors.                                                       |
+| `/api/payments`                     | MOBILE ADAPTABLE               | Own payment listing; needs pagination and DTO.                                                         |
+| `/api/payments/initiate`            | MOBILE ADAPTABLE               | Provider handoff exists; mobile-safe provider payload needed.                                          |
+| `/api/payments/verify`              | MOBILE ADAPTABLE               | Settlement logic reusable; mobile error shape needed.                                                  |
+| `/api/payments/webhook`             | SYSTEM/WEBHOOK                 | Provider-only.                                                                                         |
+| `/api/coupons/validate`             | MOBILE ADAPTABLE               | Needs mobile quote/coupon contract.                                                                    |
+| `/api/vehicles`                     | MOBILE ADAPTABLE               | Public catalog exists; stable DTO needed.                                                              |
+| `/api/tours`                        | MOBILE READY                   | Public catalogue is exposed through `/api/mobile/v1/tours`.                                            |
+| `/api/route-prices`                 | MOBILE ADAPTABLE               | Internal pricing shape; should be replaced by mobile quote endpoint.                                   |
+| `/api/fleet-vehicles`               | MOBILE ADAPTABLE               | Availability logic useful; expose only mobile-safe fleet details.                                      |
+| `/api/media/*`                      | MOBILE READY                   | Public media proxy is suitable if caching remains stable.                                              |
+| `/api/admin/*`                      | ADMIN ONLY                     | Requires admin roles and exposes backoffice operations.                                                |
+| `/api/mobile/v1/auth/*`             | MOBILE READY                   | Phase 2 token auth foundation.                                                                         |
+| `/api/mobile/v1/customer/profile`   | MOBILE READY                   | Token-authenticated DTO endpoint.                                                                      |
+| `/api/mobile/v1/customer/bookings*` | MOBILE ADAPTABLE               | Implemented DTO endpoints; creation still adapts web route pending service extraction.                 |
+| `/api/mobile/v1/driver/profile`     | MOBILE READY                   | Token-authenticated linked driver profile.                                                             |
+| `/api/mobile/v1/driver/trips*`      | MOBILE READY                   | Assigned-driver-only trip reads and production lifecycle actions.                                      |
+| Live GPS/tracking                   | BACKEND FOUNDATION IMPLEMENTED | Latest-state location/presence APIs exist; provider realtime delivery and Flutter UI remain planned.   |
+| Saved places/preferences            | MOBILE READY                   | Customer-owned saved places and default travel preferences are implemented.                            |
+| Reviews                             | MOBILE READY                   | Completed booking-leg reviews are implemented with immutable one-review-per-leg rules.                 |
+| Payment history/receipts            | MOBILE READY                   | Customer-owned payment history, detail, receipt DTO, and payment-resolution follow-up are implemented. |
+| Support config                      | MOBILE READY                   | Public mobile support configuration endpoint is implemented.                                           |
+| Account management                  | MOBILE READY                   | Email change, avatar upload, export, and soft account deletion are implemented.                        |
+| Push notifications                  | MOBILE READY                   | Push token model/provider abstraction exists; production provider wiring remains environment-specific. |
+| Chat                                | MOBILE READY                   | Trip-scoped chat domain and APIs exist from Phase 6.                                                   |

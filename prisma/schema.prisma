@@ -11,15 +11,15 @@ datasource db {
 }
 
 model User {
-  id                  String               @id @default(cuid())
+  id                  String                    @id @default(cuid())
   name                String?
-  email               String?              @unique
+  email               String?                   @unique
   emailVerified       DateTime?
   image               String?
   phone               String?
   hashedPassword      String?
-  role                String               @default("user")
-  sessionVersion      Int                  @default(0)
+  role                String                    @default("user")
+  sessionVersion      Int                       @default(0)
   disabledAt          DateTime?
   locale              String?
   termsAcceptedAt     DateTime?
@@ -27,6 +27,10 @@ model User {
   termsVersion        String?
   privacyVersion      String?
   bookings            Booking[]
+  savedPlaces         SavedPlace[]
+  travelPreference    CustomerTravelPreference?
+  tripReviews         TripReview[]
+  paymentResolutions  PaymentResolution[]
   driver              Driver?
   mobileSessions      MobileSession[]
   otpChallenges       OtpChallenge[]
@@ -35,8 +39,40 @@ model User {
   notifications       Notification[]
   accounts            Account[]
   sessions            Session[]
-  createdAt           DateTime             @default(now())
-  updatedAt           DateTime             @updatedAt
+  createdAt           DateTime                  @default(now())
+  updatedAt           DateTime                  @updatedAt
+}
+
+model SavedPlace {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type            String
+  label           String?
+  address         String
+  latitude        Float?
+  longitude       Float?
+  country         String?
+  city            String?
+  providerPlaceId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([userId, type])
+  @@index([userId, updatedAt])
+}
+
+model CustomerTravelPreference {
+  id                        String   @id @default(cuid())
+  userId                    String   @unique
+  user                      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  preferredVehicleId        String?
+  defaultPassengers         Int?
+  defaultPickupInstructions String?
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
+
+  @@index([preferredVehicleId])
 }
 
 model OtpChallenge {
@@ -148,14 +184,14 @@ model Session {
 }
 
 model Booking {
-  id                  String       @id @default(cuid())
+  id                  String              @id @default(cuid())
   userId              String?
-  user                User?        @relation(fields: [userId], references: [id])
+  user                User?               @relation(fields: [userId], references: [id])
   from                String
   to                  String
   date                DateTime
   returnDate          DateTime?
-  tripType            String       @default("one_way")
+  tripType            String              @default("one_way")
   passengerName       String?
   passengerEmail      String?
   passengerPhone      String?
@@ -166,19 +202,20 @@ model Booking {
   dropoffAddress      String?
   specialRequirements String?
   vehicleId           String
-  vehicle             Vehicle      @relation(fields: [vehicleId], references: [id])
+  vehicle             Vehicle             @relation(fields: [vehicleId], references: [id])
   passengers          Int
   priceNGN            Int
-  discountNGN         Int          @default(0)
+  discountNGN         Int                 @default(0)
   couponId            String?
   couponCode          String?
-  coupon              Coupon?      @relation(fields: [couponId], references: [id], onDelete: SetNull)
-  status              String       @default("pending")
+  coupon              Coupon?             @relation(fields: [couponId], references: [id], onDelete: SetNull)
+  status              String              @default("pending")
   paymentId           String?
   payments            Payment[]
   legs                BookingLeg[]
-  createdAt           DateTime     @default(now())
-  updatedAt           DateTime     @updatedAt
+  paymentResolutions  PaymentResolution[]
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
 
   @@index([couponId])
   @@index([userId, createdAt])
@@ -239,6 +276,7 @@ model Driver {
   licenseNumber   String?
   notes           String?
   bookingLegs     BookingLeg[]
+  tripReviews     TripReview[]
   presence        DriverPresence?
   latestLocations LatestTripLocation[]
   createdAt       DateTime             @default(now())
@@ -290,6 +328,7 @@ model BookingLeg {
   notes                  String?
   latestLocation         LatestTripLocation?
   chatConversations      TripConversation[]
+  review                 TripReview?
   createdAt              DateTime            @default(now())
   updatedAt              DateTime            @updatedAt
 
@@ -300,6 +339,24 @@ model BookingLeg {
   @@index([driverId, departureDate])
   @@index([driverId, status, departureDate])
   @@index([status, departureDate])
+}
+
+model TripReview {
+  id           String     @id @default(cuid())
+  bookingLegId String     @unique
+  bookingLeg   BookingLeg @relation(fields: [bookingLegId], references: [id], onDelete: Cascade)
+  customerId   String
+  customer     User       @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  driverId     String
+  driver       Driver     @relation(fields: [driverId], references: [id], onDelete: Cascade)
+  rating       Int
+  tags         String[]   @default([])
+  comment      String?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@index([customerId, createdAt])
+  @@index([driverId, createdAt])
 }
 
 model DriverPresence {
@@ -548,26 +605,56 @@ model BorderFee {
 }
 
 model Payment {
-  id                  String    @id @default(cuid())
+  id                  String             @id @default(cuid())
   bookingId           String
   amountNGN           Int
   status              String
-  reference           String    @unique
-  provider            String    @default("payonus")
-  providerReference   String?   @unique
+  reference           String             @unique
+  provider            String             @default("payonus")
+  providerReference   String?            @unique
   providerCheckoutUrl String?
   providerAccessCode  String?
-  currencyCode        String    @default("NGN")
+  currencyCode        String             @default("NGN")
   checkoutAmount      Int?
   expiresAt           DateTime?
   paidAt              DateTime?
   failureCode         String?
-  createdAt           DateTime  @default(now())
-  updatedAt           DateTime  @updatedAt
-  booking             Booking   @relation(fields: [bookingId], references: [id])
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+  booking             Booking            @relation(fields: [bookingId], references: [id])
+  resolution          PaymentResolution?
 
   @@index([bookingId, createdAt])
   @@index([status, createdAt])
   @@index([provider, status, createdAt])
   @@index([bookingId, status, createdAt])
+}
+
+model PaymentResolution {
+  id                  String    @id @default(cuid())
+  paymentId           String    @unique
+  payment             Payment   @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  bookingId           String
+  booking             Booking   @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  customerId          String
+  customer            User      @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  status              String    @default("review_required")
+  reason              String
+  amountNGN           Int
+  currencyCode        String    @default("NGN")
+  provider            String
+  providerReference   String?
+  customerMessageCode String?
+  requestedAt         DateTime?
+  reviewedAt          DateTime?
+  approvedAt          DateTime?
+  processingAt        DateTime?
+  completedAt         DateTime?
+  rejectedAt          DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@index([customerId, status, createdAt])
+  @@index([bookingId])
+  @@index([status, createdAt])
 }

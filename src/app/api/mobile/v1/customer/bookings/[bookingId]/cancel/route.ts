@@ -48,6 +48,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ booking
       legs: result.legs,
       reasonCode: result.reasonCode,
       supportFollowUpRequired: result.supportFollowUpRequired,
+      paymentResolutions: result.paymentResolutions,
       idempotent: result.idempotent,
     },
   })

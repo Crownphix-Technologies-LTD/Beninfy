@@ -38,6 +38,27 @@ Current customer mobile API base:
 - `GET /customer/bookings/:bookingId/payment`
 - `POST /customer/bookings/:bookingId/payment`
 - `POST /customer/bookings/:bookingId/payment/verify`
+- `GET /customer/payments`
+- `GET /customer/payments/:paymentId`
+- `GET /customer/bookings/:bookingId/receipt`
+- `GET /customer/bookings/:bookingId/payment-resolution`
+- `GET /customer/saved-places`
+- `POST /customer/saved-places`
+- `PATCH /customer/saved-places/:savedPlaceId`
+- `DELETE /customer/saved-places/:savedPlaceId`
+- `GET /customer/travel-preferences`
+- `PATCH /customer/travel-preferences`
+- `POST /customer/trips/:bookingLegId/review`
+- `GET /customer/reviews`
+- `GET /customer/reviews/:reviewId`
+- `GET /config/support`
+- `POST /customer/email-change/request`
+- `POST /customer/email-change/verify`
+- `POST /customer/profile/avatar`
+- `GET /customer/account/export`
+- `POST /customer/account/delete`
+- `GET /tours`
+- `GET /tours/:tourId`
 
 ## Identity Rule
 
@@ -98,6 +119,17 @@ Flutter must:
 
 See `docs/mobile-api/mobile-payments.md`.
 
+Standalone payment history:
+
+- `GET /customer/payments?status=all|paid|pending|failed&limit=20&cursor=<id>`
+- `GET /customer/payments/:paymentId`
+
+Receipt:
+
+- `GET /customer/bookings/:bookingId/receipt`
+
+Receipts use stored booking/payment records only. Flutter must not display invented VAT or unstored fare components.
+
 ## Cancel Booking
 
 Flutter flow:
@@ -109,6 +141,8 @@ Flutter flow:
 5. Update local booking state from the backend response.
 
 Do not guess cancellation eligibility on the client.
+
+Paid booking cancellations may return `paymentResolutions`. Flutter should show these as support/payment follow-up records, not as completed refunds.
 
 ## Account Settings
 
@@ -130,3 +164,5 @@ Locale:
 1. User changes app language.
 2. Update Flutter UI locale locally.
 3. `PATCH /customer/settings` with `locale: "en"` or `locale: "fr"`.
+
+Saved places, travel preferences, reviews, support config, account export, account deletion, avatar upload, and tour catalogue contracts are documented in their dedicated files in this directory.

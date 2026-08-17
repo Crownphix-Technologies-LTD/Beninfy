@@ -1,6 +1,6 @@
 # Beninfy Mobile API
 
-Status: Phase 1 readiness documentation.
+Status: Mobile backend foundation plus customer product completion APIs.
 
 The future Flutter apps `beninfy-customer` and `beninfy-driver` will consume the Beninfy platform backend through stable mobile APIs. They must not connect directly to PostgreSQL, depend on Prisma models, call admin UI internals, calculate authoritative prices, settle payments locally, or invent trip lifecycle rules.
 
@@ -16,22 +16,22 @@ Existing web and admin endpoints should remain where they are. Mobile endpoints 
 
 ## Current API Readiness Summary
 
-| Area                                 | Current routes                                                            | Readiness        | Notes                                                                               |
-| ------------------------------------ | ------------------------------------------------------------------------- | ---------------- | ----------------------------------------------------------------------------------- |
-| Auth.js browser auth                 | `/api/auth/*`                                                             | WEB ONLY         | Browser/session-oriented. Do not expose as the primary Flutter auth contract.       |
-| Customer registration                | `/api/auth/register`                                                      | MOBILE ADAPTABLE | Useful logic, but response/error contract and mobile token issuance are missing.    |
-| Customer profile                     | `/api/profile`                                                            | MOBILE ADAPTABLE | Session-cookie auth and web-shaped responses.                                       |
-| Bookings                             | `/api/bookings`, `/api/bookings/[id]`                                     | MOBILE ADAPTABLE | Strong domain logic, but web/session assumptions and non-versioned DTOs.            |
-| Payment initiation/verify            | `/api/payments/*`                                                         | MOBILE ADAPTABLE | Backend settlement is correct; mobile needs explicit provider DTOs and idempotency. |
-| Payment webhook                      | `/api/payments/webhook`                                                   | SYSTEM/WEBHOOK   | Never called by mobile clients.                                                     |
-| Catalog vehicles/tours/routes/prices | `/api/mobile/v1/routes`, `/api/mobile/v1/vehicles`, `/api/mobile/v1/availability`, `/api/mobile/v1/pricing/quote` | IMPLEMENTED | Mobile-safe discovery, live availability, and backend-authoritative quote DTOs. |
-| Coupons                              | `/api/mobile/v1/coupons/validate`                                         | IMPLEMENTED      | Mobile error contract; requires completed customer onboarding.                      |
-| Admin operations                     | `/api/admin/*`                                                            | ADMIN ONLY       | Do not expose to Flutter apps.                                                      |
-| Media proxy                          | `/api/media/*`                                                            | MOBILE READY     | Safe to consume as public media if cache behavior remains stable.                   |
-| Mobile auth                          | `/api/mobile/v1/auth/*`                                                   | IMPLEMENTED      | Customer/driver token auth, refresh rotation, logout, and `me`.                     |
-| Mobile customer profile/bookings     | `/api/mobile/v1/customer/*`                                               | IMPLEMENTED      | Profile, booking list/detail, and booking creation adapter.                         |
-| Mobile driver profile/trips/actions  | `/api/mobile/v1/driver/*`                                                 | IMPLEMENTED      | Linked-driver profile, assigned trips, and minimal status actions.                  |
-| Live GPS, push, chat                 | none                                                                      | MOBILE MISSING   | Explicitly out of Phase 2.                                                          |
+| Area                                 | Current routes                                                                                                    | Readiness      | Notes                                                                               |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------- | -------------- | ----------------------------------------------------------------------------------- |
+| Auth.js browser auth                 | `/api/auth/*`                                                                                                     | WEB ONLY       | Browser/session-oriented. Do not expose as the primary Flutter auth contract.       |
+| Customer registration                | `/api/mobile/v1/auth/register`                                                                                    | IMPLEMENTED    | Token auth, onboarding state, and email OTP verification.                           |
+| Customer profile                     | `/api/mobile/v1/customer/profile`, `/api/mobile/v1/auth/me`                                                       | IMPLEMENTED    | Token-authenticated customer profile DTOs.                                          |
+| Bookings                             | `/api/mobile/v1/customer/bookings*`                                                                               | IMPLEMENTED    | Customer-owned list/detail/create/cancel/payment/tracking contracts.                |
+| Payment initiation/verify            | `/api/mobile/v1/customer/bookings/:bookingId/payment*`                                                            | IMPLEMENTED    | Backend-owned Paystack/PayOnUs handoff and verification.                            |
+| Payment webhook                      | `/api/payments/webhook`                                                                                           | SYSTEM/WEBHOOK | Never called by mobile clients.                                                     |
+| Catalog vehicles/tours/routes/prices | `/api/mobile/v1/routes`, `/api/mobile/v1/vehicles`, `/api/mobile/v1/availability`, `/api/mobile/v1/pricing/quote` | IMPLEMENTED    | Mobile-safe discovery, live availability, and backend-authoritative quote DTOs.     |
+| Coupons                              | `/api/mobile/v1/coupons/validate`                                                                                 | IMPLEMENTED    | Mobile error contract; requires completed customer onboarding.                      |
+| Admin operations                     | `/api/admin/*`                                                                                                    | ADMIN ONLY     | Do not expose to Flutter apps.                                                      |
+| Media proxy                          | `/api/media/*`                                                                                                    | MOBILE READY   | Safe to consume as public media if cache behavior remains stable.                   |
+| Mobile auth                          | `/api/mobile/v1/auth/*`                                                                                           | IMPLEMENTED    | Customer/driver token auth, refresh rotation, logout, and `me`.                     |
+| Mobile customer product APIs         | `/api/mobile/v1/customer/*`                                                                                       | IMPLEMENTED    | Profile, bookings, saved places, preferences, payments, receipts, reviews, account. |
+| Mobile driver profile/trips/actions  | `/api/mobile/v1/driver/*`                                                                                         | IMPLEMENTED    | Linked-driver profile, assigned trips, and minimal status actions.                  |
+| Live GPS, push, chat                 | `/api/mobile/v1/driver/tracking*`, `/api/mobile/v1/trips/*/chat*`, notification endpoints                         | IMPLEMENTED    | Backend APIs exist; provider UI wiring is app/environment work.                     |
 
 See the topic files in this directory for planned contracts.
 
@@ -42,6 +42,15 @@ Additional references:
 - `pricing.md`
 - `coupons.md`
 - `cancellations.md`
+- `saved-places.md`
+- `travel-preferences.md`
+- `reviews.md`
+- `payments.md`
+- `receipts.md`
+- `payment-resolutions.md`
+- `support.md`
+- `account-management.md`
+- `tours.md`
 - `settings.md`
 - `cors.md`
 - `phase-2-migration.md`
