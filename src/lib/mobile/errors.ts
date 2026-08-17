@@ -12,6 +12,11 @@ export type MobileErrorCode =
   | 'INVALID_TRIP_VIEW'
   | 'VALIDATION_ERROR'
   | 'BOOKING_NOT_FOUND'
+  | 'BOOKING_NOT_CANCELLABLE'
+  | 'BOOKING_ALREADY_CANCELLED'
+  | 'INVALID_CANCELLATION_REASON'
+  | 'TRIP_ALREADY_STARTED'
+  | 'PARTIAL_CANCELLATION_NOT_SUPPORTED'
   | 'TRIP_NOT_FOUND'
   | 'TRIP_NOT_ASSIGNED'
   | 'TRIP_NOT_AVAILABLE'
@@ -66,6 +71,20 @@ export type MobileErrorCode =
   | 'RESET_TOKEN_INVALID'
   | 'RESET_TOKEN_EXPIRED'
   | 'PASSWORD_INVALID'
+  | 'CURRENT_PASSWORD_INVALID'
+  | 'SAVED_PLACE_NOT_FOUND'
+  | 'SAVED_PLACE_TYPE_CONFLICT'
+  | 'TRAVEL_PREFERENCE_INVALID'
+  | 'REVIEW_NOT_FOUND'
+  | 'REVIEW_NOT_ALLOWED'
+  | 'REVIEW_ALREADY_EXISTS'
+  | 'PAYMENT_RESOLUTION_NOT_FOUND'
+  | 'EMAIL_ALREADY_IN_USE'
+  | 'EMAIL_CHANGE_NOT_FOUND'
+  | 'AVATAR_INVALID'
+  | 'AVATAR_STORAGE_UNAVAILABLE'
+  | 'ACCOUNT_DELETE_CONFIRMATION_INVALID'
+  | 'TOUR_NOT_FOUND'
   | 'INTERNAL_ERROR'
 
 export type MobileErrorBody = {
@@ -131,6 +150,16 @@ export function mobileErrorFromCode(code: MobileErrorCode, message?: string) {
       return mobileError(code, message ?? 'Trip view is invalid', 400)
     case 'BOOKING_NOT_FOUND':
       return mobileError(code, message ?? 'Booking not found', 404)
+    case 'BOOKING_NOT_CANCELLABLE':
+      return mobileError(code, message ?? 'Booking cannot be cancelled', 409)
+    case 'BOOKING_ALREADY_CANCELLED':
+      return mobileError(code, message ?? 'Booking is already cancelled', 409)
+    case 'INVALID_CANCELLATION_REASON':
+      return mobileError(code, message ?? 'Cancellation reason is invalid', 400)
+    case 'TRIP_ALREADY_STARTED':
+      return mobileError(code, message ?? 'Trip has already started', 409)
+    case 'PARTIAL_CANCELLATION_NOT_SUPPORTED':
+      return mobileError(code, message ?? 'Partial cancellation is not supported', 409)
     case 'TRIP_NOT_FOUND':
       return mobileError(code, message ?? 'Trip not found', 404)
     case 'TRIP_NOT_ASSIGNED':
@@ -235,6 +264,34 @@ export function mobileErrorFromCode(code: MobileErrorCode, message?: string) {
       return mobileError(code, message ?? 'Password reset token has expired', 410)
     case 'PASSWORD_INVALID':
       return mobileError(code, message ?? 'Password does not meet the required policy', 400)
+    case 'CURRENT_PASSWORD_INVALID':
+      return mobileError(code, message ?? 'Current password is invalid', 401)
+    case 'SAVED_PLACE_NOT_FOUND':
+      return mobileError(code, message ?? 'Saved place not found', 404)
+    case 'SAVED_PLACE_TYPE_CONFLICT':
+      return mobileError(code, message ?? 'A saved place with this type already exists', 409)
+    case 'TRAVEL_PREFERENCE_INVALID':
+      return mobileError(code, message ?? 'Travel preference is invalid', 400)
+    case 'REVIEW_NOT_FOUND':
+      return mobileError(code, message ?? 'Review not found', 404)
+    case 'REVIEW_NOT_ALLOWED':
+      return mobileError(code, message ?? 'This trip cannot be reviewed', 409)
+    case 'REVIEW_ALREADY_EXISTS':
+      return mobileError(code, message ?? 'This trip has already been reviewed', 409)
+    case 'PAYMENT_RESOLUTION_NOT_FOUND':
+      return mobileError(code, message ?? 'Payment follow-up was not found', 404)
+    case 'EMAIL_ALREADY_IN_USE':
+      return mobileError(code, message ?? 'Email address is already in use', 409)
+    case 'EMAIL_CHANGE_NOT_FOUND':
+      return mobileError(code, message ?? 'Email change request was not found', 404)
+    case 'AVATAR_INVALID':
+      return mobileError(code, message ?? 'Avatar image is invalid', 400)
+    case 'AVATAR_STORAGE_UNAVAILABLE':
+      return mobileError(code, message ?? 'Avatar storage is unavailable', 503)
+    case 'ACCOUNT_DELETE_CONFIRMATION_INVALID':
+      return mobileError(code, message ?? 'Account deletion confirmation is invalid', 400)
+    case 'TOUR_NOT_FOUND':
+      return mobileError(code, message ?? 'Tour not found', 404)
     case 'VALIDATION_ERROR':
       return mobileValidationError(message)
     case 'INTERNAL_ERROR':

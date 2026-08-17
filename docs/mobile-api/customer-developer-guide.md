@@ -13,11 +13,15 @@ Current customer mobile API base:
 - `GET /auth/me`
 - `POST /auth/refresh`
 - `POST /auth/logout`
+- `POST /auth/logout-all`
 - `POST /auth/onboarding/phone`
 - `POST /auth/email/send-otp`
 - `POST /auth/email/verify-otp`
 - `POST /auth/forgot-password`
 - `POST /auth/reset-password`
+- `POST /customer/change-password`
+- `GET /customer/settings`
+- `PATCH /customer/settings`
 - `GET /routes`
 - `GET /routes/:routeId`
 - `GET /vehicles`
@@ -29,9 +33,32 @@ Current customer mobile API base:
 - `GET /customer/bookings`
 - `GET /customer/bookings/:bookingId`
 - `POST /customer/bookings`
+- `GET /customer/booking-cancellation-reasons`
+- `POST /customer/bookings/:bookingId/cancel`
 - `GET /customer/bookings/:bookingId/payment`
 - `POST /customer/bookings/:bookingId/payment`
 - `POST /customer/bookings/:bookingId/payment/verify`
+- `GET /customer/payments`
+- `GET /customer/payments/:paymentId`
+- `GET /customer/bookings/:bookingId/receipt`
+- `GET /customer/bookings/:bookingId/payment-resolution`
+- `GET /customer/saved-places`
+- `POST /customer/saved-places`
+- `PATCH /customer/saved-places/:savedPlaceId`
+- `DELETE /customer/saved-places/:savedPlaceId`
+- `GET /customer/travel-preferences`
+- `PATCH /customer/travel-preferences`
+- `POST /customer/trips/:bookingLegId/review`
+- `GET /customer/reviews`
+- `GET /customer/reviews/:reviewId`
+- `GET /config/support`
+- `POST /customer/email-change/request`
+- `POST /customer/email-change/verify`
+- `POST /customer/profile/avatar`
+- `GET /customer/account/export`
+- `POST /customer/account/delete`
+- `GET /tours`
+- `GET /tours/:tourId`
 
 ## Identity Rule
 
@@ -91,3 +118,51 @@ Flutter must:
 - never mark a payment as paid locally
 
 See `docs/mobile-api/mobile-payments.md`.
+
+Standalone payment history:
+
+- `GET /customer/payments?status=all|paid|pending|failed&limit=20&cursor=<id>`
+- `GET /customer/payments/:paymentId`
+
+Receipt:
+
+- `GET /customer/bookings/:bookingId/receipt`
+
+Receipts use stored booking/payment records only. Flutter must not display invented VAT or unstored fare components.
+
+## Cancel Booking
+
+Flutter flow:
+
+1. Customer opens an eligible booking.
+2. Fetch or use cached `GET /customer/booking-cancellation-reasons`.
+3. Customer chooses a reason and optional note.
+4. `POST /customer/bookings/:bookingId/cancel`.
+5. Update local booking state from the backend response.
+
+Do not guess cancellation eligibility on the client.
+
+Paid booking cancellations may return `paymentResolutions`. Flutter should show these as support/payment follow-up records, not as completed refunds.
+
+## Account Settings
+
+Change password:
+
+1. Customer enters current password and new password.
+2. `POST /customer/change-password`.
+3. Backend returns replacement tokens.
+4. Flutter replaces local access/refresh tokens.
+
+Logout all:
+
+1. `POST /auth/logout-all`.
+2. Flutter clears local credentials.
+3. Route to sign-in.
+
+Locale:
+
+1. User changes app language.
+2. Update Flutter UI locale locally.
+3. `PATCH /customer/settings` with `locale: "en"` or `locale: "fr"`.
+
+Saved places, travel preferences, reviews, support config, account export, account deletion, avatar upload, and tour catalogue contracts are documented in their dedicated files in this directory.

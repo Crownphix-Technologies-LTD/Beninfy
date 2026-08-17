@@ -27,13 +27,17 @@ Success response:
 ```json
 {
   "coupon": {
+    "valid": true,
     "code": "BENINFY10",
     "description": "Partner discount",
     "discountType": "fixed",
-    "discount": { "currency": "NGN", "value": 10000, "minorUnit": "kobo", "minorValue": 1000000, "formatted": "NGN 10,000" }
+    "calculatedDiscount": { "currency": "NGN", "value": 10000, "minorUnit": "kobo", "minorValue": 1000000, "formatted": "NGN 10,000" },
+    "currency": "NGN"
   },
   "pricing": {}
 }
 ```
 
 Errors use `COUPON_INVALID` or `COUPON_EXPIRED`.
+
+This endpoint calls the same quote/coupon validation path as mobile fare quotation. Booking creation still revalidates the coupon server-side and does not trust Flutter-provided discount values.

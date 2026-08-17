@@ -20,9 +20,19 @@ export async function POST(req: Request) {
 
   const result = await calculateMobileQuote(body)
   if (!result.ok) return mobileErrorFromCode(result.code, result.message)
+  const coupon = result.data.quote.coupon
 
   return Response.json({
-    coupon: result.data.quote.coupon,
+    coupon: coupon
+      ? {
+          valid: true,
+          code: coupon.code,
+          description: coupon.description,
+          discountType: coupon.discountType,
+          calculatedDiscount: coupon.discount,
+          currency: result.data.quote.currency,
+        }
+      : null,
     pricing: result.data.quote.pricing,
   })
 }

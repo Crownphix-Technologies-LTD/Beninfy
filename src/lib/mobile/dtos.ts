@@ -38,6 +38,7 @@ export type CustomerProfileDto = {
   name: string | null
   email: string
   phone: string | null
+  image: string | null
   emailVerified: boolean
   locale: string | null
   onboarding: MobileOnboardingDto
@@ -209,6 +210,7 @@ export function toCustomerProfileDto(user: {
   name: string | null
   email: string | null
   phone: string | null
+  image?: string | null
   emailVerified?: Date | string | null
   locale?: string | null
 }): CustomerProfileDto {
@@ -217,6 +219,7 @@ export function toCustomerProfileDto(user: {
     name: user.name,
     email: user.email ?? '',
     phone: user.phone,
+    image: user.image ?? null,
     emailVerified: Boolean(user.emailVerified),
     locale: user.locale ?? null,
     onboarding: toMobileOnboardingDto({
