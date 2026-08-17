@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { borderFees } from '@/data/borderFees'
+import { getPublicBorderFees } from '@/lib/borderFeeCatalog'
 import { formatNGN } from '@/lib/utils'
 import { getTranslations, setRequestLocale } from 'next-intl/server'
 import { pageMetadata } from '@/lib/seo'
@@ -31,6 +31,7 @@ export default async function BorderInfoPage({
   const { locale } = await params
   setRequestLocale(locale)
   const t = await getTranslations('borderInfoPage')
+  const borderFees = await getPublicBorderFees()
   return (
     <div className="min-h-screen bg-background">
       <main className="mt-16">

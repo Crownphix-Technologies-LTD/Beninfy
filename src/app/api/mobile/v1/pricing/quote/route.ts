@@ -1,5 +1,5 @@
 import { requireMobilePrincipal } from '@/lib/mobile/auth'
-import { mobileError, mobileErrorFromCode, mobileValidationError } from '@/lib/mobile/errors'
+import { mobileError, mobileErrorFromCode, mobileValidationError, type MobileErrorCode } from '@/lib/mobile/errors'
 import { requireCompletedCustomerOnboarding } from '@/lib/mobile/onboarding'
 import { calculateMobileQuote } from '@/lib/mobile/bookingDiscovery'
 
@@ -18,7 +18,7 @@ export async function POST(req: Request) {
   if (!body || typeof body !== 'object') return mobileValidationError('Invalid quote request')
 
   const result = await calculateMobileQuote(body)
-  if (!result.ok) return mobileErrorFromCode(result.code, result.message)
+  if (!result.ok) return mobileErrorFromCode(result.code as MobileErrorCode, result.message)
 
   return Response.json(result.data)
 }

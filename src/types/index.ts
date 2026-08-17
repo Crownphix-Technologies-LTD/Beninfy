@@ -4,20 +4,7 @@ export type TripType = 'one-way' | 'round-trip'
 
 export type VehicleId = string
 
-export type RouteId =
-  | 'lagos-cotonou'
-  | 'lagos-porto-novo'
-  | 'lagos-ouidah'
-  | 'cotonou-togo'
-  | 'cotonou-accra'
-  | 'togo-ghana'
-  | 'lome-cotonou'
-  | 'accra-lome'
-  | 'accra-cotonou'
-  | 'lagos-togo'
-  | 'lagos-aneho'
-  | 'lagos-kpalime'
-  | 'lagos-ghana'
+export type RouteId = string
 
 export type ServiceType = 'ride' | 'airport' | 'tour' | 'vip' | 'fleet'
 
@@ -35,11 +22,13 @@ export interface Route {
   toCode: string
   toCountry: string
   durationHours: number
+  available?: boolean
   popular: boolean
   image: string
   description: string
   descriptionFr: string
   borderCrossings: string[]
+  borderFeeIds?: string[]
 }
 
 export interface Vehicle {

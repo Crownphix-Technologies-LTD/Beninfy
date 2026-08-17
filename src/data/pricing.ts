@@ -1,5 +1,12 @@
 import type { RouteId, VehicleId, PriceRange } from '@/types'
 
+/**
+ * Legacy route price seed/policy data.
+ *
+ * Runtime booking and mobile quote calculation must use database RoutePrice rows
+ * through src/lib/bookingPricing.ts. The pickup-area requirement helpers remain
+ * code-level policy until pickup zones become a backoffice-managed model.
+ */
 export type LagosPickupArea = 'mainland' | 'island'
 export type RoutePriceScope = 'default' | LagosPickupArea
 export type ScopedRoutePriceOverride = Partial<Record<RoutePriceScope, number>>

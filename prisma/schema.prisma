@@ -521,11 +521,13 @@ model Route {
   toCode          String?
   toCountry       String?
   durationHours   Float
+  available       Boolean      @default(true)
   popular         Boolean      @default(false)
   image           String?
   description     String?
   descriptionFr   String?
   borderCrossings String[]     @default([])
+  borderFeeIds    String[]     @default([])
   prices          RoutePrice[]
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt

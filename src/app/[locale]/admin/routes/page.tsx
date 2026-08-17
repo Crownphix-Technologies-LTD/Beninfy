@@ -9,8 +9,10 @@ interface Route {
   to: string
   toCode: string | null
   durationHours: number
+  available: boolean
   popular: boolean
   borderCrossings: string[]
+  borderFeeIds: string[]
   [key: string]: unknown
 }
 
@@ -29,6 +31,7 @@ export default function AdminRoutesPage() {
         { header: 'From', render: (r) => <p className="font-medium text-gray-800">{r.from} {r.fromCode && <span className="text-gray-400 text-xs">({r.fromCode})</span>}</p> },
         { header: 'To', render: (r) => <p className="font-medium text-gray-800">{r.to} {r.toCode && <span className="text-gray-400 text-xs">({r.toCode})</span>}</p> },
         { header: 'Duration', render: (r) => `${r.durationHours}h` },
+        { header: 'Available', render: (r) => r.available ? 'yes' : 'no' },
         { header: 'Popular', render: (r) => r.popular ? 'yes' : 'no' },
         { header: 'Borders', render: (r) => r.borderCrossings.join(', ') || '—' },
       ]}
@@ -41,11 +44,13 @@ export default function AdminRoutesPage() {
         { name: 'toCode', label: 'To code', type: 'text', placeholder: 'COT' },
         { name: 'toCountry', label: 'To country', type: 'text' },
         { name: 'durationHours', label: 'Duration (hours)', type: 'number', required: true },
+        { name: 'available', label: 'Available for booking', type: 'boolean' },
         { name: 'popular', label: 'Popular route', type: 'boolean' },
         { name: 'image', label: 'Image URL', type: 'text' },
         { name: 'description', label: 'Description', type: 'textarea' },
         { name: 'descriptionFr', label: 'Description (FR)', type: 'textarea' },
         { name: 'borderCrossings', label: 'Border crossings', type: 'array' },
+        { name: 'borderFeeIds', label: 'Border fee IDs', type: 'array', placeholder: 'nigeria-benin\nbenin-togo' },
       ]}
     />
   )

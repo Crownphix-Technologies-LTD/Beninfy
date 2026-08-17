@@ -1,5 +1,12 @@
 import type { Route } from '@/types'
 
+/**
+ * Legacy operational route seed data.
+ *
+ * Production route discovery and booking must read Prisma Route records through
+ * src/lib/routeCatalog.ts. This file is retained for idempotent bootstrap/import
+ * tooling only and must not become a silent runtime authority again.
+ */
 export const routes: Route[] = [
   {
     id: 'lagos-cotonou',
@@ -223,6 +230,22 @@ export const routes: Route[] = [
     borderCrossings: ['Seme–Kraké', 'Hillacondji–Sanvee Condji', 'Aflao–Kodjoviakopé'],
   },
 ]
+
+export const legacyRouteBorderFeeIds: Record<string, string[]> = {
+  'lagos-cotonou': ['nigeria-benin'],
+  'lagos-porto-novo': ['nigeria-benin'],
+  'lagos-ouidah': ['nigeria-benin'],
+  'cotonou-togo': ['benin-togo'],
+  'lome-cotonou': ['benin-togo'],
+  'togo-ghana': ['togo-ghana'],
+  'accra-lome': ['togo-ghana'],
+  'cotonou-accra': ['benin-togo', 'togo-ghana'],
+  'accra-cotonou': ['togo-ghana', 'benin-togo'],
+  'lagos-togo': ['nigeria-benin', 'benin-togo'],
+  'lagos-aneho': ['nigeria-benin', 'benin-togo'],
+  'lagos-kpalime': ['nigeria-benin', 'benin-togo'],
+  'lagos-ghana': ['nigeria-benin', 'benin-togo', 'togo-ghana'],
+}
 
 /**
  * Finds a route corridor in either direction.

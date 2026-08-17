@@ -1,5 +1,5 @@
 import type { MetadataRoute } from 'next'
-import { routes } from '@/data/routes'
+import { getPublicRoutes } from '@/lib/routeCatalog'
 import { absoluteUrl, localizedPath, routeSeoImage } from '@/lib/seo'
 
 const locales = ['en', 'fr'] as const
@@ -14,8 +14,9 @@ const publicPages = [
   { path: 'privacy', priority: 0.42, changeFrequency: 'yearly' as const },
 ]
 
-export default function sitemap(): MetadataRoute.Sitemap {
+export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const lastModified = new Date()
+  const routes = await getPublicRoutes()
 
   const pages = locales.flatMap((locale) =>
     publicPages.map((page) => ({

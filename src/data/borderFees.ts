@@ -1,6 +1,13 @@
 import type { BorderFee } from '@/types'
 import type { RouteId, TripType } from '@/types'
 
+/**
+ * Legacy border-fee seed data.
+ *
+ * Runtime fee calculation must use Prisma BorderFee records and Route.borderFeeIds
+ * through src/lib/borderFeeCatalog.ts. This file remains only for bootstrap/import
+ * compatibility and public static-policy references until all old consumers are gone.
+ */
 export const borderFees: BorderFee[] = [
   {
     id: 'nigeria-benin',

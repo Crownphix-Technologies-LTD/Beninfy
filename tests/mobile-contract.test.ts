@@ -50,11 +50,13 @@ import {
 import {
   calculateFareBreakdown,
   mobileMoney,
-  mobileRouteDetail,
-  normalizeDiscoverySelection,
+  normalizeDiscoverySelectionForRoute,
   toMobileRouteDto,
   toMobileVehicleDto,
 } from '../src/lib/mobile/bookingDiscovery'
+import { calculateBookingPricing } from '../src/lib/bookingPricing'
+import { calculateRouteBorderFeeNGN } from '../src/lib/borderFeeCatalog'
+import { getPublicRoutes } from '../src/lib/routeCatalog'
 import {
   classifyDriverTripView,
   driverTripOrderByForView,
@@ -616,11 +618,6 @@ test('mobile route discovery DTO is customer safe and stable', () => {
   assert.equal('internalCost' in dto, false)
 })
 
-test('mobile route detail returns null for unknown routes', () => {
-  assert.equal(mobileRouteDetail('lagos-cotonou')?.id, 'lagos-cotonou')
-  assert.equal(mobileRouteDetail('unknown-route'), null)
-})
-
 test('mobile vehicle discovery DTO exposes capacity and safe pricing fields', () => {
   const dto = toMobileVehicleDto(vehicles[0])
 
@@ -632,23 +629,25 @@ test('mobile vehicle discovery DTO exposes capacity and safe pricing fields', ()
 })
 
 test('mobile discovery selection validates round trip return dates', () => {
-  const missingReturn = normalizeDiscoverySelection({
+  const missingReturn = normalizeDiscoverySelectionForRoute({
     routeId: 'lagos-cotonou',
     vehicleId: 'saloon',
     tripType: 'round-trip',
     departureDate: '2026-08-20T09:00:00.000Z',
-  })
+    passengers: 1,
+  }, routes[0])
 
   assert.equal(missingReturn.ok, false)
   if (!missingReturn.ok) assert.equal(missingReturn.code, 'INVALID_RETURN_DATE')
 
-  const valid = normalizeDiscoverySelection({
+  const valid = normalizeDiscoverySelectionForRoute({
     routeId: 'lagos-cotonou',
     vehicleId: 'saloon',
     tripType: 'round-trip',
     departureDate: '2026-08-20T09:00:00.000Z',
     returnDate: '2026-08-22T09:00:00.000Z',
-  })
+    passengers: 1,
+  }, routes[0])
 
   assert.equal(valid.ok, true)
   if (valid.ok) assert.equal(valid.data.datesToCheck.length, 2)
@@ -669,6 +668,155 @@ test('mobile fare breakdown doubles only ride fare for round trips', () => {
       subtotalNGN: 400000,
     }
   )
+})
+
+test('public route service excludes disabled database routes', async () => {
+  let whereClause: unknown = null
+  const client = {
+    route: {
+      findMany: async (args: { where?: unknown }) => {
+        whereClause = args.where
+        return [
+        {
+          ...routes[0],
+          available: true,
+          borderFeeIds: ['nigeria-benin'],
+        },
+        ]
+      },
+    },
+  }
+
+  const result = await getPublicRoutes(client as never)
+
+  assert.deepEqual(whereClause, { available: true })
+  assert.equal(result.length, 1)
+  assert.equal(result[0].id, 'lagos-cotonou')
+  assert.equal(result[0].available, true)
+})
+
+test('database border fees are summed from route borderFeeIds and round-trip values', async () => {
+  const client = {
+    route: {
+      findFirst: async () => ({
+        id: 'lagos-togo',
+        borderFeeIds: ['nigeria-benin', 'benin-togo'],
+      }),
+    },
+    borderFee: {
+      findMany: async () => [
+        {
+          id: 'nigeria-benin',
+          country: 'Benin',
+          countryFr: 'Benin',
+          border: 'Seme',
+          borderFr: 'Seme',
+          countries: ['Nigeria', 'Benin Republic'],
+          feePerPersonNGN: 5000,
+          feeRoundTripNGN: 10000,
+          popular: true,
+          icon: 'local_taxi',
+          services: [],
+          servicesFr: [],
+          documents: [],
+          documentsFr: [],
+          tips: [],
+          tipsFr: [],
+        },
+        {
+          id: 'benin-togo',
+          country: 'Togo',
+          countryFr: 'Togo',
+          border: 'Hillacondji',
+          borderFr: 'Hillacondji',
+          countries: ['Benin Republic', 'Togo'],
+          feePerPersonNGN: 10400,
+          feeRoundTripNGN: 20800,
+          popular: false,
+          icon: 'directions_bus',
+          services: [],
+          servicesFr: [],
+          documents: [],
+          documentsFr: [],
+          tips: [],
+          tipsFr: [],
+        },
+      ],
+    },
+  }
+
+  const result = await calculateRouteBorderFeeNGN({
+    routeId: 'lagos-togo',
+    tripType: 'round-trip',
+    client: client as never,
+  })
+
+  assert.equal(result.ok, true)
+  if (result.ok) assert.equal(result.amountNGN, 30800)
+})
+
+test('booking pricing prefers fleet override before category price', async () => {
+  const client = {
+    routePrice: {
+      findMany: async () => [
+        { vehicleId: 'suv', pricingScope: 'default', amountNGN: 400000 },
+        { vehicleId: 'rav4-unit-1', pricingScope: 'default', amountNGN: 375000 },
+      ],
+    },
+    route: {
+      findFirst: async () => ({ id: 'lagos-cotonou', borderFeeIds: ['nigeria-benin'] }),
+    },
+    borderFee: {
+      findMany: async () => [
+        {
+          id: 'nigeria-benin',
+          country: 'Benin',
+          countryFr: 'Benin',
+          border: 'Seme',
+          borderFr: 'Seme',
+          countries: ['Nigeria', 'Benin Republic'],
+          feePerPersonNGN: 5000,
+          feeRoundTripNGN: 10000,
+          popular: true,
+          icon: 'local_taxi',
+          services: [],
+          servicesFr: [],
+          documents: [],
+          documentsFr: [],
+          tips: [],
+          tipsFr: [],
+        },
+      ],
+    },
+  }
+
+  const result = await calculateBookingPricing({
+    routeId: 'lagos-cotonou',
+    vehicleId: 'suv',
+    vehicleName: 'SUV',
+    fleetVehicleId: 'rav4-unit-1',
+    fleetVehicleLabel: 'RAV4',
+    tripType: 'one-way',
+    client: client as never,
+  })
+
+  assert.equal(result.ok, true)
+  if (result.ok) {
+    assert.equal(result.oneWayDropoffFare, 375000)
+    assert.equal(result.subtotalNGN, 380000)
+    assert.equal(result.source, 'database')
+  }
+})
+
+test('quote and booking pricing share the same fare core', async () => {
+  const result = calculateFareBreakdown({
+    oneWayDropoffFare: 250000,
+    tripType: 'round-trip',
+    borderFeeNGN: 10000,
+  })
+
+  assert.equal(result.rideFareNGN, 500000)
+  assert.equal(result.subtotalNGN, 510000)
 })
 
 test('mobile money uses NGN and kobo minor values', () => {

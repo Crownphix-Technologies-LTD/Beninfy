@@ -8,46 +8,41 @@ Implemented endpoint:
 | --- | --- | --- |
 | `POST /api/mobile/v1/availability` | Customer bearer token + completed onboarding | Checks category or selected fleet unit availability for one-way or round-trip dates. |
 
-Request:
+The response now includes customer-safe selectable fleet units when the customer has selected a category and physical units pass the same constraints used by booking/payment settlement.
 
-```json
-{
-  "routeId": "lagos-cotonou",
-  "vehicleId": "saloon",
-  "fleetVehicleId": null,
-  "tripType": "round-trip",
-  "departureDate": "2026-08-20T09:00:00.000Z",
-  "returnDate": "2026-08-22T09:00:00.000Z",
-  "passengers": 2
-}
-```
+Customer-safe fleet unit fields:
+
+- id
+- vehicleId
+- displayName
+- color
+- currentCity
+- status
+
+Do not expose plate numbers, admin notes, maintenance notes, driver assignment, or internal status history pre-booking.
 
 Success response:
 
 ```json
 {
-  "route": {},
-  "vehicle": {},
-  "fleetVehicle": null,
-  "tripType": "round-trip",
-  "departureDate": "2026-08-20T09:00:00.000Z",
-  "returnDate": "2026-08-22T09:00:00.000Z",
-  "passengers": 2,
   "availability": {
     "status": "available",
     "available": true,
     "availableCount": 2,
     "physicalFleetCount": 3,
-    "dates": [
+    "selectableFleetUnits": [
       {
-        "date": "2026-08-20T09:00:00.000Z",
-        "physicalFleetCount": 3,
-        "availableCount": 2,
-        "available": true
+        "id": "fleet_unit_id",
+        "vehicleId": "suv",
+        "displayName": "RAV4",
+        "color": "Black",
+        "currentCity": "Lagos",
+        "status": "available"
       }
-    ]
-  },
-  "informationalOnly": true
+    ],
+    "informationalOnly": true,
+    "dates": []
+  }
 }
 ```
 

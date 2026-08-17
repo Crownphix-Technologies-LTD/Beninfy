@@ -56,6 +56,62 @@ export async function getAvailableFleetVehicleCount(
   return { physicalFleetCount, availableCount }
 }
 
+export async function getAvailableFleetVehicles(
+  vehicleId: string,
+  dates: Date[],
+  client: PrismaClientLike = prisma
+) {
+  if (dates.length === 0) return []
+
+  const where = {
+    vehicleId,
+    status: 'available',
+    AND: dates.flatMap((date) => {
+      const { startsAt, endsAt } = dayWindow(date)
+      return [
+        {
+          blocks: {
+            none: {
+              startsAt: { lte: endsAt },
+              endsAt: { gte: startsAt },
+            },
+          },
+        },
+        {
+          bookingLegs: {
+            none: {
+              departureDate: { gte: startsAt, lte: endsAt },
+              status: { notIn: NON_BLOCKING_LEG_STATUSES },
+            },
+          },
+        },
+      ]
+    }),
+  }
+
+  return client.fleetVehicle.findMany({
+    where,
+    orderBy: { label: 'asc' },
+    select: {
+      id: true,
+      vehicleId: true,
+      label: true,
+      color: true,
+      currentCity: true,
+      status: true,
+      vehicle: {
+        select: {
+          id: true,
+          name: true,
+          capacity: true,
+          luggageCapacity: true,
+          image: true,
+        },
+      },
+    },
+  })
+}
+
 export async function findAvailableFleetVehicle(
   vehicleId: string,
   departureDate: Date,

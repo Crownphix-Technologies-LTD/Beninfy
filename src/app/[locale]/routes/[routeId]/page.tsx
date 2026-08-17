@@ -3,8 +3,8 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { setRequestLocale } from 'next-intl/server'
 import type { Metadata } from 'next'
-import { routes } from '@/data/routes'
-import { getRouteBasePrice } from '@/data/pricing'
+import { getPublicRouteById, getPublicRoutes } from '@/lib/routeCatalog'
+import { getRouteStartingPriceNGN } from '@/lib/bookingPricing'
 import { formatNGN } from '@/lib/utils'
 import { pageMetadata, routeSeoImage, routeServiceJsonLd } from '@/lib/seo'
 
@@ -12,13 +12,14 @@ type Props = {
   params: Promise<{ locale: string; routeId: string }>
 }
 
-export function generateStaticParams() {
+export async function generateStaticParams() {
+  const routes = await getPublicRoutes()
   return ['en', 'fr'].flatMap((locale) => routes.map((route) => ({ locale, routeId: route.id })))
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { locale, routeId } = await params
-  const route = routes.find((item) => item.id === routeId)
+  const route = await getPublicRouteById(routeId)
   if (!route) return {}
 
   return pageMetadata({
@@ -42,11 +43,11 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 export default async function RouteLandingPage({ params }: Props) {
   const { locale, routeId } = await params
   setRequestLocale(locale)
-  const route = routes.find((item) => item.id === routeId)
+  const route = await getPublicRouteById(routeId)
   if (!route) notFound()
 
   const bookHref = `/${locale}/rides?from=${encodeURIComponent(route.from)}&to=${encodeURIComponent(route.to)}`
-  const basePrice = getRouteBasePrice(route.id)
+  const basePrice = await getRouteStartingPriceNGN(route.id)
   const image = routeSeoImage(route.id, route.image)
 
   return (
@@ -101,7 +102,7 @@ export default async function RouteLandingPage({ params }: Props) {
                 ['From', `${route.from}, ${route.fromCountry}`],
                 ['To', `${route.to}, ${route.toCountry}`],
                 ['Estimated drive', `${route.durationHours} hours`],
-                ['From price', formatNGN(basePrice)],
+                ['From price', basePrice ? formatNGN(basePrice) : 'Ask for quote'],
                 ['Border crossing', route.borderCrossings.join(', ')],
               ].map(([label, value]) => (
                 <div key={label} className="border-b border-white/15 pb-4 last:border-0 last:pb-0">

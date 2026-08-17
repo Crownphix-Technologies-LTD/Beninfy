@@ -1,9 +1,8 @@
 import Link from 'next/link'
-import { findRoute } from '@/data/routes'
-import { getRouteDropoffPrice } from '@/data/pricing'
-import { getRouteBorderFee } from '@/data/borderFees'
 import { formatNGN } from '@/lib/utils'
 import { getPublicVehicles } from '@/lib/vehicleCatalog'
+import { calculateBookingPricing } from '@/lib/bookingPricing'
+import { findPublicRouteByCities } from '@/lib/routeCatalog'
 import ConfirmationHeader from '@/components/booking/ConfirmationHeader'
 import PulseStatus from '@/components/shared/PulseStatus'
 import { getTranslations, setRequestLocale } from 'next-intl/server'
@@ -16,10 +15,9 @@ import {
   settlePaymentFromPaystack,
   verifyPaystackTransaction,
 } from '@/lib/paystack'
-import { getRoutePriceOverrides } from '@/lib/routePriceOverrides'
 import { getFleetVehicleDisplayLabel } from '@/lib/fleetDisplay'
 import { isAdminRole } from '@/lib/roles'
-import type { VehicleId, RouteId } from '@/types'
+import type { VehicleId } from '@/types'
 
 export const runtime = 'nodejs'
 
@@ -113,22 +111,21 @@ export default async function BookingConfirmedPage({ params, searchParams }: Pro
     : null
   const displayFleetVehicle = bookingLegs[0]?.fleetVehicle ?? selectedFleetVehicle
   const vehicleDisplayName = displayFleetVehicle ? getFleetVehicleDisplayLabel(displayFleetVehicle.label) : vehicle?.name
-  const matchedRoute = findRoute(from, to)
-  const legCount = tripType === 'round-trip' ? 2 : 1
-  const routePriceOverrides = matchedRoute ? await getRoutePriceOverrides(matchedRoute.id) : undefined
-  const fallbackDropoff = matchedRoute
-    ? getRouteDropoffPrice(
-        matchedRoute.id as RouteId,
-        (displayFleetVehicle?.id ?? vehicleId) as VehicleId,
-        displayFleetVehicle?.label ?? vehicle?.name,
-        undefined,
-        routePriceOverrides
-      )
-    : 120000
-  const fallbackRideFare = (fallbackDropoff ?? 0) * legCount
-  const borderFee = matchedRoute ? getRouteBorderFee(matchedRoute.id as RouteId, tripType) : 0
-  const total = dbBooking?.priceNGN ?? (fallbackRideFare + borderFee)
-  const basePrice = dbBooking ? Math.max(0, dbBooking.priceNGN - borderFee) : fallbackRideFare
+  const matchedRoute = await findPublicRouteByCities(from, to)
+  const fallbackPricing =
+    matchedRoute && vehicle
+      ? await calculateBookingPricing({
+          routeId: matchedRoute.id,
+          vehicleId,
+          vehicleName: vehicle.name,
+          fleetVehicleId: displayFleetVehicle?.id,
+          fleetVehicleLabel: displayFleetVehicle?.label,
+          tripType,
+        })
+      : null
+  const borderFee = fallbackPricing?.ok ? fallbackPricing.borderFeeNGN : 0
+  const total = dbBooking?.priceNGN ?? (fallbackPricing?.ok ? fallbackPricing.subtotalNGN : 0)
+  const basePrice = dbBooking ? Math.max(0, dbBooking.priceNGN - borderFee) : (fallbackPricing?.ok ? fallbackPricing.rideFareNGN : 0)
 
   const formattedDate = date
     ? new Date(date).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })

@@ -1,18 +1,6 @@
 # Pricing Contract
 
-Pricing is backend-authoritative.
-
-Current pricing inputs include:
-
-- Route
-- Vehicle category
-- Optional fleet unit override
-- Pickup area such as Lagos mainland/island
-- Trip type
-- Border fees
-- Coupon validation
-
-Mobile apps may display estimates returned by the backend, but must not calculate final authoritative fares locally.
+Pricing is backend-authoritative and backed by Prisma `RoutePrice`, `Route`, `BorderFee`, `Vehicle`, and `FleetVehicle` records.
 
 Implemented endpoints:
 
@@ -21,9 +9,15 @@ Implemented endpoints:
 | `POST /api/mobile/v1/pricing/quote` | IMPLEMENTED | Returns server-calculated quote for route, date, passengers, pickup area, vehicle/fleet choice. Requires completed customer onboarding. |
 | `POST /api/mobile/v1/coupons/validate` | IMPLEMENTED | Validates coupon against the same server-side quote payload. Requires completed customer onboarding. |
 
-Admin pricing modification remains admin-only through existing backoffice routes.
+Final price precedence:
 
-Important implementation note: current `RoutePrice.vehicleId` can represent either a vehicle category or a fleet vehicle depending on `pricingScope`. Mobile clients should never interpret this internal storage detail directly.
+1. Fleet-vehicle route price for requested scope.
+2. Fleet-vehicle default route price.
+3. Vehicle/category route price for requested scope.
+4. Vehicle/category default route price.
+5. Explicit legacy static fallback only when `ALLOW_LEGACY_STATIC_PRICING_FALLBACK=true`.
+
+Border fees come from `Route.borderFeeIds` and Prisma `BorderFee` records.
 
 Quote request JSON:
 
@@ -41,36 +35,6 @@ Quote request JSON:
 }
 ```
 
-`routeId` is preferred. `from` and `to` are also accepted for compatibility with the web booking shape.
+`routeId` is preferred. `from` and `to` are accepted for compatibility with the web booking shape.
 
-Quote success response:
-
-```json
-{
-  "quote": {
-    "route": {},
-    "vehicle": {},
-    "fleetVehicle": null,
-    "tripType": "one-way",
-    "departureDate": "2026-08-20T09:00:00.000Z",
-    "returnDate": null,
-    "passengers": 2,
-    "pickupArea": "mainland",
-    "currency": "NGN",
-    "pricing": {
-      "oneWayDropoffFare": { "currency": "NGN", "value": 180000, "minorUnit": "kobo", "minorValue": 18000000, "formatted": "NGN 180,000" },
-      "legCount": 1,
-      "rideFare": {},
-      "borderFees": {},
-      "subtotal": {},
-      "discount": {},
-      "total": {}
-    },
-    "coupon": null,
-    "availability": {},
-    "informationalOnly": true
-  }
-}
-```
-
-Mobile must treat this quote as display/pre-payment guidance. Booking creation still recalculates fare, coupon discount, and availability on the backend.
+Mobile must treat the quote as display/pre-payment guidance. Booking creation and payment settlement still recheck price and fleet availability on the backend.
