@@ -139,6 +139,28 @@ Send as either:
 - `Authorization: Bearer <secret>`
 - `x-beninfy-worker-secret: <secret>`
 
+Current Hobby/staging mode:
+
+- Vercel Cron runs notification delivery once daily at `0 2 * * *` UTC.
+- Vercel Cron runs payment reconciliation once daily at `0 3 * * *` UTC.
+- Authorized staging operators may manually invoke either endpoint with `GET` or `POST` using `WORKER_SECRET` or `CRON_SECRET`.
+- This once-daily cadence is deployment-compatible for Vercel Hobby, but it is not the intended final production cadence for time-sensitive notification retries or payment reconciliation.
+
+Manual staging examples:
+
+```bash
+curl -X POST https://<staging-domain>/api/workers/notifications/deliver \
+  -H "Authorization: Bearer <WORKER_OR_CRON_SECRET>"
+
+curl -X POST https://<staging-domain>/api/workers/payments/reconcile \
+  -H "Authorization: Bearer <WORKER_OR_CRON_SECRET>"
+```
+
+Production options before higher-volume traffic:
+
+- Upgrade Vercel to a plan that supports the required cron frequency.
+- Use an approved external scheduler to securely invoke the existing protected worker endpoints.
+
 ## Tours
 
 `TOUR_CATALOGUE_READY`

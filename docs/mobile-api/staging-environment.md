@@ -92,3 +92,14 @@ The mobile apps should only know:
 - app environment name
 
 They must not know database URLs, Prisma config, payment secrets, SMTP credentials, Supabase service-role/secret keys, or deployment credentials.
+
+## Vercel Hobby Worker Cadence
+
+Current staging/Hobby deployment uses once-daily Vercel Cron schedules:
+
+- `/api/workers/notifications/deliver` at `0 2 * * *` UTC
+- `/api/workers/payments/reconcile` at `0 3 * * *` UTC
+
+Both endpoints remain protected by `WORKER_SECRET` or `CRON_SECRET` and can be manually invoked with `GET` or `POST` during staging verification. Do not create an unauthenticated bypass.
+
+For production traffic that needs faster retries/reconciliation, either upgrade Vercel cron capability or use an approved external scheduler to call the same protected endpoints.
