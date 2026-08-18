@@ -49,11 +49,11 @@ export function getPayazaWebhookSecret() {
 }
 
 export function paymentsEnabled() {
-  return process.env.PAYMENTS_ENABLED === 'true'
+  return process.env.PAYMENTS_ENABLED === 'true' && process.env.ENABLE_LEGACY_PAYAZA === 'true'
 }
 
 export function getPaymentConfigurationError() {
-  if (!paymentsEnabled()) return 'Payments are temporarily unavailable'
+  if (!paymentsEnabled()) return 'Payaza is disabled for the NGN-only launch payment path'
   if (!getPayazaPublicKey() || !getPayazaApiKey() || !getPayazaWebhookSecret()) {
     return 'Payments are not fully configured'
   }

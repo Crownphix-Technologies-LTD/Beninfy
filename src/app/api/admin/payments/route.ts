@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { requireAdminPermission } from '@/lib/admin'
-import { refreshStalePaystackPayments } from '@/lib/paymentMaintenance'
+import { refreshStalePayments } from '@/lib/paymentMaintenance'
 import { prisma } from '@/lib/prisma'
 
 export async function GET(req: Request) {
@@ -11,7 +11,7 @@ export async function GET(req: Request) {
   const limit = Math.min(Number(url.searchParams.get('limit') ?? 50), 200)
   const where = status ? { status } : {}
   if (!status || status === 'pending') {
-    await refreshStalePaystackPayments()
+    await refreshStalePayments()
   }
   const payments = await prisma.payment.findMany({
     where,

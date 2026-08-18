@@ -17,7 +17,7 @@ import {
 } from '@/lib/availability'
 import { normalizeCouponCode, validateCouponCode } from '@/lib/coupons'
 import { notifyAutoAccountCreated, notifyBookingCreatedPending } from '@/lib/notifications'
-import { refreshStalePaystackPayments } from '@/lib/paymentMaintenance'
+import { refreshStalePayments } from '@/lib/paymentMaintenance'
 import { checkRateLimit, requestIp } from '@/lib/rateLimit'
 
 const createSchema = z.object({
@@ -53,7 +53,11 @@ const createSchema = z.object({
     .max(50)
     .optional(),
   pickupAddress: z.string().trim().max(240).optional(),
+  pickupLatitude: z.number().min(-90).max(90).optional().nullable(),
+  pickupLongitude: z.number().min(-180).max(180).optional().nullable(),
   dropoffAddress: z.string().trim().max(240).optional(),
+  dropoffLatitude: z.number().min(-90).max(90).optional().nullable(),
+  dropoffLongitude: z.number().min(-180).max(180).optional().nullable(),
   specialRequirements: z.string().trim().max(1000).optional(),
   pickupArea: z.enum(['mainland', 'island']).optional(),
   couponCode: z.string().trim().max(60).optional(),
@@ -310,7 +314,11 @@ export async function POST(req: Request) {
             nationality: data.nationality || null,
             travelers: data.travelers?.length ? data.travelers : undefined,
             pickupAddress: data.pickupAddress || null,
+            pickupLatitude: data.pickupLatitude ?? null,
+            pickupLongitude: data.pickupLongitude ?? null,
             dropoffAddress: data.dropoffAddress || null,
+            dropoffLatitude: data.dropoffLatitude ?? null,
+            dropoffLongitude: data.dropoffLongitude ?? null,
             specialRequirements: data.specialRequirements || null,
             vehicleId: vehicle.id,
             passengers: data.passengers,
@@ -375,7 +383,7 @@ export async function GET(req: Request) {
   const customer = await requireCustomer()
   if (!customer.ok) return customer.response
   const { session } = customer
-  await refreshStalePaystackPayments({ take: 50 })
+  await refreshStalePayments({ take: 50 })
 
   const url = new URL(req.url)
   const requestedLimit = Number(url.searchParams.get('limit') ?? 50)

@@ -1,6 +1,6 @@
 # Beninfy Mobile API
 
-Status: Mobile backend foundation plus customer product completion APIs.
+Status: Mobile backend foundation plus production-completion integration contracts.
 
 The future Flutter apps `beninfy-customer` and `beninfy-driver` will consume the Beninfy platform backend through stable mobile APIs. They must not connect directly to PostgreSQL, depend on Prisma models, call admin UI internals, calculate authoritative prices, settle payments locally, or invent trip lifecycle rules.
 
@@ -31,13 +31,14 @@ Existing web and admin endpoints should remain where they are. Mobile endpoints 
 | Mobile auth                          | `/api/mobile/v1/auth/*`                                                                                           | IMPLEMENTED    | Customer/driver token auth, refresh rotation, logout, and `me`.                     |
 | Mobile customer product APIs         | `/api/mobile/v1/customer/*`                                                                                       | IMPLEMENTED    | Profile, bookings, saved places, preferences, payments, receipts, reviews, account. |
 | Mobile driver profile/trips/actions  | `/api/mobile/v1/driver/*`                                                                                         | IMPLEMENTED    | Linked-driver profile, assigned trips, and minimal status actions.                  |
-| Live GPS, push, chat                 | `/api/mobile/v1/driver/tracking*`, `/api/mobile/v1/trips/*/chat*`, notification endpoints                         | IMPLEMENTED    | Backend APIs exist; provider UI wiring is app/environment work.                     |
+| Live GPS, push, chat                 | `/api/mobile/v1/driver/tracking*`, `/api/mobile/v1/trips/*/chat*`, notification endpoints                         | IMPLEMENTED    | Supabase Broadcast metadata/publishing, FCM provider, and retry worker are backend-ready pending provider env. |
 
 See the topic files in this directory for planned contracts.
 
 Additional references:
 
 - `api-readiness.md`
+- `production-completion.md`
 - `routes.md`
 - `pricing.md`
 - `coupons.md`

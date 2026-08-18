@@ -49,6 +49,7 @@ export type MobileErrorCode =
   | 'PAYMENT_ALREADY_COMPLETED'
   | 'BOOKING_NOT_PAYABLE'
   | 'PAYMENT_PROVIDER_UNAVAILABLE'
+  | 'UNSUPPORTED_PAYMENT_CURRENCY'
   | 'ROUTE_NOT_FOUND'
   | 'VEHICLE_NOT_FOUND'
   | 'ROUTE_NOT_AVAILABLE'
@@ -214,6 +215,8 @@ export function mobileErrorFromCode(code: MobileErrorCode, message?: string) {
       return mobileError(code, message ?? 'Booking is not payable', 409)
     case 'PAYMENT_PROVIDER_UNAVAILABLE':
       return mobileError(code, message ?? 'Payment provider is unavailable', 503)
+    case 'UNSUPPORTED_PAYMENT_CURRENCY':
+      return mobileError(code, message ?? 'Only NGN payments are supported at launch', 400)
     case 'ROUTE_NOT_FOUND':
       return mobileError(code, message ?? 'Route not found', 404)
     case 'VEHICLE_NOT_FOUND':

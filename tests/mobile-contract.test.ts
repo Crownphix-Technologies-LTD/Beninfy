@@ -40,6 +40,10 @@ import {
   toMobilePaymentDto,
 } from '../src/lib/mobile/payments'
 import {
+  assertMobileLaunchCurrency,
+  normalizeMobileLaunchPaymentProvider,
+} from '../src/lib/mobile/paymentPolicy'
+import {
   hashOtpCode,
   normalizeMobileLocale,
   normalizeMobilePhone,
@@ -85,6 +89,11 @@ import {
 } from '../src/lib/mobile/customerProduct'
 import { routes } from '../src/data/routes'
 import { vehicles } from '../src/data/vehicles'
+import { propagateCategoryRoutePrice } from '../src/lib/routePricePropagation'
+import { computeGoogleRoute } from '../src/lib/maps/googleRoutes'
+import { toJourneyIntelligenceDto } from '../src/lib/mobile/journeyIntelligence'
+import { mobileSupportConfig } from '../src/lib/mobile/supportConfig'
+import { getFcmConfig } from '../src/lib/mobile/fcm'
 
 test('driver transition blocks terminal trips', () => {
   const result = evaluateDriverTripTransition({
@@ -237,6 +246,7 @@ test('customer booking DTO excludes internal fields', () => {
 
   assert.equal(dto.tripType, 'one-way')
   assert.equal('internalNotes' in dto, false)
+  assert.equal(dto.pickupCoordinates, null)
 })
 
 test('driver trip DTO exposes operational fields and excludes payment metadata', () => {
@@ -1047,4 +1057,187 @@ test('secure account action policies are stable', () => {
     resendCooldownSeconds: 60,
     maxAttempts: 5,
   })
+})
+
+test('mobile launch payment policy accepts NGN and rejects XOF', () => {
+  assert.deepEqual(assertMobileLaunchCurrency('NGN'), { ok: true, currency: 'NGN' })
+  const rejected = assertMobileLaunchCurrency('XOF')
+  assert.equal(rejected.ok, false)
+  if (!rejected.ok) assert.equal(rejected.code, 'UNSUPPORTED_PAYMENT_CURRENCY')
+  assert.equal(normalizeMobileLaunchPaymentProvider('payaza'), 'paystack')
+  assert.equal(normalizeMobilePaymentProvider('payonus'), 'payonus')
+})
+
+test('route price propagation updates managed unit prices and preserves explicit overrides', async () => {
+  const created: unknown[] = []
+  const updated: unknown[] = []
+  const existingByUnit = new Map([
+    ['unit-managed', { id: 'price-managed', managedByCategory: true }],
+    ['unit-explicit', { id: 'price-explicit', managedByCategory: false }],
+  ])
+  const tx = {
+    vehicle: { findUnique: async () => ({ id: 'saloon' }) },
+    fleetVehicle: {
+      findMany: async () => [
+        { id: 'unit-managed' },
+        { id: 'unit-explicit' },
+        { id: 'unit-missing' },
+      ],
+    },
+    routePrice: {
+      findFirst: async ({ where }: { where: { vehicleId: string } }) =>
+        existingByUnit.get(where.vehicleId) ?? null,
+      update: async (input: unknown) => {
+        updated.push(input)
+        return input
+      },
+      create: async (input: unknown) => {
+        created.push(input)
+        return input
+      },
+    },
+  }
+
+  const result = await propagateCategoryRoutePrice(tx as never, {
+    routeId: 'lagos-cotonou',
+    vehicleId: 'saloon',
+    pricingScope: 'default',
+    amountNGN: 180000,
+  })
+
+  assert.equal(result.propagated, 1)
+  assert.equal(result.updatedManaged, 1)
+  assert.equal(result.updatedExplicit, 0)
+  assert.equal(created.length, 1)
+  assert.equal(updated.length, 1)
+})
+
+test('explicit route price sync overwrites custom unit overrides deliberately', async () => {
+  const updated: unknown[] = []
+  const tx = {
+    vehicle: { findUnique: async () => ({ id: 'saloon' }) },
+    fleetVehicle: { findMany: async () => [{ id: 'unit-explicit' }] },
+    routePrice: {
+      findFirst: async () => ({ id: 'price-explicit', managedByCategory: false }),
+      update: async (input: unknown) => {
+        updated.push(input)
+        return input
+      },
+      create: async () => null,
+    },
+  }
+
+  const result = await propagateCategoryRoutePrice(tx as never, {
+    routeId: 'lagos-cotonou',
+    vehicleId: 'saloon',
+    pricingScope: 'default',
+    amountNGN: 190000,
+    syncFleetPrices: true,
+  })
+
+  assert.equal(result.updatedExplicit, 1)
+  assert.equal(updated.length, 1)
+})
+
+test('google routes returns disabled without server key and normalizes provider response', async () => {
+  const originalKey = process.env.GOOGLE_ROUTES_API_KEY
+  delete process.env.GOOGLE_ROUTES_API_KEY
+  const disabled = await computeGoogleRoute({
+    origin: { latitude: 6.5244, longitude: 3.3792 },
+    destination: { latitude: 6.3703, longitude: 2.3912 },
+  })
+  assert.equal(disabled.ok, false)
+  if (!disabled.ok) assert.equal(disabled.code, 'GOOGLE_ROUTES_DISABLED')
+
+  process.env.GOOGLE_ROUTES_API_KEY = 'test-key'
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = (async () =>
+    new Response(
+      JSON.stringify({
+        routes: [
+          {
+            distanceMeters: 12345,
+            duration: '3600s',
+            staticDuration: '3300s',
+            polyline: { encodedPolyline: 'abc123' },
+          },
+        ],
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    )) as typeof fetch
+  const ok = await computeGoogleRoute({
+    origin: { latitude: 6.5244, longitude: 3.3792 },
+    destination: { latitude: 6.3703, longitude: 2.3912 },
+  })
+  assert.equal(ok.ok, true)
+  if (ok.ok) {
+    assert.equal(ok.route.encodedPolyline, 'abc123')
+    assert.equal(ok.route.distanceMeters, 12345)
+    assert.equal(ok.route.durationSeconds, 3300)
+    assert.equal(ok.route.trafficDurationSeconds, 3600)
+  }
+  globalThis.fetch = originalFetch
+  if (originalKey === undefined) delete process.env.GOOGLE_ROUTES_API_KEY
+  else process.env.GOOGLE_ROUTES_API_KEY = originalKey
+})
+
+test('journey intelligence DTO remains optional and marks stale cache', () => {
+  assert.equal(toJourneyIntelligenceDto(null), null)
+  const dto = toJourneyIntelligenceDto({
+    encodedPolyline: 'poly',
+    distanceRemainingMeters: 5000,
+    estimatedArrivalAt: new Date('2026-08-18T10:30:00.000Z'),
+    estimatedDurationSeconds: 1200,
+    calculatedAt: new Date('2026-08-18T10:00:00.000Z'),
+    expiresAt: new Date('2026-08-18T10:01:00.000Z'),
+  })
+  assert.equal(dto?.routePolyline, 'poly')
+  assert.equal(dto?.freshness, 'stale')
+})
+
+test('mobile support config returns only configured support contacts', () => {
+  const originalSupport = process.env.SUPPORT_EMAIL
+  const originalSender = process.env.SMTP_SENDER_EMAIL
+  const originalPhone = process.env.SUPPORT_PHONE
+  const originalWhatsapp = process.env.SUPPORT_WHATSAPP
+  delete process.env.SUPPORT_EMAIL
+  delete process.env.SMTP_SENDER_EMAIL
+  delete process.env.SUPPORT_PHONE
+  delete process.env.SUPPORT_WHATSAPP
+  assert.deepEqual(mobileSupportConfig(), {
+    email: null,
+    phone: null,
+    whatsapp: null,
+    emergency: { enabled: false, phone: null, whatsapp: null },
+  })
+  process.env.SUPPORT_WHATSAPP = '+22951019134'
+  assert.equal(mobileSupportConfig().whatsapp?.url, 'https://wa.me/22951019134')
+  if (originalSupport === undefined) delete process.env.SUPPORT_EMAIL
+  else process.env.SUPPORT_EMAIL = originalSupport
+  if (originalSender === undefined) delete process.env.SMTP_SENDER_EMAIL
+  else process.env.SMTP_SENDER_EMAIL = originalSender
+  if (originalPhone === undefined) delete process.env.SUPPORT_PHONE
+  else process.env.SUPPORT_PHONE = originalPhone
+  if (originalWhatsapp === undefined) delete process.env.SUPPORT_WHATSAPP
+  else process.env.SUPPORT_WHATSAPP = originalWhatsapp
+})
+
+test('fcm config stays server-side and requires all credential parts', () => {
+  const originalProject = process.env.FIREBASE_PROJECT_ID
+  const originalEmail = process.env.FIREBASE_CLIENT_EMAIL
+  const originalKey = process.env.FIREBASE_PRIVATE_KEY
+  delete process.env.FIREBASE_PROJECT_ID
+  delete process.env.FIREBASE_CLIENT_EMAIL
+  delete process.env.FIREBASE_PRIVATE_KEY
+  assert.equal(getFcmConfig(), null)
+  process.env.FIREBASE_PROJECT_ID = 'project'
+  process.env.FIREBASE_CLIENT_EMAIL = 'firebase@example.com'
+  process.env.FIREBASE_PRIVATE_KEY = 'line1\\nline2'
+  assert.equal(getFcmConfig()?.privateKey, 'line1\nline2')
+  if (originalProject === undefined) delete process.env.FIREBASE_PROJECT_ID
+  else process.env.FIREBASE_PROJECT_ID = originalProject
+  if (originalEmail === undefined) delete process.env.FIREBASE_CLIENT_EMAIL
+  else process.env.FIREBASE_CLIENT_EMAIL = originalEmail
+  if (originalKey === undefined) delete process.env.FIREBASE_PRIVATE_KEY
+  else process.env.FIREBASE_PRIVATE_KEY = originalKey
 })

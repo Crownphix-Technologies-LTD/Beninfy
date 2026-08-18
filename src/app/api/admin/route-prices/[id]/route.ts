@@ -13,6 +13,7 @@ const patchSchema = z.object({
   pricingScope: z.enum(['default', 'mainland', 'island']).optional(),
   amountNGN: z.number().int().positive().optional(),
   notes: z.string().trim().nullable().optional(),
+  syncFleetPrices: z.boolean().optional().default(false),
 })
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -32,6 +33,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     const pricingScope = parsed.data.pricingScope ?? current.pricingScope
     const amountNGN = parsed.data.amountNGN ?? current.amountNGN
     const notes = Object.hasOwn(parsed.data, 'notes') ? parsed.data.notes : current.notes
+    const syncFleetPrices = parsed.data.syncFleetPrices ?? false
 
     const existingTarget = await prisma.routePrice.findFirst({
       where: { routeId, vehicleId, pricingScope },
@@ -42,10 +44,10 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       const routePrice = await prisma.$transaction(async (tx) => {
         const updated = await tx.routePrice.update({
           where: { id: existingTarget.id },
-          data: { amountNGN, notes },
+          data: { amountNGN, notes, managedByCategory: false },
         })
         await tx.routePrice.delete({ where: { id } })
-        await propagateCategoryRoutePrice(tx, updated)
+        await propagateCategoryRoutePrice(tx, { ...updated, syncFleetPrices })
         return updated
       })
       await notifyRoutePriceChanged('updated', [
@@ -65,6 +67,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
           deletedDuplicateId: id,
           previous: current,
           next: routePrice,
+          syncFleetPrices,
         },
       })
       return NextResponse.json({ routePrice })
@@ -73,9 +76,16 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     const routePrice = await prisma.$transaction(async (tx) => {
       const updated = await tx.routePrice.update({
         where: { id },
-        data: { routeId, vehicleId, pricingScope, amountNGN, notes },
+        data: {
+          routeId,
+          vehicleId,
+          pricingScope,
+          amountNGN,
+          notes,
+          managedByCategory: false,
+        },
       })
-      await propagateCategoryRoutePrice(tx, updated)
+      await propagateCategoryRoutePrice(tx, { ...updated, syncFleetPrices })
       return updated
     })
     await notifyRoutePriceChanged('updated', [
@@ -94,6 +104,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       metadata: {
         previous: current,
         next: routePrice,
+        syncFleetPrices,
       },
     })
     return NextResponse.json({ routePrice })

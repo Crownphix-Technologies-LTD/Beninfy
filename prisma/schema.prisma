@@ -199,7 +199,11 @@ model Booking {
   nationality         String?
   travelers           Json?
   pickupAddress       String?
+  pickupLatitude      Float?
+  pickupLongitude     Float?
   dropoffAddress      String?
+  dropoffLatitude     Float?
+  dropoffLongitude    Float?
   specialRequirements String?
   vehicleId           String
   vehicle             Vehicle             @relation(fields: [vehicleId], references: [id])
@@ -327,6 +331,7 @@ model BookingLeg {
   declineReasonCode      String?
   notes                  String?
   latestLocation         LatestTripLocation?
+  journeySnapshot        TripJourneySnapshot?
   chatConversations      TripConversation[]
   review                 TripReview?
   createdAt              DateTime            @default(now())
@@ -339,6 +344,32 @@ model BookingLeg {
   @@index([driverId, departureDate])
   @@index([driverId, status, departureDate])
   @@index([status, departureDate])
+}
+
+model TripJourneySnapshot {
+  id                       String     @id @default(cuid())
+  bookingLegId             String     @unique
+  bookingLeg               BookingLeg @relation(fields: [bookingLegId], references: [id], onDelete: Cascade)
+  originLatitude           Float
+  originLongitude          Float
+  destinationLatitude      Float
+  destinationLongitude     Float
+  encodedPolyline          String?
+  distanceMeters           Int?
+  durationSeconds          Int?
+  trafficDurationSeconds   Int?
+  distanceRemainingMeters  Int?
+  estimatedDurationSeconds Int?
+  estimatedArrivalAt       DateTime?
+  provider                 String
+  providerStatus           String     @default("ok")
+  calculatedAt             DateTime
+  expiresAt                DateTime
+  createdAt                DateTime   @default(now())
+  updatedAt                DateTime   @updatedAt
+
+  @@index([expiresAt])
+  @@index([calculatedAt])
 }
 
 model TripReview {
@@ -541,6 +572,7 @@ model RoutePrice {
   pricingScope String   @default("default")
   amountNGN    Int
   notes        String?
+  managedByCategory Boolean @default(false)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 

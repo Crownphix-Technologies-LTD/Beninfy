@@ -3,6 +3,7 @@ import { requireMobilePrincipal } from '@/lib/mobile/auth'
 import { toCustomerTrackingSnapshotDto } from '@/lib/mobile/dtos'
 import { mobileError, mobileErrorFromCode } from '@/lib/mobile/errors'
 import { requireCompletedCustomerOnboarding } from '@/lib/mobile/onboarding'
+import { getOrRefreshJourneyIntelligence } from '@/lib/mobile/journeyIntelligence'
 
 export const runtime = 'nodejs'
 
@@ -33,6 +34,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ bookingI
           fleetVehicle: true,
           driver: true,
           latestLocation: true,
+          journeySnapshot: true,
         },
       },
     },
@@ -41,12 +43,15 @@ export async function GET(req: Request, { params }: { params: Promise<{ bookingI
   if (!booking) return mobileErrorFromCode('BOOKING_NOT_FOUND')
   const leg = booking.legs[0]
   if (!leg) return mobileErrorFromCode('TRIP_NOT_FOUND')
+  const journeySnapshot = await getOrRefreshJourneyIntelligence({ bookingLegId: leg.id }).catch(
+    () => leg.journeySnapshot
+  )
 
   return Response.json({
     tracking: toCustomerTrackingSnapshotDto({
       bookingId: booking.id,
       principalId: guard.principal.userId,
-      leg,
+      leg: { ...leg, journeySnapshot },
     }),
   })
 }

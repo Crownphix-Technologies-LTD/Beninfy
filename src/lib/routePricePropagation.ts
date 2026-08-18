@@ -6,18 +6,19 @@ type RoutePricePropagationInput = {
   pricingScope: string
   amountNGN: number
   notes?: string | null
+  syncFleetPrices?: boolean
 }
 
 export async function propagateCategoryRoutePrice(
   tx: Prisma.TransactionClient,
-  { routeId, vehicleId, pricingScope, amountNGN, notes }: RoutePricePropagationInput
+  { routeId, vehicleId, pricingScope, amountNGN, notes, syncFleetPrices = false }: RoutePricePropagationInput
 ) {
   const category = await tx.vehicle.findUnique({
     where: { id: vehicleId },
     select: { id: true },
   })
 
-  if (!category) return { propagated: 0 }
+  if (!category) return { propagated: 0, updatedManaged: 0, updatedExplicit: 0 }
 
   const fleetUnits = await tx.fleetVehicle.findMany({
     where: { vehicleId },
@@ -25,6 +26,8 @@ export async function propagateCategoryRoutePrice(
   })
 
   let propagated = 0
+  let updatedManaged = 0
+  let updatedExplicit = 0
 
   for (const unit of fleetUnits) {
     const existing = await tx.routePrice.findFirst({
@@ -33,10 +36,22 @@ export async function propagateCategoryRoutePrice(
         vehicleId: unit.id,
         pricingScope,
       },
-      select: { id: true },
+      select: { id: true, managedByCategory: true },
     })
 
     if (existing) {
+      if (existing.managedByCategory || syncFleetPrices) {
+        await tx.routePrice.update({
+          where: { id: existing.id },
+          data: {
+            amountNGN,
+            notes,
+            managedByCategory: true,
+          },
+        })
+        if (existing.managedByCategory) updatedManaged += 1
+        else updatedExplicit += 1
+      }
       continue
     }
 
@@ -47,10 +62,11 @@ export async function propagateCategoryRoutePrice(
         pricingScope,
         amountNGN,
         notes,
+        managedByCategory: true,
       },
     })
     propagated += 1
   }
 
-  return { propagated }
+  return { propagated, updatedManaged, updatedExplicit }
 }

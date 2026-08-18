@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { requireMobilePrincipal } from '@/lib/mobile/auth'
 import { mobileErrorFromCode, mobileValidationError } from '@/lib/mobile/errors'
-import { upsertDriverPresence } from '@/lib/mobile/tracking'
+import { realtimeChannelForDriver, signPresenceScope, upsertDriverPresence } from '@/lib/mobile/tracking'
 
 export const runtime = 'nodejs'
 
@@ -32,6 +32,12 @@ export async function POST(req: Request) {
       lastSeenAt: presence.lastSeenAt.toISOString(),
       lastHeartbeatAt: presence.lastHeartbeatAt?.toISOString() ?? null,
       currentBookingLegId: presence.currentBookingLegId,
+      realtime: signPresenceScope({
+        principalType: 'driver',
+        principalId: guard.principal.driverId,
+        driverId: guard.principal.driverId,
+        channel: realtimeChannelForDriver(guard.principal.driverId),
+      }),
     },
   })
 }

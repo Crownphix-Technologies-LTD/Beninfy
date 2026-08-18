@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { z } from 'zod'
 import { requireAdminPermission } from '@/lib/admin'
-import { refreshStalePaystackPayments } from '@/lib/paymentMaintenance'
+import { refreshStalePayments } from '@/lib/paymentMaintenance'
 import { prisma } from '@/lib/prisma'
 
 export async function GET(req: Request) {
@@ -15,7 +15,7 @@ export async function GET(req: Request) {
   const limit = Math.min(Number(url.searchParams.get('limit') ?? 50), 200)
 
   if (!status || status === 'pending' || q?.toUpperCase().startsWith('BFY-')) {
-    await refreshStalePaystackPayments({ bookingDisplayRef: q })
+    await refreshStalePayments({ bookingDisplayRef: q })
   }
 
   const where: Record<string, unknown> = {}

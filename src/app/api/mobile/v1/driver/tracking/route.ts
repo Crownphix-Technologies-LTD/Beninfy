@@ -3,6 +3,7 @@ import { requireMobilePrincipal } from '@/lib/mobile/auth'
 import { toDriverTrackingSnapshotDto } from '@/lib/mobile/dtos'
 import { mobileErrorFromCode } from '@/lib/mobile/errors'
 import { TRACKING_ENABLED_LEG_STATUSES } from '@/lib/mobile/tracking'
+import { getOrRefreshJourneyIntelligence } from '@/lib/mobile/journeyIntelligence'
 
 export const runtime = 'nodejs'
 
@@ -23,12 +24,22 @@ export async function GET(req: Request) {
       fleetVehicle: true,
       driver: true,
       latestLocation: true,
+      journeySnapshot: true,
     },
   })
 
+  const snapshots = await Promise.all(
+    trips.map((leg) =>
+      getOrRefreshJourneyIntelligence({ bookingLegId: leg.id }).catch(() => leg.journeySnapshot)
+    )
+  )
+
   return Response.json({
-    tracking: trips.map((leg) =>
-      toDriverTrackingSnapshotDto({ principalId: guard.principal.userId, leg })
+    tracking: trips.map((leg, index) =>
+      toDriverTrackingSnapshotDto({
+        principalId: guard.principal.userId,
+        leg: { ...leg, journeySnapshot: snapshots[index] },
+      })
     ),
   })
 }

@@ -16,8 +16,7 @@ function normalizeWhatsapp(value: string | null) {
 export function mobileSupportConfig() {
   const email =
     clean(process.env.SUPPORT_EMAIL) ||
-    clean(process.env.SMTP_SENDER_EMAIL) ||
-    'support@beninfy.com'
+    clean(process.env.SMTP_SENDER_EMAIL)
   const phone = clean(process.env.SUPPORT_PHONE)
   const whatsapp = normalizeWhatsapp(clean(process.env.SUPPORT_WHATSAPP))
 

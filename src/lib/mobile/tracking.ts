@@ -177,6 +177,41 @@ export function realtimeChannelForDriver(driverId: string) {
   return `driver:${driverId}:presence`
 }
 
+export function signPresenceScope({
+  principalType,
+  principalId,
+  driverId,
+  channel,
+  ttlSeconds = REALTIME_AUTH_TTL_SECONDS,
+}: {
+  principalType: 'customer' | 'driver'
+  principalId: string
+  driverId: string
+  channel: string
+  ttlSeconds?: number
+}) {
+  const expiresAt = Math.floor(Date.now() / 1000) + ttlSeconds
+  const payload = {
+    version: 1,
+    scope: 'presence',
+    principalType,
+    principalId,
+    driverId,
+    channel,
+    permission: 'presence',
+    expiresAt,
+  }
+  const body = Buffer.from(JSON.stringify(payload)).toString('base64url')
+  const signature = createHmac('sha256', trackingSecret()).update(body).digest('base64url')
+  return {
+    token: `${body}.${signature}`,
+    expiresAt: new Date(expiresAt * 1000).toISOString(),
+    channel,
+    provider: 'supabase-presence' as const,
+    permission: 'presence' as const,
+  }
+}
+
 export function signRealtimeScope({
   principalType,
   principalId,

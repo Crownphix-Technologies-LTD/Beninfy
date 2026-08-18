@@ -1,6 +1,7 @@
 import { createHash } from 'crypto'
 import { Prisma } from '@prisma/client'
 import type { MobilePrincipal } from '@/lib/mobile/auth'
+import { getFcmProvider } from '@/lib/mobile/fcm'
 import { prisma } from '@/lib/prisma'
 
 export type PushAppType = 'customer' | 'driver'
@@ -284,9 +285,10 @@ export function getPushProvider(): PushNotificationProvider {
       },
     }
   }
+  if (provider === 'fcm') return getFcmProvider()
 
   return {
-    name: provider === 'fcm' ? 'fcm-disabled' : 'disabled',
+    name: 'disabled',
     async send() {
       return {
         ok: false,
@@ -634,6 +636,43 @@ export async function deliverNotification(notificationId: string, provider = get
   })
 
   return { state: deliveryState, sent, invalid, failed, skipped }
+}
+
+export async function processDueNotificationDeliveries({
+  take = 50,
+  now = new Date(),
+}: {
+  take?: number
+  now?: Date
+} = {}) {
+  const dueDeliveryRows = await prisma.notificationDelivery.findMany({
+    where: {
+      status: 'failed',
+      attempts: { lt: MAX_RETRY_ATTEMPTS },
+      OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: now } }],
+    },
+    orderBy: [{ nextAttemptAt: 'asc' }, { createdAt: 'asc' }],
+    take,
+    select: { notificationId: true },
+  })
+  const dueIds = new Set(dueDeliveryRows.map((row) => row.notificationId))
+  if (dueIds.size < take) {
+    const pending = await prisma.notification.findMany({
+      where: { deliveryState: 'pending' },
+      orderBy: { createdAt: 'asc' },
+      take: take - dueIds.size,
+      select: { id: true },
+    })
+    for (const row of pending) dueIds.add(row.id)
+  }
+
+  let processed = 0
+  for (const notificationId of dueIds) {
+    await deliverNotification(notificationId)
+    processed += 1
+  }
+
+  return { checked: dueIds.size, processed }
 }
 
 export async function notifyPaymentConfirmedPush(bookingId: string, paymentId: string) {

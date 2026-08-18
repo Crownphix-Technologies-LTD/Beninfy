@@ -272,7 +272,19 @@ function PassengerDetailsContent() {
       nationality: form.nationality,
       travelers: JSON.stringify(travelerManifest),
       pickupAddress: form.pickupAddress,
+      ...(pickupCoordinates
+        ? {
+            pickupLatitude: String(pickupCoordinates.lat),
+            pickupLongitude: String(pickupCoordinates.lng),
+          }
+        : {}),
       dropoffAddress: form.dropoffAddress,
+      ...(dropoffCoordinates
+        ? {
+            dropoffLatitude: String(dropoffCoordinates.lat),
+            dropoffLongitude: String(dropoffCoordinates.lng),
+          }
+        : {}),
       specialRequirements: form.specialRequirements,
     })
     if (fleetVehicle?.id) search.set('fleetVehicle', fleetVehicle.id)
