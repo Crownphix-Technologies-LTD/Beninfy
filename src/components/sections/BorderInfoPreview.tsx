@@ -1,11 +1,12 @@
 import Link from 'next/link'
 import { getLocale, getTranslations } from 'next-intl/server'
-import { borderFees } from '@/data/borderFees'
+import { getPublicBorderFees } from '@/lib/borderFeeCatalog'
 import { formatNGN } from '@/lib/utils'
 
 export default async function BorderInfoPreview() {
   const locale = await getLocale()
   const t = await getTranslations('border')
+  const borderFees = await getPublicBorderFees()
   return (
     <section className="py-20 bg-primary-container">
       <div className="max-w-[1280px] mx-auto px-4 md:px-10">

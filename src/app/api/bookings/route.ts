@@ -6,10 +6,10 @@ import { auth } from '@/lib/auth'
 import { requireCustomer } from '@/lib/customer'
 import { isAdminRole } from '@/lib/roles'
 import { prisma } from '@/lib/prisma'
-import { findRoute } from '@/data/routes'
-import { getRouteDropoffPrice, requiresLagosPickupArea } from '@/data/pricing'
-import { getRouteBorderFee } from '@/data/borderFees'
+import { requiresLagosPickupArea } from '@/data/pricing'
 import { vehicles as catalogVehicles } from '@/data/vehicles'
+import { calculateBookingPricing } from '@/lib/bookingPricing'
+import { findPublicRouteByCities } from '@/lib/routeCatalog'
 import {
   assertFleetVehicleAvailable,
   assertVehicleTypeAvailable,
@@ -17,10 +17,8 @@ import {
 } from '@/lib/availability'
 import { normalizeCouponCode, validateCouponCode } from '@/lib/coupons'
 import { notifyAutoAccountCreated, notifyBookingCreatedPending } from '@/lib/notifications'
-import { refreshStalePaystackPayments } from '@/lib/paymentMaintenance'
-import { getRoutePriceOverrides } from '@/lib/routePriceOverrides'
+import { refreshStalePayments } from '@/lib/paymentMaintenance'
 import { checkRateLimit, requestIp } from '@/lib/rateLimit'
-import type { RouteId, VehicleId } from '@/types'
 
 const createSchema = z.object({
   from: z.string().min(1),
@@ -55,7 +53,11 @@ const createSchema = z.object({
     .max(50)
     .optional(),
   pickupAddress: z.string().trim().max(240).optional(),
+  pickupLatitude: z.number().min(-90).max(90).optional().nullable(),
+  pickupLongitude: z.number().min(-180).max(180).optional().nullable(),
   dropoffAddress: z.string().trim().max(240).optional(),
+  dropoffLatitude: z.number().min(-90).max(90).optional().nullable(),
+  dropoffLongitude: z.number().min(-180).max(180).optional().nullable(),
   specialRequirements: z.string().trim().max(1000).optional(),
   pickupArea: z.enum(['mainland', 'island']).optional(),
   couponCode: z.string().trim().max(60).optional(),
@@ -169,10 +171,10 @@ export async function POST(req: Request) {
     )
   }
 
-  const matchedRoute = findRoute(data.from, data.to)
+  const matchedRoute = await findPublicRouteByCities(data.from, data.to)
   if (
     matchedRoute &&
-    requiresLagosPickupArea(matchedRoute.id as RouteId, vehicle.id as VehicleId, vehicle.name) &&
+    requiresLagosPickupArea(matchedRoute.id, vehicle.id, vehicle.name) &&
     !data.pickupArea
   ) {
     return NextResponse.json(
@@ -183,7 +185,6 @@ export async function POST(req: Request) {
   if (!matchedRoute) {
     return NextResponse.json({ error: 'This route is not available for booking' }, { status: 400 })
   }
-  const routePriceOverrides = await getRoutePriceOverrides(matchedRoute.id)
   const selectedFleetVehicle = data.fleetVehicleId
     ? await prisma.fleetVehicle.findUnique({
         where: { id: data.fleetVehicleId },
@@ -199,23 +200,22 @@ export async function POST(req: Request) {
       { status: 400 }
     )
   }
-  const dropoffFare = getRouteDropoffPrice(
-    matchedRoute.id as RouteId,
-    (selectedFleetVehicle?.id ?? vehicle.id) as VehicleId,
-    selectedFleetVehicle?.label ?? vehicle.name,
-    data.pickupArea,
-    routePriceOverrides
-  )
-  if (dropoffFare === null) {
+  const pricing = await calculateBookingPricing({
+    routeId: matchedRoute.id,
+    vehicleId: vehicle.id,
+    vehicleName: vehicle.name,
+    fleetVehicleId: selectedFleetVehicle?.id,
+    fleetVehicleLabel: selectedFleetVehicle?.label,
+    tripType: data.tripType,
+    pickupArea: data.pickupArea,
+  })
+  if (!pricing.ok) {
     return NextResponse.json(
-      { error: 'This vehicle is not priced for the selected route' },
-      { status: 400 }
+      { error: pricing.message, code: pricing.code, details: pricing.details },
+      { status: pricing.code === 'ROUTE_NOT_FOUND' ? 404 : 400 }
     )
   }
-  const legCount = data.tripType === 'round-trip' ? 2 : 1
-  const rideFare = dropoffFare * legCount
-  const borderFee = getRouteBorderFee(matchedRoute.id as RouteId, data.tripType)
-  const subtotalNGN = rideFare + borderFee
+  const subtotalNGN = pricing.subtotalNGN
   const normalizedCouponCode = data.couponCode ? normalizeCouponCode(data.couponCode) : ''
 
   try {
@@ -314,7 +314,11 @@ export async function POST(req: Request) {
             nationality: data.nationality || null,
             travelers: data.travelers?.length ? data.travelers : undefined,
             pickupAddress: data.pickupAddress || null,
+            pickupLatitude: data.pickupLatitude ?? null,
+            pickupLongitude: data.pickupLongitude ?? null,
             dropoffAddress: data.dropoffAddress || null,
+            dropoffLatitude: data.dropoffLatitude ?? null,
+            dropoffLongitude: data.dropoffLongitude ?? null,
             specialRequirements: data.specialRequirements || null,
             vehicleId: vehicle.id,
             passengers: data.passengers,
@@ -379,7 +383,7 @@ export async function GET(req: Request) {
   const customer = await requireCustomer()
   if (!customer.ok) return customer.response
   const { session } = customer
-  await refreshStalePaystackPayments({ take: 50 })
+  await refreshStalePayments({ take: 50 })
 
   const url = new URL(req.url)
   const requestedLimit = Number(url.searchParams.get('limit') ?? 50)

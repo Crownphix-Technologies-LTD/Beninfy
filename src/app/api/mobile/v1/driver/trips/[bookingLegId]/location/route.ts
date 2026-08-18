@@ -8,10 +8,12 @@ import {
   isTrackingEligibleStatus,
   shouldReplaceLocation,
   toLocationDto,
+  realtimeChannelForTrip,
   upsertDriverPresence,
   validateLocationInput,
 } from '@/lib/mobile/tracking'
 import { prisma } from '@/lib/prisma'
+import { publishSupabaseBroadcast } from '@/lib/realtime/supabaseBroadcast'
 
 export const runtime = 'nodejs'
 
@@ -122,18 +124,33 @@ export async function POST(
 
   if (!result.ok) return mobileErrorFromCode('LOCATION_STALE', 'Older location update ignored')
 
+  const locationDto = toLocationDto(result.location)
+  const realtimeEvent = {
+    event: 'trip.location_updated',
+    version: 1,
+    bookingLegId: leg.id,
+    latitude: result.location.latitude,
+    longitude: result.location.longitude,
+    accuracyMeters: result.location.accuracyMeters,
+    recordedAt: result.location.capturedAt.toISOString(),
+    sequence: result.location.sequence,
+  }
+  publishSupabaseBroadcast({
+    channel: realtimeChannelForTrip(leg.id),
+    event: realtimeEvent.event,
+    payload: realtimeEvent,
+  }).catch((error) => {
+    console.warn('Trip location broadcast failed', {
+      bookingLegId: leg.id,
+      error: error instanceof Error ? error.message : 'unknown',
+    })
+  })
+
   return Response.json({
     ok: true,
     bookingLegId: leg.id,
     trackingStatus: 'live',
-    location: toLocationDto(result.location),
-    realtimeEvent: {
-      event: 'trip.location.updated',
-      version: 1,
-      bookingLegId: leg.id,
-      bookingId: leg.bookingId,
-      occurredAt: now.toISOString(),
-      sequence: result.location.sequence,
-    },
+    location: locationDto,
+    realtimeEvent,
   })
 }

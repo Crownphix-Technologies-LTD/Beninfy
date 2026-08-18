@@ -14,6 +14,7 @@ interface RoutePrice {
   pricingScope: string
   amountNGN: number
   notes: string | null
+  managedByCategory?: boolean
   route?: { id: string; from: string; to: string }
 }
 
@@ -51,6 +52,7 @@ const EMPTY_FORM = {
   pricingScope: 'default',
   amountNGN: '',
   notes: '',
+  syncFleetPrices: false,
 }
 
 export default function AdminRoutePricesPage() {
@@ -140,6 +142,7 @@ export default function AdminRoutePricesPage() {
       pricingScope: item.pricingScope,
       amountNGN: item.amountNGN,
       notes: item.notes ?? '',
+      syncFleetPrices: false,
     })
     setOpen({ mode: 'edit', item })
   }
@@ -162,6 +165,7 @@ export default function AdminRoutePricesPage() {
         pricingScope: String(form.pricingScope ?? 'default'),
         amountNGN: Number(form.amountNGN ?? 0),
         notes: String(form.notes ?? '').trim() || null,
+        syncFleetPrices: Boolean(form.syncFleetPrices),
       }
       const url = open.mode === 'create' ? '/api/admin/route-prices' : `/api/admin/route-prices/${open.item?.id}`
       const method = open.mode === 'create' ? 'POST' : 'PATCH'
@@ -246,6 +250,7 @@ export default function AdminRoutePricesPage() {
                         <th className="px-6 py-4">Category</th>
                         <th className="px-6 py-4">Scope</th>
                         <th className="px-6 py-4">Fare (NGN)</th>
+                        <th className="px-6 py-4">Inheritance</th>
                         <th className="px-6 py-4">Notes</th>
                         <th className="px-6 py-4 text-right">Actions</th>
                       </tr>
@@ -256,6 +261,9 @@ export default function AdminRoutePricesPage() {
                           <td className="px-6 py-4">{vehicleLabel(price.vehicleId)}</td>
                           <td className="px-6 py-4">{routePriceScopeLabel(price.pricingScope)}</td>
                           <td className="px-6 py-4 font-semibold text-gray-900">{formatNGN(price.amountNGN)}</td>
+                          <td className="px-6 py-4 text-gray-500">
+                            {price.managedByCategory ? 'Category-managed' : 'Explicit'}
+                          </td>
                           <td className="px-6 py-4 text-gray-500">{price.notes ?? '—'}</td>
                           <td className="px-6 py-4 text-right">
                             <button onClick={() => openEdit(price)} className="mr-2 inline-flex h-9 items-center justify-center rounded-xl border border-purple-100 bg-white px-3 text-sm font-semibold text-[#3e004c] transition hover:bg-[#f7eff8]">
@@ -360,6 +368,22 @@ export default function AdminRoutePricesPage() {
               placeholder="Optional internal note, e.g. agency rate or seasonal price"
             />
           </div>
+
+          <label className="flex items-start gap-3 rounded-2xl border border-purple-100 bg-[#fbf7fc] p-4 text-sm text-gray-700">
+            <input
+              type="checkbox"
+              checked={Boolean(form.syncFleetPrices)}
+              onChange={(e) => setForm({ ...form, syncFleetPrices: e.target.checked })}
+              className="mt-1 h-4 w-4 rounded border-purple-200 text-[#3e004c]"
+            />
+            <span>
+              <span className="block font-semibold text-[#3e004c]">Sync connected fleet units</span>
+              <span className="mt-1 block text-gray-500">
+                Overwrite all connected unit prices for this route and scope, then keep them category-managed.
+                Leave this off to preserve custom unit overrides.
+              </span>
+            </span>
+          </label>
         </form>
       </AdminModal>
     </div>

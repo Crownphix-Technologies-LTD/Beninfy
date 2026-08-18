@@ -3,14 +3,15 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useLocale, useTranslations } from 'next-intl'
-import { bookingCities } from '@/data/routes'
 import { useVehicles } from '@/hooks/useVehicles'
+import { useRoutes } from '@/hooks/useRoutes'
 
 export default function BookingWidget() {
   const locale = useLocale()
   const t = useTranslations('booking')
   const router = useRouter()
   const { vehicles } = useVehicles()
+  const { locations } = useRoutes()
 
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
@@ -62,8 +63,8 @@ export default function BookingWidget() {
                   required
                 >
                   <option value="">{t('selectCity')}</option>
-                  {bookingCities.map((c) => (
-                    <option key={c.code} value={c.city}>
+                  {locations.map((c) => (
+                    <option key={`${c.city}:${c.country}`} value={c.city}>
                       {c.city}, {c.country}
                     </option>
                   ))}
@@ -83,8 +84,8 @@ export default function BookingWidget() {
                   required
                 >
                   <option value="">{t('selectCity')}</option>
-                  {bookingCities.map((c) => (
-                    <option key={c.code} value={c.city}>
+                  {locations.map((c) => (
+                    <option key={`${c.city}:${c.country}`} value={c.city}>
                       {c.city}, {c.country}
                     </option>
                   ))}

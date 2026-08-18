@@ -1,20 +1,26 @@
 import { z } from 'zod'
-import { routes, bookingCities, findRoute } from '@/data/routes'
 import { vehicles as catalogVehicles } from '@/data/vehicles'
-import {
-  getRouteDropoffPrice,
-  requiresLagosPickupArea,
-  type LagosPickupArea,
-} from '@/data/pricing'
-import { getRouteBorderFee } from '@/data/borderFees'
+import { requiresLagosPickupArea, type LagosPickupArea } from '@/data/pricing'
+import { calculateBookingPricing, calculateFareBreakdown } from '@/lib/bookingPricing'
 import { prisma } from '@/lib/prisma'
+import {
+  findPublicRouteByCities,
+  getBookingLocations,
+  getPublicRouteById,
+  getPublicRoutes,
+} from '@/lib/routeCatalog'
 import { getPublicVehicles } from '@/lib/vehicleCatalog'
-import { getRoutePriceOverrides } from '@/lib/routePriceOverrides'
-import { getAvailableFleetVehicleCount, assertFleetVehicleAvailable } from '@/lib/availability'
+import {
+  getAvailableFleetVehicleCount,
+  getAvailableFleetVehicles,
+  assertFleetVehicleAvailable,
+} from '@/lib/availability'
 import { validateCouponCode, normalizeCouponCode } from '@/lib/coupons'
 import type { MobileErrorCode } from '@/lib/mobile/errors'
 import type { Prisma } from '@prisma/client'
-import type { Route, RouteId, TripType, Vehicle, VehicleId } from '@/types'
+import type { Route, Vehicle } from '@/types'
+
+export { calculateFareBreakdown }
 
 type PrismaClientLike = typeof prisma | Prisma.TransactionClient
 
@@ -117,6 +123,8 @@ export function toMobileVehicleDto(vehicle: Vehicle) {
 }
 
 export async function mobileRoutesCatalogue() {
+  const routes = await getPublicRoutes()
+  const bookingCities = await getBookingLocations()
   return {
     routes: routes.map(toMobileRouteDto),
     locations: bookingCities.map((city) => ({
@@ -126,8 +134,8 @@ export async function mobileRoutesCatalogue() {
   }
 }
 
-export function mobileRouteDetail(routeId: string) {
-  const route = routes.find((item) => item.id === routeId)
+export async function mobileRouteDetail(routeId: string) {
+  const route = await getPublicRouteById(routeId)
   if (!route) return null
   return toMobileRouteDto(route)
 }
@@ -137,15 +145,16 @@ export async function mobileVehiclesCatalogue() {
   return { vehicles: vehicles.map(toMobileVehicleDto) }
 }
 
-export function normalizeDiscoverySelection(
-  input: MobileDiscoverySelectionInput
-): MobileDiscoveryResult<{
+export async function normalizeDiscoverySelection(
+  input: MobileDiscoverySelectionInput,
+  client: PrismaClientLike = prisma
+): Promise<MobileDiscoveryResult<{
   selection: MobileDiscoverySelection
   route: Route
   departureDate: Date
   returnDate: Date | null
   datesToCheck: Date[]
-}> {
+}>> {
   const parsed = mobileDiscoverySelectionSchema.safeParse(input)
   if (!parsed.success) {
     return {
@@ -157,9 +166,22 @@ export function normalizeDiscoverySelection(
   }
 
   const selection = parsed.data
-  const route = resolveRoute(selection)
+  const route = await resolveRoute(selection, client)
   if (!route) return { ok: false, code: 'ROUTE_NOT_FOUND', message: 'Route not found' }
 
+  return normalizeDiscoverySelectionForRoute(selection, route)
+}
+
+export function normalizeDiscoverySelectionForRoute(
+  selection: MobileDiscoverySelection,
+  route: Route
+): MobileDiscoveryResult<{
+  selection: MobileDiscoverySelection
+  route: Route
+  departureDate: Date
+  returnDate: Date | null
+  datesToCheck: Date[]
+}> {
   const departureDateValue = selection.departureDate ?? selection.date
   if (!departureDateValue) {
     return { ok: false, code: 'INVALID_TRIP_DATES', message: 'Departure date is required' }
@@ -208,7 +230,7 @@ export async function calculateMobileAvailability(
   input: MobileDiscoverySelectionInput,
   client: PrismaClientLike = prisma
 ) {
-  const normalized = normalizeDiscoverySelection(input)
+  const normalized = await normalizeDiscoverySelection(input, client)
   if (!normalized.ok) return normalized
 
   const vehicle = await resolveVehicle(normalized.data.selection.vehicleId, client)
@@ -268,7 +290,7 @@ export async function calculateMobileQuote(
   const availabilityResult = await calculateMobileAvailability(input, client)
   if (!availabilityResult.ok) return availabilityResult
 
-  const normalized = normalizeDiscoverySelection(input)
+  const normalized = await normalizeDiscoverySelection(input, client)
   if (!normalized.ok) return normalized
 
   const vehicle = await resolveVehicle(normalized.data.selection.vehicleId, client)
@@ -306,31 +328,27 @@ export async function calculateMobileQuote(
     }
   }
 
-  const routePriceOverrides = await getRoutePriceOverrides(normalized.data.route.id)
-  const oneWayDropoffFare = getRouteDropoffPrice(
-    normalized.data.route.id as RouteId,
-    pricingTargetId as VehicleId,
-    pricingTargetName,
-    normalized.data.selection.pickupArea as LagosPickupArea | undefined,
-    routePriceOverrides
-  )
+  const fare = await calculateBookingPricing({
+    routeId: normalized.data.route.id,
+    vehicleId: vehicle.id,
+    vehicleName: vehicle.name,
+    fleetVehicleId: fleetVehicle?.id,
+    fleetVehicleLabel: fleetVehicle?.label,
+    tripType: normalized.data.selection.tripType,
+    pickupArea: normalized.data.selection.pickupArea as LagosPickupArea | undefined,
+    client,
+  })
 
-  if (oneWayDropoffFare === null) {
+  if (!fare.ok) {
     return {
       ok: false as const,
-      code: 'QUOTE_UNAVAILABLE' as const,
-      message: 'Fare quote is unavailable for this route and vehicle',
+      code:
+        fare.code === 'PICKUP_AREA_REQUIRED' || fare.code === 'ROUTE_NOT_FOUND'
+          ? fare.code
+          : 'QUOTE_UNAVAILABLE',
+      message: fare.message,
     }
   }
-
-  const fare = calculateFareBreakdown({
-    oneWayDropoffFare,
-    tripType: normalized.data.selection.tripType,
-    borderFeeNGN: getRouteBorderFee(
-      normalized.data.route.id as RouteId,
-      normalized.data.selection.tripType as TripType
-    ),
-  })
 
   const couponCode = normalized.data.selection.couponCode
     ? normalizeCouponCode(normalized.data.selection.couponCode)
@@ -385,27 +403,9 @@ export async function calculateMobileQuote(
   }
 }
 
-export function calculateFareBreakdown(input: {
-  oneWayDropoffFare: number
-  tripType: TripType
-  borderFeeNGN: number
-}) {
-  const legCount = input.tripType === 'round-trip' ? 2 : 1
-  const rideFareNGN = input.oneWayDropoffFare * legCount
-  const subtotalNGN = rideFareNGN + input.borderFeeNGN
-
-  return {
-    oneWayDropoffFare: input.oneWayDropoffFare,
-    legCount,
-    rideFareNGN,
-    borderFeeNGN: input.borderFeeNGN,
-    subtotalNGN,
-  }
-}
-
-function resolveRoute(selection: MobileDiscoverySelection) {
-  if (selection.routeId) return routes.find((route) => route.id === selection.routeId) ?? null
-  if (selection.from && selection.to) return findRoute(selection.from, selection.to) ?? null
+async function resolveRoute(selection: MobileDiscoverySelection, client: PrismaClientLike) {
+  if (selection.routeId) return getPublicRouteById(selection.routeId, client)
+  if (selection.from && selection.to) return findPublicRouteByCities(selection.from, selection.to, client)
   return null
 }
 
@@ -493,6 +493,8 @@ async function selectedFleetAvailability(
     available,
     availableCount: available ? 1 : 0,
     physicalFleetCount: 1,
+    selectableFleetUnits: available ? [toMobileFleetVehicleDto(fleetVehicle)] : [],
+    informationalOnly: true,
     dates: checks,
   }
 }
@@ -518,6 +520,10 @@ async function categoryAvailability(vehicleId: string, datesToCheck: Date[], cli
     available,
     availableCount,
     physicalFleetCount,
+    selectableFleetUnits: (await getAvailableFleetVehicles(vehicleId, datesToCheck, client)).map((unit) =>
+      toMobileFleetVehicleDto(toFleetVehicleSafe(unit))
+    ),
+    informationalOnly: true,
     dates: checks,
   }
 }

@@ -13,11 +13,13 @@ const patchSchema = z.object({
   toCode: z.string().nullable().optional(),
   toCountry: z.string().nullable().optional(),
   durationHours: z.number().positive().optional(),
+  available: z.boolean().optional(),
   popular: z.boolean().optional(),
   image: z.string().nullable().optional(),
   description: z.string().nullable().optional(),
   descriptionFr: z.string().nullable().optional(),
   borderCrossings: z.array(z.string()).optional(),
+  borderFeeIds: z.array(z.string()).optional(),
 })
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -34,6 +36,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     ['From', route.from],
     ['To', route.to],
     ['Duration hours', route.durationHours],
+    ['Available', route.available ? 'Yes' : 'No'],
     ['Popular', route.popular ? 'Yes' : 'No'],
   ])
   await writeAuditLog({

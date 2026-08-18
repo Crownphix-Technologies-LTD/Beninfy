@@ -1,6 +1,6 @@
 # Vehicles Contract
 
-Vehicle discovery is mobile-safe and category based.
+Vehicle discovery is category based and backed by Prisma `Vehicle` records managed in the backoffice.
 
 Implemented endpoint:
 
@@ -8,30 +8,6 @@ Implemented endpoint:
 | --- | --- | --- |
 | `GET /api/mobile/v1/vehicles` | Public | Returns active vehicle categories for customer booking UI. |
 
-Success response:
+Fleet units are not returned by this endpoint. Use `POST /api/mobile/v1/availability` to discover customer-safe available units for a chosen category and date.
 
-```json
-{
-  "vehicles": [
-    {
-      "id": "saloon",
-      "name": "Saloon Car",
-      "nameFr": "Berline",
-      "displayName": "Saloon Car",
-      "capacity": 3,
-      "luggageCapacity": 2,
-      "available": true,
-      "image": "/images/fleet/saloon.jpg",
-      "description": "...",
-      "descriptionFr": "...",
-      "features": ["Air Conditioning"],
-      "featuresFr": ["Climatisation"],
-      "badge": "Premium Class",
-      "badgeFr": "Classe Premium",
-      "basePrice": null
-    }
-  ]
-}
-```
-
-Fleet unit plate numbers, internal notes, and admin-only fields are not exposed here.
+Fleet unit plate numbers, internal notes, maintenance notes, and admin-only fields are not exposed pre-booking.

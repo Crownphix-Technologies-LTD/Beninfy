@@ -16,8 +16,14 @@ import {
   verifyPaystackTransaction,
 } from '@/lib/paystack'
 import { settlePaymentFromPayOnUs, verifyPayOnUsPayment } from '@/lib/payonus'
+import {
+  MOBILE_LAUNCH_CURRENCY,
+  assertMobileLaunchCurrency,
+  normalizeMobileLaunchPaymentProvider,
+  type MobileLaunchPaymentProvider,
+} from '@/lib/mobile/paymentPolicy'
 
-export type MobilePaymentProvider = 'paystack' | 'payonus'
+export type MobilePaymentProvider = MobileLaunchPaymentProvider
 export type MobilePaymentStatus = 'pending' | 'paid' | 'failed' | 'amount_mismatch' | 'ops_review'
 
 export type MobilePaymentErrorCode =
@@ -28,6 +34,7 @@ export type MobilePaymentErrorCode =
   | 'PAYMENT_ALREADY_COMPLETED'
   | 'BOOKING_NOT_PAYABLE'
   | 'PAYMENT_PROVIDER_UNAVAILABLE'
+  | 'UNSUPPORTED_PAYMENT_CURRENCY'
 
 type BookingForPayment = {
   id: string
@@ -61,7 +68,7 @@ type PaymentForDto = {
 }
 
 export function normalizeMobilePaymentProvider(value: unknown): MobilePaymentProvider {
-  return value === 'payonus' ? 'payonus' : 'paystack'
+  return normalizeMobileLaunchPaymentProvider(value)
 }
 
 export function mobilePaymentState({
@@ -118,7 +125,7 @@ export function toMobilePaymentDto({
     status,
     amount: {
       value: payment?.amountNGN ?? booking.priceNGN,
-      currency: payment?.currencyCode ?? 'NGN',
+      currency: payment?.currencyCode ?? MOBILE_LAUNCH_CURRENCY,
       minorUnit: 'kobo',
       minorValue: (payment?.amountNGN ?? booking.priceNGN) * 100,
     },
@@ -160,7 +167,7 @@ export function payOnUsCheckoutConfig({
   return {
     businessId,
     amount: booking.priceNGN,
-    currency: 'NGN' as const,
+    currency: MOBILE_LAUNCH_CURRENCY,
     customerEmail: booking.passengerEmail || `booking-${booking.id}@beninfy.com`,
     customerName: booking.passengerName || 'Beninfy Customer',
     customerPhone: normalizePayOnUsPhone(booking.passengerPhone || ''),
@@ -243,6 +250,10 @@ export async function initiateMobileBookingPayment({
       dto: toMobilePaymentDto({ booking, payment: booking.payments[0] ?? null }),
     }
   }
+  const currency = assertMobileLaunchCurrency(MOBILE_LAUNCH_CURRENCY)
+  if (!currency.ok) {
+    return { ok: false as const, code: currency.code, message: currency.message }
+  }
 
   const existing = activePendingPayment(booking.payments, provider)
   if (existing && existing.expiresAt && existing.expiresAt > new Date()) {
@@ -279,7 +290,7 @@ export async function initiateMobileBookingPayment({
         status: 'pending',
         reference,
         provider: 'paystack',
-        currencyCode: 'NGN',
+        currencyCode: MOBILE_LAUNCH_CURRENCY,
         checkoutAmount: booking.priceNGN,
         expiresAt: paymentExpiresAt(),
       },
@@ -342,7 +353,7 @@ export async function initiateMobileBookingPayment({
       status: 'pending',
       reference,
       provider: 'payonus',
-      currencyCode: 'NGN',
+        currencyCode: MOBILE_LAUNCH_CURRENCY,
       checkoutAmount: booking.priceNGN,
       expiresAt: paymentExpiresAt(),
     },
@@ -377,6 +388,11 @@ export async function verifyMobileBookingPayment({
     booking.payments[0] ??
     null
   if (!payment) return { ok: false as const, code: 'PAYMENT_NOT_FOUND' as const }
+  if (payment.provider !== 'paystack' && payment.provider !== 'payonus') {
+    return { ok: false as const, code: 'PAYMENT_PROVIDER_UNAVAILABLE' as const }
+  }
+  const currency = assertMobileLaunchCurrency(payment.currencyCode)
+  if (!currency.ok) return { ok: false as const, code: currency.code }
 
   if (
     payment.status === 'paid' ||

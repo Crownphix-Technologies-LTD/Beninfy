@@ -3,6 +3,7 @@ import type { MobilePrincipal } from '@/lib/mobile/auth'
 import { createNotificationEvent } from '@/lib/mobile/notifications'
 import { prisma } from '@/lib/prisma'
 import { signRealtimeScope } from '@/lib/mobile/tracking'
+import { publishSupabaseBroadcast } from '@/lib/realtime/supabaseBroadcast'
 
 export const CHAT_SEND_ENABLED_STATUSES = [
   'assigned',
@@ -141,8 +142,16 @@ export function chatMessageRealtimeEvent({
 
 export function getChatPublisher(): RealtimeChatPublisher {
   return {
-    async publish() {
-      if ((process.env.CHAT_REALTIME_PROVIDER ?? 'metadata-only') !== 'mock') {
+    async publish(channel, payload) {
+      if ((process.env.CHAT_REALTIME_PROVIDER ?? 'supabase') === 'mock') {
+        return
+      }
+      const result = await publishSupabaseBroadcast({
+        channel,
+        event: payload.event,
+        payload,
+      })
+      if (!result.ok) {
         throw new Error('CHAT_REALTIME_PROVIDER_NOT_CONFIGURED')
       }
     },

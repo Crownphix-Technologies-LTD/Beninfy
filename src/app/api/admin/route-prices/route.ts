@@ -14,6 +14,7 @@ const schema = z.object({
   pricingScope: z.enum(['default', 'mainland', 'island']).default('default'),
   amountNGN: z.number().int().positive(),
   notes: z.string().trim().nullable().optional(),
+  syncFleetPrices: z.boolean().optional().default(false),
 })
 
 export async function GET() {
@@ -39,8 +40,9 @@ export async function POST(req: Request) {
 
   try {
     const routePrice = await prisma.$transaction(async (tx) => {
-      const created = await tx.routePrice.create({ data: parsed.data })
-      await propagateCategoryRoutePrice(tx, created)
+      const { syncFleetPrices, ...data } = parsed.data
+      const created = await tx.routePrice.create({ data })
+      await propagateCategoryRoutePrice(tx, { ...created, syncFleetPrices })
       return created
     })
     await notifyRoutePriceChanged('created', [

@@ -15,6 +15,10 @@ import {
 } from '@/lib/mobile/tracking'
 import { type MobileOnboardingDto, toMobileOnboardingDto } from '@/lib/mobile/onboarding'
 import { classifyDriverTripView, type DriverTripView } from '@/lib/mobile/driverOperations'
+import {
+  toJourneyIntelligenceDto,
+  type JourneyIntelligenceDto,
+} from '@/lib/mobile/journeyIntelligence'
 
 export type MobileBookingStatus = 'pending' | 'confirmed' | 'ops_review' | 'cancelled' | 'completed'
 
@@ -98,7 +102,9 @@ export type CustomerBookingSummaryDto = {
 
 export type CustomerBookingDetailDto = CustomerBookingSummaryDto & {
   pickupAddress: string | null
+  pickupCoordinates: { latitude: number; longitude: number } | null
   dropoffAddress: string | null
+  dropoffCoordinates: { latitude: number; longitude: number } | null
   passengerName: string | null
   passengerEmail: string | null
   passengerPhone: string | null
@@ -189,6 +195,7 @@ export type TrackingSnapshotDto = {
     expiresAt: string
     events: string[]
   } | null
+  journeyIntelligence: JourneyIntelligenceDto
 }
 
 type Dateish = Date | string
@@ -367,7 +374,11 @@ export function toCustomerBookingSummaryDto(booking: {
 export function toCustomerBookingDetailDto(
   booking: Parameters<typeof toCustomerBookingSummaryDto>[0] & {
     pickupAddress: string | null
+    pickupLatitude?: number | null
+    pickupLongitude?: number | null
     dropoffAddress: string | null
+    dropoffLatitude?: number | null
+    dropoffLongitude?: number | null
     passengerName: string | null
     passengerEmail: string | null
     passengerPhone: string | null
@@ -378,7 +389,15 @@ export function toCustomerBookingDetailDto(
   return {
     ...toCustomerBookingSummaryDto(booking),
     pickupAddress: booking.pickupAddress,
+    pickupCoordinates:
+      typeof booking.pickupLatitude === 'number' && typeof booking.pickupLongitude === 'number'
+        ? { latitude: booking.pickupLatitude, longitude: booking.pickupLongitude }
+        : null,
     dropoffAddress: booking.dropoffAddress,
+    dropoffCoordinates:
+      typeof booking.dropoffLatitude === 'number' && typeof booking.dropoffLongitude === 'number'
+        ? { latitude: booking.dropoffLatitude, longitude: booking.dropoffLongitude }
+        : null,
     passengerName: booking.passengerName,
     passengerEmail: booking.passengerEmail,
     passengerPhone: booking.passengerPhone,
@@ -483,6 +502,7 @@ export function toCustomerTrackingSnapshotDto({
     fleetVehicle: Parameters<typeof toFleetVehicleDto>[0] | null
     driver: Parameters<typeof toDriverProfileDto>[0] | null
     latestLocation: Parameters<typeof toLocationDto>[0] | null
+    journeySnapshot?: Parameters<typeof toJourneyIntelligenceDto>[0] | null
   }
 }): TrackingSnapshotDto {
   const trackingStatus = trackingStatusFor({
@@ -523,7 +543,7 @@ export function toCustomerTrackingSnapshotDto({
       ? {
           ...realtime,
           events: [
-            'trip.location.updated',
+            'trip.location_updated',
             'trip.driver_en_route',
             'trip.driver_arrived',
             'trip.passenger_onboard',
@@ -534,6 +554,7 @@ export function toCustomerTrackingSnapshotDto({
           ],
         }
       : null,
+    journeyIntelligence: toJourneyIntelligenceDto(leg.journeySnapshot ?? null),
   }
 }
 
@@ -550,6 +571,7 @@ export function toDriverTrackingSnapshotDto({
     fleetVehicle: Parameters<typeof toFleetVehicleDto>[0] | null
     driver: Parameters<typeof toDriverProfileDto>[0] | null
     latestLocation: Parameters<typeof toLocationDto>[0] | null
+    journeySnapshot?: Parameters<typeof toJourneyIntelligenceDto>[0] | null
   }
 }): TrackingSnapshotDto {
   const trackingStatus = trackingStatusFor({
@@ -585,7 +607,8 @@ export function toDriverTrackingSnapshotDto({
     vehicle: leg.fleetVehicle ? toFleetVehicleDto(leg.fleetVehicle) : null,
     realtime: {
       ...realtime,
-      events: ['trip.location.updated'],
+      events: ['trip.location_updated'],
     },
+    journeyIntelligence: toJourneyIntelligenceDto(leg.journeySnapshot ?? null),
   }
 }

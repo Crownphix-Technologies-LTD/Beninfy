@@ -2,30 +2,27 @@
 
 `Route` represents a supported transport corridor, for example Lagos to Cotonou or Lome to Accra.
 
-Mobile apps may read public route data to build booking forms and destination screens.
-
-Current public/web sources:
-
-- Static catalog: `src/data/routes.ts`
-- API/admin-backed route data: `/api/admin/routes` for admin only
-- Customer-facing route pages under `src/app/[locale]/routes/...`
+Mobile route discovery is backed by Prisma `Route` records. The backoffice `/admin/routes` screen is the operational source for customer-visible route metadata.
 
 Implemented mobile endpoints:
 
 | Endpoint | Status | Notes |
 | --- | --- | --- |
-| `GET /api/mobile/v1/routes` | IMPLEMENTED | Public stable route DTOs and supported booking locations. |
-| `GET /api/mobile/v1/routes/:routeId` | IMPLEMENTED | Public route detail by id. |
+| `GET /api/mobile/v1/routes` | IMPLEMENTED | Public stable route DTOs and supported booking locations from available database routes. |
+| `GET /api/mobile/v1/routes/:routeId` | IMPLEMENTED | Public route detail by id. Disabled routes are not returned. |
 
-Mobile route DTOs should include only customer-safe fields:
+Mobile route DTOs expose only customer-safe fields:
 
 - id
-- origin
-- destination
-- countries/cities
-- active status
-- display copy
-- route media URL
+- origin city/code/country
+- destination city/code/country
+- displayName
+- durationHours
+- popular
+- image
+- description / descriptionFr
+- borderCrossings
+- available
 
 Pricing must be fetched or calculated server-side. Flutter must not keep an authoritative price table.
 

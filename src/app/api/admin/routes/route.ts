@@ -15,11 +15,13 @@ const schema = z.object({
   toCode: z.string().nullable().optional(),
   toCountry: z.string().nullable().optional(),
   durationHours: z.number().positive(),
+  available: z.boolean().optional(),
   popular: z.boolean().optional(),
   image: z.string().nullable().optional(),
   description: z.string().nullable().optional(),
   descriptionFr: z.string().nullable().optional(),
   borderCrossings: z.array(z.string()).optional(),
+  borderFeeIds: z.array(z.string()).optional(),
 })
 
 export async function GET() {
@@ -42,6 +44,7 @@ export async function POST(req: Request) {
     ['From', route.from],
     ['To', route.to],
     ['Duration hours', route.durationHours],
+    ['Available', route.available ? 'Yes' : 'No'],
     ['Popular', route.popular ? 'Yes' : 'No'],
   ])
   await writeAuditLog({

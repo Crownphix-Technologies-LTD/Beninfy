@@ -8,11 +8,13 @@ import {
   initiateMobileBookingPayment,
   normalizeMobilePaymentProvider,
 } from '@/lib/mobile/payments'
+import { assertMobileLaunchCurrency } from '@/lib/mobile/paymentPolicy'
 
 export const runtime = 'nodejs'
 
 const initSchema = z.object({
   provider: z.enum(['paystack', 'payonus']).default('paystack'),
+  currency: z.string().trim().optional().default('NGN'),
   locale: z.enum(['en', 'fr']).default('en'),
 })
 
@@ -70,6 +72,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ booking
   const parsed = initSchema.safeParse(body ?? {})
   if (!parsed.success)
     return mobileValidationError('Invalid payment request', parsed.error.flatten())
+  const currency = assertMobileLaunchCurrency(parsed.data.currency)
+  if (!currency.ok) return mobileErrorFromCode(currency.code, currency.message)
 
   const result = await initiateMobileBookingPayment({
     bookingId,

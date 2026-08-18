@@ -5,9 +5,10 @@ import Link from 'next/link'
 import { useLocale } from 'next-intl'
 import { useSession } from 'next-auth/react'
 import { CalendarCheck, CarFront, MessageCircle, Phone, Route, X } from 'lucide-react'
+import { siteConfig } from '@/lib/config'
 import { cn } from '@/lib/utils'
 
-const WHATSAPP_NUMBER = '22951019134'
+const WHATSAPP_NUMBER = siteConfig.contact.whatsapp.replace(/[^\d]/g, '')
 
 const copy = {
   en: {

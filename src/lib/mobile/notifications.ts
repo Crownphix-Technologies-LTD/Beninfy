@@ -1,6 +1,7 @@
 import { createHash } from 'crypto'
 import { Prisma } from '@prisma/client'
 import type { MobilePrincipal } from '@/lib/mobile/auth'
+import { getFcmProvider } from '@/lib/mobile/fcm'
 import { prisma } from '@/lib/prisma'
 
 export type PushAppType = 'customer' | 'driver'
@@ -27,6 +28,11 @@ export type NotificationType =
   | 'trip.started'
   | 'trip.completed'
   | 'trip.cancelled'
+  | 'payment_resolution.under_review'
+  | 'refund.approved'
+  | 'refund.processing'
+  | 'refund.completed'
+  | 'refund.rejected'
 
 type PushPayload = {
   type: NotificationType
@@ -34,6 +40,7 @@ type PushPayload = {
   bookingId?: string
   bookingLegId?: string
   paymentId?: string
+  paymentResolutionId?: string
   conversationId?: string
   messageId?: string
 }
@@ -169,6 +176,38 @@ const templates: Record<
       body: 'Ce trajet Beninfy a ete annule. Contactez le support si besoin.',
     },
   },
+  'payment_resolution.under_review': {
+    en: {
+      title: 'Refund review started',
+      body: 'Operations is reviewing your payment resolution request.',
+    },
+    fr: {
+      title: 'Examen du remboursement commence',
+      body: 'Notre equipe examine votre demande de resolution de paiement.',
+    },
+  },
+  'refund.approved': {
+    en: { title: 'Refund approved', body: 'Your refund request has been approved.' },
+    fr: { title: 'Remboursement approuve', body: 'Votre demande de remboursement a ete approuvee.' },
+  },
+  'refund.processing': {
+    en: { title: 'Refund processing', body: 'Your refund is being processed by operations.' },
+    fr: { title: 'Remboursement en cours', body: 'Votre remboursement est en cours de traitement.' },
+  },
+  'refund.completed': {
+    en: { title: 'Refund completed', body: 'Your refund resolution has been completed.' },
+    fr: { title: 'Remboursement termine', body: 'Votre resolution de remboursement est terminee.' },
+  },
+  'refund.rejected': {
+    en: {
+      title: 'Refund request closed',
+      body: 'Your refund request was not approved. Contact support if you need help.',
+    },
+    fr: {
+      title: 'Demande de remboursement cloturee',
+      body: 'Votre demande de remboursement n a pas ete approuvee. Contactez le support si besoin.',
+    },
+  },
 }
 
 export function tokenHash(token: string) {
@@ -246,9 +285,10 @@ export function getPushProvider(): PushNotificationProvider {
       },
     }
   }
+  if (provider === 'fcm') return getFcmProvider()
 
   return {
-    name: provider === 'fcm' ? 'fcm-disabled' : 'disabled',
+    name: 'disabled',
     async send() {
       return {
         ok: false,
@@ -598,6 +638,43 @@ export async function deliverNotification(notificationId: string, provider = get
   return { state: deliveryState, sent, invalid, failed, skipped }
 }
 
+export async function processDueNotificationDeliveries({
+  take = 50,
+  now = new Date(),
+}: {
+  take?: number
+  now?: Date
+} = {}) {
+  const dueDeliveryRows = await prisma.notificationDelivery.findMany({
+    where: {
+      status: 'failed',
+      attempts: { lt: MAX_RETRY_ATTEMPTS },
+      OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: now } }],
+    },
+    orderBy: [{ nextAttemptAt: 'asc' }, { createdAt: 'asc' }],
+    take,
+    select: { notificationId: true },
+  })
+  const dueIds = new Set(dueDeliveryRows.map((row) => row.notificationId))
+  if (dueIds.size < take) {
+    const pending = await prisma.notification.findMany({
+      where: { deliveryState: 'pending' },
+      orderBy: { createdAt: 'asc' },
+      take: take - dueIds.size,
+      select: { id: true },
+    })
+    for (const row of pending) dueIds.add(row.id)
+  }
+
+  let processed = 0
+  for (const notificationId of dueIds) {
+    await deliverNotification(notificationId)
+    processed += 1
+  }
+
+  return { checked: dueIds.size, processed }
+}
+
 export async function notifyPaymentConfirmedPush(bookingId: string, paymentId: string) {
   const booking = await prisma.booking.findUnique({
     where: { id: bookingId },
@@ -625,6 +702,38 @@ export async function notifyPaymentFailedPush(bookingId: string, paymentId?: str
     type: 'payment.failed',
     payload: { type: 'payment.failed', version: 1, bookingId, paymentId },
     dedupeKey: `payment.failed:${paymentId ?? bookingId}`,
+  })
+}
+
+export async function notifyPaymentResolutionPush(input: {
+  paymentResolutionId: string
+  bookingId: string
+  paymentId: string
+  customerId: string
+  status: string
+}) {
+  const typeByStatus: Partial<Record<string, NotificationType>> = {
+    under_review: 'payment_resolution.under_review',
+    approved: 'refund.approved',
+    processing: 'refund.processing',
+    completed: 'refund.completed',
+    rejected: 'refund.rejected',
+  }
+  const type = typeByStatus[input.status]
+  if (!type) return null
+
+  return createNotificationEvent({
+    userId: input.customerId,
+    appType: 'customer',
+    type,
+    payload: {
+      type,
+      version: 1,
+      bookingId: input.bookingId,
+      paymentId: input.paymentId,
+      paymentResolutionId: input.paymentResolutionId,
+    },
+    dedupeKey: `${type}:${input.paymentResolutionId}:${input.status}`,
   })
 }
 

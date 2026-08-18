@@ -124,7 +124,11 @@ function PaymentContent() {
   const passportId = params.get('passportId') ?? ''
   const nationality = params.get('nationality') ?? ''
   const pickupAddress = params.get('pickupAddress') ?? ''
+  const pickupLatitude = Number(params.get('pickupLatitude'))
+  const pickupLongitude = Number(params.get('pickupLongitude'))
   const dropoffAddress = params.get('dropoffAddress') ?? ''
+  const dropoffLatitude = Number(params.get('dropoffLatitude'))
+  const dropoffLongitude = Number(params.get('dropoffLongitude'))
   const specialRequirements = params.get('specialRequirements') ?? ''
   const pickupAreaParam = params.get('pickupArea')
   const pickupArea = (pickupAreaParam === 'mainland' || pickupAreaParam === 'island' ? pickupAreaParam : undefined) as LagosPickupArea | undefined
@@ -222,7 +226,11 @@ function PaymentContent() {
           nationality,
           travelers,
           pickupAddress,
+          pickupLatitude: Number.isFinite(pickupLatitude) ? pickupLatitude : undefined,
+          pickupLongitude: Number.isFinite(pickupLongitude) ? pickupLongitude : undefined,
           dropoffAddress,
+          dropoffLatitude: Number.isFinite(dropoffLatitude) ? dropoffLatitude : undefined,
+          dropoffLongitude: Number.isFinite(dropoffLongitude) ? dropoffLongitude : undefined,
           specialRequirements,
           pickupArea,
           couponCode: couponCode.trim() || undefined,
@@ -357,6 +365,10 @@ function PaymentContent() {
             phone: passengerPhone,
             passportId,
             nationality,
+            ...(Number.isFinite(pickupLatitude) ? { pickupLatitude: String(pickupLatitude) } : {}),
+            ...(Number.isFinite(pickupLongitude) ? { pickupLongitude: String(pickupLongitude) } : {}),
+            ...(Number.isFinite(dropoffLatitude) ? { dropoffLatitude: String(dropoffLatitude) } : {}),
+            ...(Number.isFinite(dropoffLongitude) ? { dropoffLongitude: String(dropoffLongitude) } : {}),
             ...(travelersParam ? { travelers: travelersParam } : {}),
             pickupAddress,
             dropoffAddress,

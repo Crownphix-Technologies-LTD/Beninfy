@@ -30,6 +30,14 @@ Required only when testing related flows:
 - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
 - `SUPABASE_SECRET_KEY`
 - `SUPABASE_STORAGE_BUCKET`
+- `REALTIME_AUTH_SECRET`
+- `GOOGLE_ROUTES_API_KEY`
+- `PUSH_PROVIDER`
+- `FIREBASE_PROJECT_ID`
+- `FIREBASE_CLIENT_EMAIL`
+- `FIREBASE_PRIVATE_KEY`
+- `WORKER_SECRET`
+- `CRON_SECRET`
 - `SMTP_HOST`
 - `SMTP_PORT`
 - `SMTP_USER`
@@ -47,6 +55,9 @@ Server-only:
 - Payment provider secret variables for live payment flows
 - SMTP credentials for live notifications
 - Supabase service/secret key for admin uploads
+- Google Routes API server key
+- Firebase service-account credentials for FCM
+- Worker secret for scheduled reconciliation and notification retries
 
 Public/browser-safe:
 
@@ -63,6 +74,9 @@ Public/browser-safe:
 - `AUTH_ADMIN_SESSION_MAX_AGE_SECONDS`
 - `SMTP_LOCAL_ADDRESS`
 - `PAYSTACK_WEBHOOK_ALLOWED_IPS`
+- `JOURNEY_ROUTE_CACHE_TTL_SECONDS`
+- `JOURNEY_ROUTE_RECALCULATE_SECONDS`
+- `ENABLE_LEGACY_PAYAZA`
 - `ADMIN_NOTIFICATION_EMAILS`
 - `GOOGLE_CLIENT_ID`
 - `GOOGLE_CLIENT_SECRET`
