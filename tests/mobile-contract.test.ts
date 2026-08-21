@@ -1,6 +1,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { toCustomerBookingDetailDto, toDriverTripDetailDto } from '../src/lib/mobile/dtos'
+import {
+  toCustomerBookingDetailDto,
+  toDriverProfileDto,
+  toDriverTrackingSnapshotDto,
+  toDriverTripDetailDto,
+} from '../src/lib/mobile/dtos'
 import {
   allowedDriverTripActions,
   evaluateDriverTripTransition,
@@ -9,7 +14,9 @@ import {
 } from '../src/lib/tripLifecycle'
 import {
   isTrackingEligibleStatus,
+  realtimeChannelForDriver,
   shouldReplaceLocation,
+  signPresenceScope,
   trackingStatusFor,
   validateLocationInput,
   verifyRealtimeScope,
@@ -278,6 +285,88 @@ test('driver trip DTO exposes operational fields and excludes payment metadata',
   assert.equal(dto.reference, 'BFY-12345678')
   assert.equal(dto.specialRequirements, 'Call on arrival')
   assert.equal('paymentProviderMetadata' in dto, false)
+})
+
+test('driver profile DTO keeps duty and presence separate', () => {
+  const dto = toDriverProfileDto({
+    id: 'driver1',
+    name: 'Ada Driver',
+    phone: '+22951019134',
+    email: 'driver@example.com',
+    status: 'off_duty',
+    presence: {
+      status: 'online',
+      lastSeenAt: new Date('2026-08-21T10:00:00.000Z'),
+      lastHeartbeatAt: new Date('2026-08-21T10:00:10.000Z'),
+      currentBookingLegId: 'leg1',
+    },
+  })
+
+  assert.equal(dto.status, 'off_duty')
+  assert.equal(dto.dutyStatus, 'off_duty')
+  assert.equal(dto.presence?.status, 'online')
+  assert.equal(dto.presence?.currentBookingLegId, 'leg1')
+  assert.equal('password' in dto, false)
+  assert.equal('hashedPassword' in dto, false)
+})
+
+test('driver duty status is self-service only for available and off duty', () => {
+  assert.equal(isDriverDutyStatus('available'), true)
+  assert.equal(isDriverDutyStatus('off_duty'), true)
+  assert.equal(isDriverDutyStatus('inactive'), false)
+})
+
+test('driver tracking DTO exposes publish-scoped realtime metadata only', () => {
+  process.env.REALTIME_AUTH_SECRET = 'test-secret-for-driver-tracking'
+  const dto = toDriverTrackingSnapshotDto({
+    principalId: 'driver-user-1',
+    leg: {
+      id: 'leg1',
+      bookingId: 'booking12345678',
+      status: 'driver_en_route',
+      driverId: 'driver1',
+      fleetVehicle: {
+        id: 'fleet1',
+        label: 'Toyota Camry',
+        plateNumber: 'ABC-123',
+        color: 'Black',
+        vehicleId: 'saloon',
+        status: 'available',
+      },
+      driver: {
+        id: 'driver1',
+        name: 'Ada Driver',
+        phone: '+22951019134',
+        email: 'driver@example.com',
+        status: 'available',
+      },
+      latestLocation: null,
+      journeySnapshot: null,
+    },
+  })
+
+  assert.equal(dto.realtime?.provider, 'supabase-broadcast')
+  assert.equal(dto.realtime?.channel, 'trip:leg1:tracking')
+  assert.equal(dto.realtime?.permission, 'publish')
+  assert.deepEqual(dto.realtime?.events, ['trip.location_updated'])
+  assert.equal(dto.journeyIntelligence, null)
+})
+
+test('driver presence scope is driver-channel scoped and verifiable', () => {
+  process.env.REALTIME_AUTH_SECRET = 'test-secret-for-driver-presence'
+  const channel = realtimeChannelForDriver('driver1')
+  const scope = signPresenceScope({
+    principalType: 'driver',
+    principalId: 'driver1',
+    driverId: 'driver1',
+    channel,
+    ttlSeconds: 60,
+  })
+
+  assert.equal(scope.provider, 'supabase-presence')
+  assert.equal(scope.permission, 'presence')
+  assert.equal(scope.channel, 'driver:driver1:presence')
+  assert.match(scope.token, /^[^.]+\.[^.]+$/)
 })
 
 test('location validation rejects invalid coordinates', () => {
