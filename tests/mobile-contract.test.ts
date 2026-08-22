@@ -1,6 +1,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { toCustomerBookingDetailDto, toDriverTripDetailDto } from '../src/lib/mobile/dtos'
+import {
+  toCustomerBookingDetailDto,
+  toDriverProfileDto,
+  toDriverTrackingSnapshotDto,
+  toDriverTripDetailDto,
+} from '../src/lib/mobile/dtos'
 import {
   allowedDriverTripActions,
   evaluateDriverTripTransition,
@@ -9,7 +14,9 @@ import {
 } from '../src/lib/tripLifecycle'
 import {
   isTrackingEligibleStatus,
+  realtimeChannelForDriver,
   shouldReplaceLocation,
+  signPresenceScope,
   trackingStatusFor,
   validateLocationInput,
   verifyRealtimeScope,
@@ -60,7 +67,7 @@ import {
 } from '../src/lib/mobile/bookingDiscovery'
 import { calculateBookingPricing } from '../src/lib/bookingPricing'
 import { calculateRouteBorderFeeNGN } from '../src/lib/borderFeeCatalog'
-import { getPublicRoutes } from '../src/lib/routeCatalog'
+import { findPublicRouteByCities, getPublicRoutes } from '../src/lib/routeCatalog'
 import {
   classifyDriverTripView,
   driverTripOrderByForView,
@@ -91,6 +98,13 @@ import { routes } from '../src/data/routes'
 import { vehicles } from '../src/data/vehicles'
 import { propagateCategoryRoutePrice } from '../src/lib/routePricePropagation'
 import { computeGoogleRoute } from '../src/lib/maps/googleRoutes'
+import {
+  extractSupportedCity,
+  getGooglePlacesServerKey,
+  normalizePlacesQuery,
+  toMobilePlaceDetailDto,
+  toMobilePlacePredictionDto,
+} from '../src/lib/maps/googlePlaces'
 import { toJourneyIntelligenceDto } from '../src/lib/mobile/journeyIntelligence'
 import { mobileSupportConfig } from '../src/lib/mobile/supportConfig'
 import { getFcmConfig } from '../src/lib/mobile/fcm'
@@ -278,6 +292,88 @@ test('driver trip DTO exposes operational fields and excludes payment metadata',
   assert.equal(dto.reference, 'BFY-12345678')
   assert.equal(dto.specialRequirements, 'Call on arrival')
   assert.equal('paymentProviderMetadata' in dto, false)
+})
+
+test('driver profile DTO keeps duty and presence separate', () => {
+  const dto = toDriverProfileDto({
+    id: 'driver1',
+    name: 'Ada Driver',
+    phone: '+22951019134',
+    email: 'driver@example.com',
+    status: 'off_duty',
+    presence: {
+      status: 'online',
+      lastSeenAt: new Date('2026-08-21T10:00:00.000Z'),
+      lastHeartbeatAt: new Date('2026-08-21T10:00:10.000Z'),
+      currentBookingLegId: 'leg1',
+    },
+  })
+
+  assert.equal(dto.status, 'off_duty')
+  assert.equal(dto.dutyStatus, 'off_duty')
+  assert.equal(dto.presence?.status, 'online')
+  assert.equal(dto.presence?.currentBookingLegId, 'leg1')
+  assert.equal('password' in dto, false)
+  assert.equal('hashedPassword' in dto, false)
+})
+
+test('driver duty status is self-service only for available and off duty', () => {
+  assert.equal(isDriverDutyStatus('available'), true)
+  assert.equal(isDriverDutyStatus('off_duty'), true)
+  assert.equal(isDriverDutyStatus('inactive'), false)
+})
+
+test('driver tracking DTO exposes publish-scoped realtime metadata only', () => {
+  process.env.REALTIME_AUTH_SECRET = 'test-secret-for-driver-tracking'
+  const dto = toDriverTrackingSnapshotDto({
+    principalId: 'driver-user-1',
+    leg: {
+      id: 'leg1',
+      bookingId: 'booking12345678',
+      status: 'driver_en_route',
+      driverId: 'driver1',
+      fleetVehicle: {
+        id: 'fleet1',
+        label: 'Toyota Camry',
+        plateNumber: 'ABC-123',
+        color: 'Black',
+        vehicleId: 'saloon',
+        status: 'available',
+      },
+      driver: {
+        id: 'driver1',
+        name: 'Ada Driver',
+        phone: '+22951019134',
+        email: 'driver@example.com',
+        status: 'available',
+      },
+      latestLocation: null,
+      journeySnapshot: null,
+    },
+  })
+
+  assert.equal(dto.realtime?.provider, 'supabase-broadcast')
+  assert.equal(dto.realtime?.channel, 'trip:leg1:tracking')
+  assert.equal(dto.realtime?.permission, 'publish')
+  assert.deepEqual(dto.realtime?.events, ['trip.location_updated'])
+  assert.equal(dto.journeyIntelligence, null)
+})
+
+test('driver presence scope is driver-channel scoped and verifiable', () => {
+  process.env.REALTIME_AUTH_SECRET = 'test-secret-for-driver-presence'
+  const channel = realtimeChannelForDriver('driver1')
+  const scope = signPresenceScope({
+    principalType: 'driver',
+    principalId: 'driver1',
+    driverId: 'driver1',
+    channel,
+    ttlSeconds: 60,
+  })
+
+  assert.equal(scope.provider, 'supabase-presence')
+  assert.equal(scope.permission, 'presence')
+  assert.equal(scope.channel, 'driver:driver1:presence')
+  assert.match(scope.token, /^[^.]+\.[^.]+$/)
 })
 
 test('location validation rejects invalid coordinates', () => {
@@ -639,25 +735,31 @@ test('mobile vehicle discovery DTO exposes capacity and safe pricing fields', ()
 })
 
 test('mobile discovery selection validates round trip return dates', () => {
-  const missingReturn = normalizeDiscoverySelectionForRoute({
-    routeId: 'lagos-cotonou',
-    vehicleId: 'saloon',
-    tripType: 'round-trip',
-    departureDate: '2026-08-20T09:00:00.000Z',
-    passengers: 1,
-  }, routes[0])
+  const missingReturn = normalizeDiscoverySelectionForRoute(
+    {
+      routeId: 'lagos-cotonou',
+      vehicleId: 'saloon',
+      tripType: 'round-trip',
+      departureDate: '2026-08-20T09:00:00.000Z',
+      passengers: 1,
+    },
+    routes[0]
+  )
 
   assert.equal(missingReturn.ok, false)
   if (!missingReturn.ok) assert.equal(missingReturn.code, 'INVALID_RETURN_DATE')
 
-  const valid = normalizeDiscoverySelectionForRoute({
-    routeId: 'lagos-cotonou',
-    vehicleId: 'saloon',
-    tripType: 'round-trip',
-    departureDate: '2026-08-20T09:00:00.000Z',
-    returnDate: '2026-08-22T09:00:00.000Z',
-    passengers: 1,
-  }, routes[0])
+  const valid = normalizeDiscoverySelectionForRoute(
+    {
+      routeId: 'lagos-cotonou',
+      vehicleId: 'saloon',
+      tripType: 'round-trip',
+      departureDate: '2026-08-20T09:00:00.000Z',
+      returnDate: '2026-08-22T09:00:00.000Z',
+      passengers: 1,
+    },
+    routes[0]
+  )
 
   assert.equal(valid.ok, true)
   if (valid.ok) assert.equal(valid.data.datesToCheck.length, 2)
@@ -687,11 +789,11 @@ test('public route service excludes disabled database routes', async () => {
       findMany: async (args: { where?: unknown }) => {
         whereClause = args.where
         return [
-        {
-          ...routes[0],
-          available: true,
-          borderFeeIds: ['nigeria-benin'],
-        },
+          {
+            ...routes[0],
+            available: true,
+            borderFeeIds: ['nigeria-benin'],
+          },
         ]
       },
     },
@@ -1179,6 +1281,115 @@ test('google routes returns disabled without server key and normalizes provider 
   globalThis.fetch = originalFetch
   if (originalKey === undefined) delete process.env.GOOGLE_ROUTES_API_KEY
   else process.env.GOOGLE_ROUTES_API_KEY = originalKey
+})
+
+test('google places autocomplete normalizes predictions without coordinates', () => {
+  const query = normalizePlacesQuery('  cotonou airport  ')
+  assert.equal(query.ok, true)
+  if (query.ok) assert.equal(query.query, 'cotonou airport')
+
+  const dto = toMobilePlacePredictionDto({
+    place: 'places/ChIJAirport123',
+    text: { text: 'Cadjehoun Airport, Cotonou, Benin' },
+    structuredFormat: {
+      mainText: { text: 'Cadjehoun Airport' },
+      secondaryText: { text: 'Cotonou, Benin' },
+    },
+    types: ['airport', 'point_of_interest', 'establishment'],
+  })
+
+  assert.deepEqual(dto, {
+    placeId: 'ChIJAirport123',
+    displayName: 'Cadjehoun Airport',
+    formattedAddress: 'Cotonou, Benin',
+    latitude: null,
+    longitude: null,
+    city: null,
+    country: null,
+    countryCode: null,
+  })
+})
+
+test('google place details DTO exposes only customer-safe location fields', () => {
+  const dto = toMobilePlaceDetailDto({
+    id: 'ChIJHotel456',
+    displayName: { text: 'Hotel du Lac' },
+    formattedAddress: 'Rue Bel Air, Cotonou, Benin',
+    location: { latitude: 6.369, longitude: 2.432 },
+    addressComponents: [
+      { longText: 'Cotonou', shortText: 'Cotonou', types: ['locality'] },
+      { longText: 'Littoral Department', shortText: 'LT', types: ['administrative_area_level_1'] },
+      { longText: 'Benin', shortText: 'BJ', types: ['country'] },
+    ],
+  })
+
+  assert.deepEqual(dto, {
+    placeId: 'ChIJHotel456',
+    displayName: 'Hotel du Lac',
+    formattedAddress: 'Rue Bel Air, Cotonou, Benin',
+    latitude: 6.369,
+    longitude: 2.432,
+    city: 'Cotonou',
+    country: 'Benin',
+    countryCode: 'BJ',
+  })
+})
+
+test('supported city extraction prefers local city and falls back to administrative area', () => {
+  assert.deepEqual(
+    extractSupportedCity([
+      { longText: 'Accra', shortText: 'Accra', types: ['locality'] },
+      { longText: 'Ghana', shortText: 'GH', types: ['country'] },
+    ]),
+    { city: 'Accra', country: 'Ghana', countryCode: 'GH' }
+  )
+
+  assert.deepEqual(
+    extractSupportedCity([
+      {
+        longText: 'Kpalime Prefecture',
+        shortText: 'Kloto',
+        types: ['administrative_area_level_2'],
+      },
+      { longText: 'Togo', shortText: 'TG', types: ['country'] },
+    ]),
+    { city: 'Kpalime Prefecture', country: 'Togo', countryCode: 'TG' }
+  )
+})
+
+test('unsupported mobile place city pair remains rejected by route catalogue', async () => {
+  const client = {
+    route: {
+      findFirst: async () => null,
+    },
+  }
+
+  const result = await findPublicRouteByCities('Paris', 'Berlin', client as never)
+  assert.equal(result, null)
+})
+
+test('google places server key is backend-only and never falls back to public maps key', () => {
+  const originalPlacesKey = process.env.GOOGLE_PLACES_API_KEY
+  const originalPublicKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
+
+  delete process.env.GOOGLE_PLACES_API_KEY
+  process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY = 'public-browser-key'
+  assert.equal(getGooglePlacesServerKey(), null)
+
+  process.env.GOOGLE_PLACES_API_KEY = 'server-places-key'
+  const dto = toMobilePlaceDetailDto({
+    id: 'ChIJLandmark789',
+    displayName: { text: 'Black Star Square' },
+    formattedAddress: 'Accra, Ghana',
+  })
+  assert.equal(getGooglePlacesServerKey(), 'server-places-key')
+  assert.equal(JSON.stringify(dto).includes('server-places-key'), false)
+  assert.equal(JSON.stringify(dto).includes('public-browser-key'), false)
+
+  if (originalPlacesKey === undefined) delete process.env.GOOGLE_PLACES_API_KEY
+  else process.env.GOOGLE_PLACES_API_KEY = originalPlacesKey
+  if (originalPublicKey === undefined) delete process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
+  else process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY = originalPublicKey
 })
 
 test('journey intelligence DTO remains optional and marks stale cache', () => {

@@ -58,6 +58,9 @@ export type MobileErrorCode =
   | 'INVALID_TRIP_DATES'
   | 'INVALID_RETURN_DATE'
   | 'PICKUP_AREA_REQUIRED'
+  | 'PLACE_NOT_FOUND'
+  | 'PLACE_SEARCH_FAILED'
+  | 'PLACE_SEARCH_UNAVAILABLE'
   | 'COUPON_INVALID'
   | 'COUPON_EXPIRED'
   | 'QUOTE_UNAVAILABLE'
@@ -233,6 +236,12 @@ export function mobileErrorFromCode(code: MobileErrorCode, message?: string) {
       return mobileError(code, message ?? 'Return date is required for round trips', 400)
     case 'PICKUP_AREA_REQUIRED':
       return mobileError(code, message ?? 'Pickup fare zone is required for this route', 400)
+    case 'PLACE_NOT_FOUND':
+      return mobileError(code, message ?? 'Place not found', 404)
+    case 'PLACE_SEARCH_FAILED':
+      return mobileError(code, message ?? 'Place search failed', 502)
+    case 'PLACE_SEARCH_UNAVAILABLE':
+      return mobileError(code, message ?? 'Place search is unavailable', 503)
     case 'COUPON_INVALID':
       return mobileError(code, message ?? 'Coupon code is invalid', 400)
     case 'COUPON_EXPIRED':
