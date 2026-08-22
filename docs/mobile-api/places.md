@@ -1,6 +1,6 @@
 # Mobile Places Search
 
-Mobile clients must not call Google Places directly with the backend credential. The backend owns Google Places API (New) calls and returns only customer-safe fields.
+Mobile clients must not call Google Places or Geocoding directly with the backend credential. The backend owns Google Places API (New) and Geocoding API reverse lookup calls and returns only customer-safe fields.
 
 ## Environment
 
@@ -8,7 +8,7 @@ Required server-only variable:
 
 - `GOOGLE_PLACES_API_KEY`
 
-This key must not be named with `NEXT_PUBLIC_`. Enable Places API (New) in the existing Google Cloud project and restrict this key for backend/server usage. Android and iOS Maps SDK keys remain separate platform-restricted app keys.
+This key must not be named with `NEXT_PUBLIC_`. Enable Places API (New) and Geocoding API in the existing Google Cloud project and restrict this key for backend/server usage. Android and iOS Maps SDK keys remain separate platform-restricted app keys.
 
 ## Autocomplete
 
@@ -68,6 +68,60 @@ Success:
 }
 ```
 
+## Reverse Geocoding
+
+`GET /api/mobile/v1/places/reverse?latitude=6.369&longitude=2.432&locale=en|fr`
+
+`languageCode=en|fr` is also accepted as an alias for `locale`.
+
+Authentication: mobile customer bearer token.
+
+Rate limit: per customer and request IP.
+
+Provider: Google Geocoding API reverse geocoding through the backend.
+
+Success when Google returns an authoritative locality/postal town and country:
+
+```json
+{
+  "place": {
+    "placeId": "ChIJ...",
+    "displayName": "Rue Bel Air, Cotonou, Benin",
+    "formattedAddress": "Rue Bel Air, Cotonou, Benin",
+    "latitude": 6.369,
+    "longitude": 2.432,
+    "city": "Cotonou",
+    "country": "Benin",
+    "countryCode": "BJ",
+    "resolved": true
+  },
+  "unresolved": false,
+  "attribution": { "provider": "google_geocoding" }
+}
+```
+
+Safe unresolved response when Google returns an address/region but no reliable city:
+
+```json
+{
+  "place": {
+    "placeId": "ChIJ...",
+    "displayName": "Littoral Department, Benin",
+    "formattedAddress": "Littoral Department, Benin",
+    "latitude": 6.37,
+    "longitude": 2.39,
+    "city": null,
+    "country": null,
+    "countryCode": null,
+    "resolved": false
+  },
+  "unresolved": true,
+  "attribution": { "provider": "google_geocoding" }
+}
+```
+
+Flutter should treat `resolved: false` or `city: null` as "current location could not be matched to a supported booking city" and ask the customer to choose a pickup address manually.
+
 ## Booking Authority
 
 Places search does not make arbitrary city pairs bookable. Flutter may use the returned address, coordinates and extracted city to prefill booking, but the booking endpoint remains authoritative:
@@ -76,6 +130,8 @@ Places search does not make arbitrary city pairs bookable. Flutter may use the r
 - fare comes from backend pricing
 - availability comes from backend fleet reservation logic
 - unsupported city pairs remain rejected by the booking API
+
+Reverse geocoding does not make arbitrary GPS locations bookable. The booking API still matches the pickup/dropoff city pair against the Beninfy route catalog and rejects unsupported pairs.
 
 Booking creation already accepts and persists:
 

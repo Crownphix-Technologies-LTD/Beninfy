@@ -9,6 +9,11 @@ export type MobilePlaceDto = {
   countryCode: string | null
 }
 
+export type MobileReverseGeocodeDto = Omit<MobilePlaceDto, 'placeId'> & {
+  placeId: string | null
+  resolved: boolean
+}
+
 type GooglePlaceText = {
   text?: string
 }
@@ -42,10 +47,26 @@ type GoogleAddressComponent = {
   types?: string[]
 }
 
+export type GoogleGeocodeResult = {
+  placeId?: string
+  formattedAddress?: string
+  location?: {
+    latitude?: number
+    longitude?: number
+  }
+  addressComponents?: GoogleAddressComponent[]
+  types?: string[]
+}
+
 type GoogleAutocompleteResponse = {
   suggestions?: Array<{
     placePrediction?: GooglePlacePrediction
   }>
+  error?: { message?: string }
+}
+
+type GoogleReverseGeocodeResponse = {
+  results?: GoogleGeocodeResult[]
   error?: { message?: string }
 }
 
@@ -61,7 +82,12 @@ type PlaceDetailResult =
       message: string
     }
 
+type ReverseGeocodeResult =
+  | { ok: true; place: MobileReverseGeocodeDto }
+  | { ok: false; code: 'GOOGLE_PLACES_DISABLED' | 'GOOGLE_PLACES_ERROR'; message: string }
+
 const PLACES_API_BASE_URL = 'https://places.googleapis.com/v1'
+const GEOCODING_API_BASE_URL = 'https://geocode.googleapis.com/v4'
 const DEFAULT_REGION_CODES = ['ng', 'bj', 'tg', 'gh']
 
 export function getGooglePlacesServerKey() {
@@ -81,6 +107,18 @@ export function normalizePlaceResultLimit(value: string | null) {
   const parsed = Number(value ?? 6)
   if (!Number.isFinite(parsed)) return 6
   return Math.min(8, Math.max(1, Math.trunc(parsed)))
+}
+
+export function normalizeCoordinateInput(latitude: string | null, longitude: string | null) {
+  const lat = Number(latitude)
+  const lng = Number(longitude)
+  if (!Number.isFinite(lat) || lat < -90 || lat > 90) {
+    return { ok: false as const, message: 'Latitude must be between -90 and 90' }
+  }
+  if (!Number.isFinite(lng) || lng < -180 || lng > 180) {
+    return { ok: false as const, message: 'Longitude must be between -180 and 180' }
+  }
+  return { ok: true as const, latitude: lat, longitude: lng }
 }
 
 export function normalizePlacesLanguageCode(value: string | null) {
@@ -121,6 +159,20 @@ export function extractSupportedCity(components: GoogleAddressComponent[] | unde
   }
 }
 
+export function extractAuthoritativeLocality(components: GoogleAddressComponent[] | undefined) {
+  const city =
+    firstComponent(components, 'locality')?.longText ||
+    firstComponent(components, 'postal_town')?.longText ||
+    null
+  const countryComponent = firstComponent(components, 'country')
+
+  return {
+    city,
+    country: countryComponent?.longText ?? null,
+    countryCode: countryComponent?.shortText?.toUpperCase() ?? null,
+  }
+}
+
 export function toMobilePlacePredictionDto(
   prediction: GooglePlacePrediction
 ): MobilePlaceDto | null {
@@ -145,6 +197,62 @@ export function toMobilePlacePredictionDto(
   }
 }
 
+function reverseFallback({
+  latitude,
+  longitude,
+  formattedAddress = null,
+  placeId = null,
+}: {
+  latitude: number
+  longitude: number
+  formattedAddress?: string | null
+  placeId?: string | null
+}): MobileReverseGeocodeDto {
+  return {
+    placeId,
+    displayName: formattedAddress || 'Current location',
+    formattedAddress,
+    latitude,
+    longitude,
+    city: null,
+    country: null,
+    countryCode: null,
+    resolved: false,
+  }
+}
+
+export function toMobileReverseGeocodeDto(
+  result: GoogleGeocodeResult | undefined,
+  fallback: { latitude: number; longitude: number }
+): MobileReverseGeocodeDto {
+  if (!result) return reverseFallback(fallback)
+
+  const coordinates =
+    typeof result.location?.latitude === 'number' && typeof result.location.longitude === 'number'
+      ? { latitude: result.location.latitude, longitude: result.location.longitude }
+      : fallback
+  const locality = extractAuthoritativeLocality(result.addressComponents)
+  if (!locality.city || !locality.country) {
+    return reverseFallback({
+      ...coordinates,
+      formattedAddress: result.formattedAddress ?? null,
+      placeId: result.placeId ?? null,
+    })
+  }
+
+  return {
+    placeId: result.placeId ?? null,
+    displayName: result.formattedAddress || locality.city,
+    formattedAddress: result.formattedAddress ?? null,
+    latitude: coordinates.latitude,
+    longitude: coordinates.longitude,
+    city: locality.city,
+    country: locality.country,
+    countryCode: locality.countryCode,
+    resolved: true,
+  }
+}
+
 export function toMobilePlaceDetailDto(place: GooglePlaceDetails): MobilePlaceDto | null {
   const placeId = place.id || stripPlaceResourceName(place.name)
   const displayName = place.displayName?.text || place.formattedAddress || placeId
@@ -165,6 +273,67 @@ export function toMobilePlaceDetailDto(place: GooglePlaceDetails): MobilePlaceDt
     city: location.city,
     country: location.country,
     countryCode: location.countryCode,
+  }
+}
+
+export async function reverseGeocodeGooglePlace({
+  latitude,
+  longitude,
+  languageCode = 'en',
+  timeoutMs = 3500,
+}: {
+  latitude: number
+  longitude: number
+  languageCode?: 'en' | 'fr'
+  timeoutMs?: number
+}): Promise<ReverseGeocodeResult> {
+  const key = getGooglePlacesServerKey()
+  if (!key) {
+    return {
+      ok: false,
+      code: 'GOOGLE_PLACES_DISABLED',
+      message: 'Google Places API is not configured',
+    }
+  }
+
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const params = new URLSearchParams({
+      'location.latitude': String(latitude),
+      'location.longitude': String(longitude),
+      languageCode,
+    })
+    const response = await fetch(`${GEOCODING_API_BASE_URL}/geocode/location?${params}`, {
+      headers: {
+        'X-Goog-Api-Key': key,
+        'X-Goog-FieldMask':
+          'results.placeId,results.formattedAddress,results.location,results.addressComponents,results.types',
+      },
+      signal: controller.signal,
+      cache: 'no-store',
+    })
+    const json = (await response.json().catch(() => ({}))) as GoogleReverseGeocodeResponse
+    if (!response.ok) {
+      return {
+        ok: false,
+        code: 'GOOGLE_PLACES_ERROR',
+        message: json.error?.message || `Google reverse geocoding failed (${response.status})`,
+      }
+    }
+
+    return {
+      ok: true,
+      place: toMobileReverseGeocodeDto(json.results?.[0], { latitude, longitude }),
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      code: 'GOOGLE_PLACES_ERROR',
+      message: error instanceof Error ? error.message : 'Google reverse geocoding failed',
+    }
+  } finally {
+    clearTimeout(timeout)
   }
 }
 
