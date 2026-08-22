@@ -58,7 +58,9 @@ export async function POST(req: Request) {
     user: profile,
     onboarding: result.principalType === 'CUSTOMER' ? profile.onboarding : null,
     driver:
-      result.principalType === 'DRIVER' && user.driver ? toDriverProfileDto(user.driver) : null,
+      result.principalType === 'DRIVER' && user.driver
+        ? toDriverProfileDto({ ...user.driver, image: user.image })
+        : null,
     accessToken: result.accessToken,
     refreshToken: result.refreshToken,
     tokenType: result.tokenType,

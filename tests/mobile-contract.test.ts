@@ -111,6 +111,7 @@ import {
 import { toJourneyIntelligenceDto } from '../src/lib/mobile/journeyIntelligence'
 import { mobileSupportConfig } from '../src/lib/mobile/supportConfig'
 import { getFcmConfig } from '../src/lib/mobile/fcm'
+import { mobileErrorFromCode } from '../src/lib/mobile/errors'
 
 test('driver transition blocks terminal trips', () => {
   const result = evaluateDriverTripTransition({
@@ -136,6 +137,14 @@ test('driver transition requires assigned vehicle to start en route', () => {
 
   assert.equal(result.ok, false)
   if (!result.ok) assert.equal(result.code, 'VEHICLE_NOT_ASSIGNED')
+})
+
+test('driver missing-assignment error maps to stable client response', async () => {
+  const response = mobileErrorFromCode('DRIVER_NOT_ASSIGNED')
+  const body = await response.json()
+
+  assert.equal(response.status, 409)
+  assert.equal(body.error.code, 'DRIVER_NOT_ASSIGNED')
 })
 
 test('driver transition supports full production lifecycle', () => {
@@ -283,7 +292,11 @@ test('driver trip DTO exposes operational fields and excludes payment metadata',
       passengerName: 'Ada',
       passengerPhone: '+234000',
       pickupAddress: 'Mainland',
+      pickupLatitude: 6.5244,
+      pickupLongitude: 3.3792,
       dropoffAddress: 'Cotonou',
+      dropoffLatitude: 6.3703,
+      dropoffLongitude: 2.3912,
       passengers: 2,
       travelers: [],
       specialRequirements: 'Call on arrival',
@@ -294,6 +307,8 @@ test('driver trip DTO exposes operational fields and excludes payment metadata',
 
   assert.equal(dto.reference, 'BFY-12345678')
   assert.equal(dto.specialRequirements, 'Call on arrival')
+  assert.deepEqual(dto.pickupCoordinates, { latitude: 6.5244, longitude: 3.3792 })
+  assert.deepEqual(dto.dropoffCoordinates, { latitude: 6.3703, longitude: 2.3912 })
   assert.equal('paymentProviderMetadata' in dto, false)
 })
 
@@ -303,6 +318,7 @@ test('driver profile DTO keeps duty and presence separate', () => {
     name: 'Ada Driver',
     phone: '+22951019134',
     email: 'driver@example.com',
+    user: { image: 'https://cdn.example/driver.jpg' },
     status: 'off_duty',
     presence: {
       status: 'online',
@@ -314,6 +330,8 @@ test('driver profile DTO keeps duty and presence separate', () => {
 
   assert.equal(dto.status, 'off_duty')
   assert.equal(dto.dutyStatus, 'off_duty')
+  assert.equal(dto.image, 'https://cdn.example/driver.jpg')
+  assert.equal(dto.avatarUrl, 'https://cdn.example/driver.jpg')
   assert.equal(dto.presence?.status, 'online')
   assert.equal(dto.presence?.currentBookingLegId, 'leg1')
   assert.equal('password' in dto, false)

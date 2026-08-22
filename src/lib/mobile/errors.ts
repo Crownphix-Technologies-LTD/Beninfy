@@ -180,6 +180,8 @@ export function mobileErrorFromCode(code: MobileErrorCode, message?: string) {
       return mobileError(code, message ?? 'Trip transition is not allowed', 409)
     case 'PAYMENT_REQUIRED':
       return mobileError(code, message ?? 'Payment is required', 402)
+    case 'DRIVER_NOT_ASSIGNED':
+      return mobileError(code, message ?? 'Driver is not assigned', 409)
     case 'VEHICLE_NOT_ASSIGNED':
       return mobileError(code, message ?? 'Vehicle is not assigned', 409)
     case 'RATE_LIMITED':

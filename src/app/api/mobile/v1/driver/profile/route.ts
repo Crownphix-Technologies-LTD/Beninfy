@@ -12,7 +12,7 @@ export async function GET(req: Request) {
 
   const driver = await prisma.driver.findUnique({
     where: { id: guard.principal.driverId },
-    include: { presence: true },
+    include: { presence: true, user: { select: { image: true } } },
   })
   if (!driver) return mobileErrorFromCode('DRIVER_NOT_LINKED')
 

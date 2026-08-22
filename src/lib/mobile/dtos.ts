@@ -19,6 +19,7 @@ import {
   toJourneyIntelligenceDto,
   type JourneyIntelligenceDto,
 } from '@/lib/mobile/journeyIntelligence'
+import { type MobileSupportConfig } from '@/lib/mobile/supportConfig'
 
 export type MobileBookingStatus = 'pending' | 'confirmed' | 'ops_review' | 'cancelled' | 'completed'
 
@@ -62,6 +63,8 @@ export type DriverProfileDto = {
   name: string
   phone: string
   email: string | null
+  image: string | null
+  avatarUrl: string | null
   status: 'available' | 'off_duty' | 'inactive'
   dutyStatus: 'available' | 'off_duty' | 'inactive'
   presence: {
@@ -128,7 +131,9 @@ export type DriverTripSummaryDto = {
   passengerName: string | null
   passengerPhone: string | null
   pickupAddress: string | null
+  pickupCoordinates: { latitude: number; longitude: number } | null
   dropoffAddress: string | null
+  dropoffCoordinates: { latitude: number; longitude: number } | null
   vehicle: FleetVehicleDto | null
 }
 
@@ -147,6 +152,14 @@ export type DriverTripDetailDto = DriverTripSummaryDto & {
     completedAt: string | null
     cancelledAt: string | null
   }
+}
+
+export type DriverHomeDto = {
+  driver: DriverProfileDto
+  notificationUnreadCount: number
+  currentActiveTrip: DriverTripSummaryDto | null
+  featuredTrip: DriverTripSummaryDto | null
+  support: MobileSupportConfig
 }
 
 export type PaymentDto = {
@@ -259,6 +272,8 @@ export function toDriverProfileDto(driver: {
   name: string
   phone: string
   email: string | null
+  image?: string | null
+  user?: { image?: string | null } | null
   status: string
   presence?: {
     status: string
@@ -272,6 +287,8 @@ export function toDriverProfileDto(driver: {
     name: driver.name,
     phone: driver.phone,
     email: driver.email,
+    image: driver.image ?? driver.user?.image ?? null,
+    avatarUrl: driver.image ?? driver.user?.image ?? null,
     status: driver.status as DriverProfileDto['status'],
     dutyStatus: driver.status as DriverProfileDto['dutyStatus'],
     presence: driver.presence
@@ -421,7 +438,11 @@ export function toDriverTripSummaryDto(leg: {
     passengerName: string | null
     passengerPhone: string | null
     pickupAddress: string | null
+    pickupLatitude?: number | null
+    pickupLongitude?: number | null
     dropoffAddress: string | null
+    dropoffLatitude?: number | null
+    dropoffLongitude?: number | null
   }
 }): DriverTripSummaryDto {
   return {
@@ -445,7 +466,17 @@ export function toDriverTripSummaryDto(leg: {
     passengerName: leg.booking.passengerName,
     passengerPhone: leg.booking.passengerPhone,
     pickupAddress: leg.booking.pickupAddress,
+    pickupCoordinates:
+      typeof leg.booking.pickupLatitude === 'number' &&
+      typeof leg.booking.pickupLongitude === 'number'
+        ? { latitude: leg.booking.pickupLatitude, longitude: leg.booking.pickupLongitude }
+        : null,
     dropoffAddress: leg.booking.dropoffAddress,
+    dropoffCoordinates:
+      typeof leg.booking.dropoffLatitude === 'number' &&
+      typeof leg.booking.dropoffLongitude === 'number'
+        ? { latitude: leg.booking.dropoffLatitude, longitude: leg.booking.dropoffLongitude }
+        : null,
     vehicle: leg.fleetVehicle ? toFleetVehicleDto(leg.fleetVehicle) : null,
   }
 }
