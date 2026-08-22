@@ -57,7 +57,7 @@ Server-only:
 - SMTP credentials for live notifications
 - Supabase service/secret key for admin uploads
 - Google Routes API server key
-- Google Places API (New) server key for mobile address search
+- Google Places API (New) and Geocoding API server key for mobile address/current-location search
 - Firebase service-account credentials for FCM
 - Worker secret for scheduled reconciliation and notification retries
 

@@ -101,7 +101,9 @@ import { computeGoogleRoute } from '../src/lib/maps/googleRoutes'
 import {
   extractSupportedCity,
   getGooglePlacesServerKey,
+  normalizeCoordinateInput,
   normalizePlacesQuery,
+  toMobileReverseGeocodeDto,
   toMobilePlaceDetailDto,
   toMobilePlacePredictionDto,
 } from '../src/lib/maps/googlePlaces'
@@ -1332,6 +1334,74 @@ test('google place details DTO exposes only customer-safe location fields', () =
     city: 'Cotonou',
     country: 'Benin',
     countryCode: 'BJ',
+  })
+})
+
+test('reverse geocoding validates coordinate ranges and returns current-location DTO', () => {
+  assert.deepEqual(normalizeCoordinateInput('6.369', '2.432'), {
+    ok: true,
+    latitude: 6.369,
+    longitude: 2.432,
+  })
+  assert.equal(normalizeCoordinateInput('91', '2.432').ok, false)
+  assert.equal(normalizeCoordinateInput('6.369', '-181').ok, false)
+
+  const dto = toMobileReverseGeocodeDto(
+    {
+      placeId: 'ChIJReverse123',
+      formattedAddress: 'Rue Bel Air, Cotonou, Benin',
+      location: { latitude: 6.369, longitude: 2.432 },
+      addressComponents: [
+        { longText: 'Cotonou', shortText: 'Cotonou', types: ['locality'] },
+        { longText: 'Benin', shortText: 'BJ', types: ['country'] },
+      ],
+      types: ['street_address'],
+    },
+    { latitude: 6.369, longitude: 2.432 }
+  )
+
+  assert.deepEqual(dto, {
+    placeId: 'ChIJReverse123',
+    displayName: 'Rue Bel Air, Cotonou, Benin',
+    formattedAddress: 'Rue Bel Air, Cotonou, Benin',
+    latitude: 6.369,
+    longitude: 2.432,
+    city: 'Cotonou',
+    country: 'Benin',
+    countryCode: 'BJ',
+    resolved: true,
+  })
+})
+
+test('reverse geocoding returns unresolved response when authoritative city is absent', () => {
+  const dto = toMobileReverseGeocodeDto(
+    {
+      placeId: 'ChIJRegionOnly123',
+      formattedAddress: 'Littoral Department, Benin',
+      location: { latitude: 6.37, longitude: 2.39 },
+      addressComponents: [
+        {
+          longText: 'Littoral Department',
+          shortText: 'LT',
+          types: ['administrative_area_level_1'],
+        },
+        { longText: 'Benin', shortText: 'BJ', types: ['country'] },
+      ],
+      types: ['administrative_area_level_1', 'political'],
+    },
+    { latitude: 6.369, longitude: 2.432 }
+  )
+
+  assert.deepEqual(dto, {
+    placeId: 'ChIJRegionOnly123',
+    displayName: 'Littoral Department, Benin',
+    formattedAddress: 'Littoral Department, Benin',
+    latitude: 6.37,
+    longitude: 2.39,
+    city: null,
+    country: null,
+    countryCode: null,
+    resolved: false,
   })
 })
 
