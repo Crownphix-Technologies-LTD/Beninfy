@@ -31,6 +31,7 @@ Required only when testing related flows:
 - `SUPABASE_SECRET_KEY`
 - `SUPABASE_STORAGE_BUCKET`
 - `REALTIME_AUTH_SECRET`
+- `GOOGLE_PLACES_API_KEY`
 - `GOOGLE_ROUTES_API_KEY`
 - `PUSH_PROVIDER`
 - `FIREBASE_PROJECT_ID`
@@ -56,6 +57,7 @@ Server-only:
 - SMTP credentials for live notifications
 - Supabase service/secret key for admin uploads
 - Google Routes API server key
+- Google Places API (New) server key for mobile address search
 - Firebase service-account credentials for FCM
 - Worker secret for scheduled reconciliation and notification retries
 
@@ -88,10 +90,10 @@ Use at least 32 random bytes for `MOBILE_AUTH_SECRET`, for example 43+ base64 ch
 The mobile apps should only know:
 
 - API base URL
-- public map keys if needed
+- platform-restricted public map keys if needed
 - app environment name
 
-They must not know database URLs, Prisma config, payment secrets, SMTP credentials, Supabase service-role/secret keys, or deployment credentials.
+They must not know database URLs, Prisma config, payment secrets, SMTP credentials, Supabase service-role/secret keys, backend Google Places/Routes keys, or deployment credentials.
 
 ## Vercel Hobby Worker Cadence
 
