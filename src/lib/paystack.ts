@@ -104,7 +104,13 @@ export async function initializePaystackTransaction({
   })
 
   const json = (await res.json().catch(() => ({}))) as PaystackInitializeResponse
-  if (!res.ok || !json.status || !json.data?.authorization_url || !json.data?.reference) {
+  if (
+    !res.ok ||
+    !json.status ||
+    !json.data?.authorization_url ||
+    !json.data?.access_code ||
+    !json.data?.reference
+  ) {
     throw new Error(json.message || 'Payment init failed')
   }
 

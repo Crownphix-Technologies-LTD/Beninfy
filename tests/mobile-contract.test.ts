@@ -98,6 +98,7 @@ import { routes } from '../src/data/routes'
 import { vehicles } from '../src/data/vehicles'
 import { propagateCategoryRoutePrice } from '../src/lib/routePricePropagation'
 import { computeGoogleRoute } from '../src/lib/maps/googleRoutes'
+import { initializePaystackTransaction } from '../src/lib/paystack'
 import {
   extractSupportedCity,
   getGooglePlacesServerKey,
@@ -608,6 +609,7 @@ test('mobile payment retry is blocked for authoritative terminal booking states'
 })
 
 test('mobile payment DTO exposes safe money and checkout fields only', () => {
+  const secret = 'sk_test_should_not_leak'
   const dto = toMobilePaymentDto({
     booking: { id: 'booking1', status: 'pending', priceNGN: 180000 },
     payment: {
@@ -634,8 +636,157 @@ test('mobile payment DTO exposes safe money and checkout fields only', () => {
   assert.equal(dto.amount.currency, 'NGN')
   assert.equal(dto.amount.minorValue, 18000000)
   assert.equal(dto.checkout?.authorizationUrl, 'https://checkout.example')
+  assert.equal(dto.checkout?.checkoutUrl, 'https://checkout.example')
+  assert.equal(dto.checkout?.accessCode, 'access-code')
+  assert.equal(dto.checkout?.mode, 'hosted_checkout')
   assert.equal('secret' in dto, false)
   assert.equal('webhookSignature' in dto, false)
+  assert.equal(JSON.stringify(dto).includes(secret), false)
+  assert.equal(JSON.stringify(dto).includes('PAYSTACK_SECRET_KEY'), false)
+})
+
+test('paystack initialization requires and maps access code for Flutter SDK checkout', async () => {
+  const originalFetch = globalThis.fetch
+  const requestBodies: Array<Record<string, unknown>> = []
+  let authHeader: string | null = null
+  globalThis.fetch = (async (_url, init) => {
+    authHeader = new Headers(init?.headers).get('Authorization')
+    requestBodies.push(JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>)
+    return new Response(
+      JSON.stringify({
+        status: true,
+        data: {
+          authorization_url: 'https://checkout.paystack.com/session',
+          access_code: 'paystack-access-code',
+          reference: 'BFY-M-123',
+        },
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    )
+  }) as typeof fetch
+  try {
+    const result = await initializePaystackTransaction({
+      secret: 'sk_test_secret_value',
+      email: 'customer@example.com',
+      amountNGN: 180000,
+      reference: 'BFY-M-123',
+      callbackUrl: 'https://beninfy.com/en/rides/confirmed',
+      metadata: { bookingId: 'booking1', provider: 'paystack' },
+    })
+
+    assert.deepEqual(result, {
+      authorizationUrl: 'https://checkout.paystack.com/session',
+      accessCode: 'paystack-access-code',
+      reference: 'BFY-M-123',
+    })
+    assert.equal(authHeader, 'Bearer sk_test_secret_value')
+    const requestBody = requestBodies[0]
+    assert.ok(requestBody)
+    assert.equal(requestBody.amount, 18000000)
+    assert.equal(requestBody.currency, 'NGN')
+    assert.equal(requestBody.reference, 'BFY-M-123')
+    assert.equal(JSON.stringify(result).includes('sk_test_secret_value'), false)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('paystack initialization fails closed when access code is missing', async () => {
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = (async () =>
+    new Response(
+      JSON.stringify({
+        status: true,
+        data: {
+          authorization_url: 'https://checkout.paystack.com/session',
+          reference: 'BFY-M-123',
+        },
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    )) as typeof fetch
+  try {
+    await assert.rejects(
+      () =>
+        initializePaystackTransaction({
+          secret: 'sk_test_secret_value',
+          email: 'customer@example.com',
+          amountNGN: 180000,
+          reference: 'BFY-M-123',
+          callbackUrl: 'https://beninfy.com/en/rides/confirmed',
+          metadata: { bookingId: 'booking1', provider: 'paystack' },
+        }),
+      /Payment init failed/
+    )
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('payonus checkout DTO remains hosted-widget compatible and access-code free', () => {
+  const dto = toMobilePaymentDto({
+    booking: { id: 'booking1', status: 'pending', priceNGN: 180000 },
+    payment: {
+      id: 'payment1',
+      bookingId: 'booking1',
+      amountNGN: 180000,
+      status: 'pending',
+      reference: 'BFY-M-123',
+      provider: 'payonus',
+      providerReference: null,
+      providerCheckoutUrl: null,
+      providerAccessCode: null,
+      currencyCode: 'NGN',
+      checkoutAmount: 180000,
+      expiresAt: new Date('2026-08-15T12:30:00.000Z'),
+      paidAt: null,
+      failureCode: null,
+      createdAt: new Date('2026-08-15T12:00:00.000Z'),
+      updatedAt: new Date('2026-08-15T12:00:00.000Z'),
+    },
+  })
+
+  assert.equal(dto.checkout?.mode, 'payonus_checkout')
+  assert.equal(dto.checkout?.checkoutUrl, null)
+  assert.equal(dto.checkout?.authorizationUrl, null)
+  assert.equal(dto.checkout?.accessCode, null)
+})
+
+test('mobile payment state blocks already-paid bookings and reuses duplicate pending attempts', () => {
+  assert.equal(canRetryPayment({ bookingStatus: 'confirmed', paymentStatus: 'paid' }), false)
+  assert.equal(canRetryPayment({ bookingStatus: 'completed', paymentStatus: 'paid' }), false)
+  assert.equal(canRetryPayment({ bookingStatus: 'pending', paymentStatus: 'pending' }), false)
+  assert.equal(
+    mobilePaymentState({ bookingStatus: 'pending', paymentStatus: 'pending' }),
+    'pending'
+  )
+})
+
+test('mobile payment verification remains backend-authoritative after SDK success', () => {
+  const dto = toMobilePaymentDto({
+    booking: { id: 'booking1', status: 'pending', priceNGN: 180000 },
+    payment: {
+      id: 'payment1',
+      bookingId: 'booking1',
+      amountNGN: 180000,
+      status: 'pending',
+      reference: 'BFY-M-123',
+      provider: 'paystack',
+      providerReference: 'BFY-M-123',
+      providerCheckoutUrl: 'https://checkout.example',
+      providerAccessCode: 'access-code',
+      currencyCode: 'NGN',
+      checkoutAmount: 180000,
+      expiresAt: new Date('2026-08-15T12:30:00.000Z'),
+      paidAt: null,
+      failureCode: null,
+      createdAt: new Date('2026-08-15T12:00:00.000Z'),
+      updatedAt: new Date('2026-08-15T12:00:00.000Z'),
+    },
+  })
+
+  assert.equal(dto.status, 'pending')
+  assert.equal(dto.canRetry, false)
+  assert.equal(dto.paymentReference, 'BFY-M-123')
 })
 
 test('mobile booking payability and provider normalization are conservative', () => {
