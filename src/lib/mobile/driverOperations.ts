@@ -39,7 +39,10 @@ export function classifyDriverTripView(status: string): DriverTripView {
   return 'all'
 }
 
-export function driverTripWhereForView(driverId: string, view: DriverTripView): Prisma.BookingLegWhereInput {
+export function driverTripWhereForView(
+  driverId: string,
+  view: DriverTripView
+): Prisma.BookingLegWhereInput {
   const base: Prisma.BookingLegWhereInput = { driverId }
   switch (view) {
     case 'upcoming':
@@ -54,7 +57,9 @@ export function driverTripWhereForView(driverId: string, view: DriverTripView): 
   }
 }
 
-export function driverTripOrderByForView(view: DriverTripView): Prisma.BookingLegOrderByWithRelationInput[] {
+export function driverTripOrderByForView(
+  view: DriverTripView
+): Prisma.BookingLegOrderByWithRelationInput[] {
   switch (view) {
     case 'completed':
       return [{ completedAt: 'desc' }, { departureDate: 'desc' }, { id: 'desc' }]
@@ -135,7 +140,7 @@ export async function updateDriverDutyStatus({
 
   const updated = await prisma.driver.findUnique({
     where: { id: driver.id },
-    include: { presence: true },
+    include: { presence: true, user: { select: { image: true } } },
   })
 
   return { ok: true as const, driver: updated }

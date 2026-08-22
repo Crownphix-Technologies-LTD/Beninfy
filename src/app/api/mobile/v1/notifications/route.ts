@@ -46,20 +46,32 @@ export async function GET(req: Request) {
   const unreadOnly = url.searchParams.get('unread') === 'true'
   const appType = appTypeForPrincipal(guard.principal)
 
-  const notifications = await prisma.notification.findMany({
-    where: {
-      userId: guard.principal.userId,
-      appType,
-      ...(unreadOnly ? { readAt: null } : {}),
-    },
-    orderBy: { createdAt: 'desc' },
-    take: limit + 1,
-    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-  })
+  const baseWhere = {
+    userId: guard.principal.userId,
+    appType,
+  }
+  const [notifications, unreadCount] = await Promise.all([
+    prisma.notification.findMany({
+      where: {
+        ...baseWhere,
+        ...(unreadOnly ? { readAt: null } : {}),
+      },
+      orderBy: { createdAt: 'desc' },
+      take: limit + 1,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+    }),
+    prisma.notification.count({
+      where: {
+        ...baseWhere,
+        readAt: null,
+      },
+    }),
+  ])
   const hasMore = notifications.length > limit
   const page = hasMore ? notifications.slice(0, limit) : notifications
 
   return Response.json({
+    unreadCount,
     notifications: page.map(toNotificationDto),
     pageInfo: {
       hasMore,

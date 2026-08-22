@@ -13,6 +13,8 @@ export async function GET(req: Request) {
     principal: guard.principal,
     user: profile,
     onboarding: guard.principal.type === 'CUSTOMER' ? profile.onboarding : null,
-    driver: guard.user.driver ? toDriverProfileDto(guard.user.driver) : null,
+    driver: guard.user.driver
+      ? toDriverProfileDto({ ...guard.user.driver, image: guard.user.image })
+      : null,
   })
 }

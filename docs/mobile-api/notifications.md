@@ -78,6 +78,7 @@ Response:
 
 ```json
 {
+  "unreadCount": 3,
   "notifications": [
     {
       "id": "cm...",

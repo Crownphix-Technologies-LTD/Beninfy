@@ -14,9 +14,7 @@ function normalizeWhatsapp(value: string | null) {
 }
 
 export function mobileSupportConfig() {
-  const email =
-    clean(process.env.SUPPORT_EMAIL) ||
-    clean(process.env.SMTP_SENDER_EMAIL)
+  const email = clean(process.env.SUPPORT_EMAIL) || clean(process.env.SMTP_SENDER_EMAIL)
   const phone = clean(process.env.SUPPORT_PHONE)
   const whatsapp = normalizeWhatsapp(clean(process.env.SUPPORT_WHATSAPP))
 
@@ -31,3 +29,5 @@ export function mobileSupportConfig() {
     },
   }
 }
+
+export type MobileSupportConfig = ReturnType<typeof mobileSupportConfig>
