@@ -16,6 +16,7 @@ Current driver mobile API base:
 - `GET /driver/profile`
 - `PATCH /driver/availability`
 - `GET /driver/trips?view=all|upcoming|active|completed`
+- `GET /driver/trip-history`
 - `GET /driver/trips/:bookingLegId`
 - `POST /driver/trips/:bookingLegId/actions`
 - `POST /driver/presence`
@@ -66,7 +67,8 @@ Dashboard flow:
 4. Toggle duty with `PATCH /driver/availability`.
 5. Load `GET /driver/trips?view=active`.
 6. Load `GET /driver/trips?view=upcoming`.
-7. History uses `GET /driver/trips?view=completed`.
+7. Current completed assigned trips use `GET /driver/trips?view=completed`.
+8. Assignment history uses `GET /driver/trip-history`.
 
 `GET /driver/profile` remains available for profile refresh. Driver profile includes `image` and `avatarUrl` when the linked user account has an image.
 
@@ -131,6 +133,57 @@ Allowed current actions:
 - `cancel`
 
 The backend decides whether each transition is valid. The app must handle standardized error codes such as `INVALID_TRANSITION`, `TRIP_NOT_FOUND`, `TRIP_NOT_ASSIGNED`, `DRIVER_INACTIVE`, and `VEHICLE_NOT_ASSIGNED`.
+
+## Assignment History
+
+Implemented:
+
+`GET /api/mobile/v1/driver/trip-history?limit=20&cursor=...`
+
+Response:
+
+```json
+{
+  "history": [
+    {
+      "assignmentHistoryId": "history-id",
+      "bookingLegId": "leg-id",
+      "bookingId": "booking-id",
+      "reference": "booking-id",
+      "routeDisplayName": "Lagos to Cotonou",
+      "direction": "outbound",
+      "from": "Lagos",
+      "to": "Cotonou",
+      "departureDate": "2026-08-18T09:00:00.000Z",
+      "outcome": "reassigned",
+      "outcomeLabelKey": "driverAssignmentHistory.reassigned",
+      "currentLegStatus": "assigned",
+      "assignedAt": "2026-08-18T08:00:00.000Z",
+      "acceptedAt": null,
+      "declinedAt": null,
+      "releasedAt": "2026-08-18T08:20:00.000Z",
+      "completedAt": null,
+      "releaseReason": "reassigned",
+      "releaseSource": "admin"
+    }
+  ],
+  "pageInfo": {
+    "hasMore": false,
+    "nextCursor": null,
+    "limit": 20
+  }
+}
+```
+
+Supported outcomes:
+
+- `current`
+- `completed`
+- `declined`
+- `released`
+- `reassigned`
+
+Flutter should render these as assignment outcomes. A `released` or `reassigned` record means this driver's assignment ended; it does not necessarily mean the customer trip was cancelled.
 
 ## Navigation To Pickup
 

@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   toCustomerBookingDetailDto,
+  toDriverAssignmentHistoryDto,
   toDriverProfileDto,
   toDriverTrackingSnapshotDto,
   toDriverTripDetailDto,
@@ -112,6 +113,13 @@ import { toJourneyIntelligenceDto } from '../src/lib/mobile/journeyIntelligence'
 import { mobileSupportConfig } from '../src/lib/mobile/supportConfig'
 import { getFcmConfig } from '../src/lib/mobile/fcm'
 import { mobileErrorFromCode } from '../src/lib/mobile/errors'
+import {
+  driverAssignmentHistoryOpenWhere,
+  driverAssignmentHistoryOrderBy,
+  driverAssignmentHistoryWhereForDriver,
+  driverAssignmentOutcome,
+  driverAssignmentOutcomeLabelKey,
+} from '../src/lib/mobile/driverAssignmentHistory'
 
 test('driver transition blocks terminal trips', () => {
   const result = evaluateDriverTripTransition({
@@ -213,6 +221,29 @@ test('driver decline releases assignment without cancelling customer leg', () =>
     assert.equal(result.nextStatus, 'unassigned')
     assert.equal(result.releaseDriver, true)
   }
+})
+
+test('driver assignment history outcomes are truthful driver-facing states', () => {
+  assert.equal(driverAssignmentOutcome({}), 'current')
+  assert.equal(driverAssignmentOutcome({ completedAt: '2026-08-18T10:00:00.000Z' }), 'completed')
+  assert.equal(driverAssignmentOutcome({ declinedAt: '2026-08-18T10:00:00.000Z' }), 'declined')
+  assert.equal(driverAssignmentOutcome({ supersededAt: '2026-08-18T10:00:00.000Z' }), 'reassigned')
+  assert.equal(driverAssignmentOutcome({ releasedAt: '2026-08-18T10:00:00.000Z' }), 'released')
+  assert.equal(driverAssignmentOutcomeLabelKey('declined'), 'driverAssignmentHistory.declined')
+})
+
+test('driver assignment history writes target the open assignment only', () => {
+  assert.deepEqual(
+    driverAssignmentHistoryOpenWhere({ bookingLegId: 'leg1', driverId: 'driver1' }),
+    {
+      bookingLegId: 'leg1',
+      driverId: 'driver1',
+      declinedAt: null,
+      releasedAt: null,
+      completedAt: null,
+      supersededAt: null,
+    }
+  )
 })
 
 test('booking completion waits for all round trip legs', () => {
@@ -1156,6 +1187,75 @@ test('driver trip view query scopes by authenticated driver and status', () => {
     driverId: 'driver1',
     status: { in: ['completed'] },
   })
+})
+
+test('driver assignment history query scopes by authenticated driver', () => {
+  assert.deepEqual(driverAssignmentHistoryWhereForDriver('driver1'), {
+    driverId: 'driver1',
+  })
+  assert.deepEqual(driverAssignmentHistoryOrderBy(), [{ assignedAt: 'desc' }, { id: 'desc' }])
+})
+
+test('driver assignment history DTO preserves released driver association', () => {
+  const dto = toDriverAssignmentHistoryDto({
+    id: 'history1',
+    bookingLegId: 'leg1',
+    driverId: 'driver1',
+    assignedAt: new Date('2026-08-18T08:00:00.000Z'),
+    acceptedAt: null,
+    declinedAt: null,
+    releasedAt: new Date('2026-08-18T08:30:00.000Z'),
+    completedAt: null,
+    supersededAt: null,
+    releaseReason: 'driver_cancelled',
+    releaseSource: 'driver',
+    bookingLeg: {
+      id: 'leg1',
+      bookingId: 'booking1',
+      direction: 'outbound',
+      from: 'Lagos',
+      to: 'Cotonou',
+      departureDate: new Date('2026-08-20T09:00:00.000Z'),
+      status: 'unassigned',
+    },
+  })
+
+  assert.equal(dto.assignmentHistoryId, 'history1')
+  assert.equal(dto.bookingLegId, 'leg1')
+  assert.equal(dto.outcome, 'released')
+  assert.equal(dto.outcomeLabelKey, 'driverAssignmentHistory.released')
+  assert.equal(dto.currentLegStatus, 'unassigned')
+  assert.equal(dto.releaseReason, 'driver_cancelled')
+  assert.equal(dto.releaseSource, 'driver')
+})
+
+test('driver assignment history DTO distinguishes reassigned-away outcome', () => {
+  const dto = toDriverAssignmentHistoryDto({
+    id: 'history1',
+    bookingLegId: 'leg1',
+    driverId: 'driver1',
+    assignedAt: new Date('2026-08-18T08:00:00.000Z'),
+    acceptedAt: null,
+    declinedAt: null,
+    releasedAt: new Date('2026-08-18T08:30:00.000Z'),
+    completedAt: null,
+    supersededAt: new Date('2026-08-18T08:30:00.000Z'),
+    releaseReason: 'reassigned',
+    releaseSource: 'admin',
+    bookingLeg: {
+      id: 'leg1',
+      bookingId: 'booking1',
+      direction: 'outbound',
+      from: 'Lagos',
+      to: 'Cotonou',
+      departureDate: new Date('2026-08-20T09:00:00.000Z'),
+      status: 'assigned',
+    },
+  })
+
+  assert.equal(dto.outcome, 'reassigned')
+  assert.equal(dto.outcomeLabelKey, 'driverAssignmentHistory.reassigned')
+  assert.equal(dto.currentLegStatus, 'assigned')
 })
 
 test('driver trip view sorting is operationally useful', () => {

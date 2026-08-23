@@ -269,22 +269,23 @@ model FleetVehicle {
 }
 
 model Driver {
-  id              String               @id @default(cuid())
-  userId          String?              @unique
-  user            User?                @relation(fields: [userId], references: [id], onDelete: SetNull)
-  name            String
-  phone           String
-  email           String?
-  status          String               @default("available")
-  homeCity        String?
-  licenseNumber   String?
-  notes           String?
-  bookingLegs     BookingLeg[]
-  tripReviews     TripReview[]
-  presence        DriverPresence?
-  latestLocations LatestTripLocation[]
-  createdAt       DateTime             @default(now())
-  updatedAt       DateTime             @updatedAt
+  id                String                        @id @default(cuid())
+  userId            String?                       @unique
+  user              User?                         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  name              String
+  phone             String
+  email             String?
+  status            String                        @default("available")
+  homeCity          String?
+  licenseNumber     String?
+  notes             String?
+  bookingLegs       BookingLeg[]
+  assignmentHistory DriverTripAssignmentHistory[]
+  tripReviews       TripReview[]
+  presence          DriverPresence?
+  latestLocations   LatestTripLocation[]
+  createdAt         DateTime                      @default(now())
+  updatedAt         DateTime                      @updatedAt
 
   @@index([status, name])
 }
@@ -304,38 +305,39 @@ model VehicleBlock {
 }
 
 model BookingLeg {
-  id                     String              @id @default(cuid())
-  bookingId              String
-  booking                Booking             @relation(fields: [bookingId], references: [id], onDelete: Cascade)
-  direction              String
-  from                   String
-  to                     String
-  departureDate          DateTime
-  vehicleId              String
-  fleetVehicleId         String?
-  fleetVehicle           FleetVehicle?       @relation(fields: [fleetVehicleId], references: [id])
-  driverId               String?
-  driver                 Driver?             @relation(fields: [driverId], references: [id])
-  status                 String              @default("unassigned")
-  assignedAt             DateTime?
-  acceptedAt             DateTime?
-  declinedAt             DateTime?
-  enRouteAt              DateTime?
-  arrivedAt              DateTime?
-  passengerOnboardAt     DateTime?
-  startedAt              DateTime?
-  completedAt            DateTime?
-  cancelledAt            DateTime?
-  cancelledBy            String?
-  cancellationReasonCode String?
-  declineReasonCode      String?
-  notes                  String?
-  latestLocation         LatestTripLocation?
-  journeySnapshot        TripJourneySnapshot?
-  chatConversations      TripConversation[]
-  review                 TripReview?
-  createdAt              DateTime            @default(now())
-  updatedAt              DateTime            @updatedAt
+  id                      String                        @id @default(cuid())
+  bookingId               String
+  booking                 Booking                       @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  direction               String
+  from                    String
+  to                      String
+  departureDate           DateTime
+  vehicleId               String
+  fleetVehicleId          String?
+  fleetVehicle            FleetVehicle?                 @relation(fields: [fleetVehicleId], references: [id])
+  driverId                String?
+  driver                  Driver?                       @relation(fields: [driverId], references: [id])
+  status                  String                        @default("unassigned")
+  assignedAt              DateTime?
+  acceptedAt              DateTime?
+  declinedAt              DateTime?
+  enRouteAt               DateTime?
+  arrivedAt               DateTime?
+  passengerOnboardAt      DateTime?
+  startedAt               DateTime?
+  completedAt             DateTime?
+  cancelledAt             DateTime?
+  cancelledBy             String?
+  cancellationReasonCode  String?
+  declineReasonCode       String?
+  notes                   String?
+  latestLocation          LatestTripLocation?
+  journeySnapshot         TripJourneySnapshot?
+  driverAssignmentHistory DriverTripAssignmentHistory[]
+  chatConversations       TripConversation[]
+  review                  TripReview?
+  createdAt               DateTime                      @default(now())
+  updatedAt               DateTime                      @updatedAt
 
   @@index([bookingId])
   @@index([vehicleId, departureDate])
@@ -344,6 +346,29 @@ model BookingLeg {
   @@index([driverId, departureDate])
   @@index([driverId, status, departureDate])
   @@index([status, departureDate])
+}
+
+model DriverTripAssignmentHistory {
+  id            String     @id @default(cuid())
+  bookingLegId  String
+  bookingLeg    BookingLeg @relation(fields: [bookingLegId], references: [id], onDelete: Cascade)
+  driverId      String
+  driver        Driver     @relation(fields: [driverId], references: [id], onDelete: Cascade)
+  assignedAt    DateTime   @default(now())
+  acceptedAt    DateTime?
+  declinedAt    DateTime?
+  releasedAt    DateTime?
+  completedAt   DateTime?
+  supersededAt  DateTime?
+  releaseReason String?
+  releaseSource String?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  @@index([bookingLegId, assignedAt])
+  @@index([driverId, assignedAt])
+  @@index([driverId, completedAt])
+  @@index([bookingLegId, driverId, assignedAt])
 }
 
 model TripJourneySnapshot {
@@ -565,16 +590,16 @@ model Route {
 }
 
 model RoutePrice {
-  id           String   @id @default(cuid())
-  routeId      String
-  route        Route    @relation(fields: [routeId], references: [id], onDelete: Cascade)
-  vehicleId    String
-  pricingScope String   @default("default")
-  amountNGN    Int
-  notes        String?
-  managedByCategory Boolean @default(false)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id                String   @id @default(cuid())
+  routeId           String
+  route             Route    @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  vehicleId         String
+  pricingScope      String   @default("default")
+  amountNGN         Int
+  notes             String?
+  managedByCategory Boolean  @default(false)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
   @@unique([routeId, vehicleId, pricingScope])
   @@index([vehicleId])

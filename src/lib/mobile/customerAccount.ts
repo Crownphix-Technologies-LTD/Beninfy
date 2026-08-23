@@ -10,6 +10,7 @@ import {
   createPaymentResolutionForPaidCancellation,
   toPaymentResolutionDto,
 } from '@/lib/mobile/customerProduct'
+import { markDriverAssignmentReleased } from '@/lib/mobile/driverAssignmentHistory'
 
 export const CUSTOMER_CANCELLATION_REASONS = [
   'change_of_plans',
@@ -169,6 +170,18 @@ export async function cancelCustomerBooking({
     await expireCancelledTracking(
       result.legs.map((leg) => leg.id),
       tx
+    )
+    await Promise.all(
+      previousDrivers.map((assignment) =>
+        markDriverAssignmentReleased({
+          tx,
+          bookingLegId: assignment.bookingLegId,
+          driverId: assignment.driverId!,
+          releasedAt: now,
+          releaseReason: reasonCode,
+          releaseSource: 'customer',
+        })
+      )
     )
     const paymentResolutions = await createPaymentResolutionForPaidCancellation({
       tx,

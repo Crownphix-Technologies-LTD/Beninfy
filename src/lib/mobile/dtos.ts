@@ -16,6 +16,11 @@ import {
 import { type MobileOnboardingDto, toMobileOnboardingDto } from '@/lib/mobile/onboarding'
 import { classifyDriverTripView, type DriverTripView } from '@/lib/mobile/driverOperations'
 import {
+  driverAssignmentOutcome,
+  driverAssignmentOutcomeLabelKey,
+  type DriverAssignmentHistoryOutcome,
+} from '@/lib/mobile/driverAssignmentHistory'
+import {
   toJourneyIntelligenceDto,
   type JourneyIntelligenceDto,
 } from '@/lib/mobile/journeyIntelligence'
@@ -152,6 +157,28 @@ export type DriverTripDetailDto = DriverTripSummaryDto & {
     completedAt: string | null
     cancelledAt: string | null
   }
+}
+
+export type DriverAssignmentHistoryDto = {
+  assignmentHistoryId: string
+  bookingLegId: string
+  bookingId: string
+  reference: string
+  routeDisplayName: string
+  direction: string
+  from: string
+  to: string
+  departureDate: string
+  outcome: DriverAssignmentHistoryOutcome
+  outcomeLabelKey: string
+  currentLegStatus: MobileBookingLegStatus
+  assignedAt: string
+  acceptedAt: string | null
+  declinedAt: string | null
+  releasedAt: string | null
+  completedAt: string | null
+  releaseReason: string | null
+  releaseSource: string | null
 }
 
 export type DriverHomeDto = {
@@ -515,6 +542,52 @@ export function toDriverTripDetailDto(
       completedAt: leg.completedAt ? toIso(leg.completedAt) : null,
       cancelledAt: leg.cancelledAt ? toIso(leg.cancelledAt) : null,
     },
+  }
+}
+
+export function toDriverAssignmentHistoryDto(record: {
+  id: string
+  bookingLegId: string
+  driverId: string
+  assignedAt: Dateish
+  acceptedAt?: Dateish | null
+  declinedAt?: Dateish | null
+  releasedAt?: Dateish | null
+  completedAt?: Dateish | null
+  supersededAt?: Dateish | null
+  releaseReason?: string | null
+  releaseSource?: string | null
+  bookingLeg: {
+    id: string
+    bookingId: string
+    direction: string
+    from: string
+    to: string
+    departureDate: Dateish
+    status: string
+  }
+}): DriverAssignmentHistoryDto {
+  const outcome = driverAssignmentOutcome(record)
+  return {
+    assignmentHistoryId: record.id,
+    bookingLegId: record.bookingLegId,
+    bookingId: record.bookingLeg.bookingId,
+    reference: displayReference(record.bookingLeg.bookingId),
+    routeDisplayName: `${record.bookingLeg.from} to ${record.bookingLeg.to}`,
+    direction: record.bookingLeg.direction,
+    from: record.bookingLeg.from,
+    to: record.bookingLeg.to,
+    departureDate: toIso(record.bookingLeg.departureDate),
+    outcome,
+    outcomeLabelKey: driverAssignmentOutcomeLabelKey(outcome),
+    currentLegStatus: record.bookingLeg.status as MobileBookingLegStatus,
+    assignedAt: toIso(record.assignedAt),
+    acceptedAt: record.acceptedAt ? toIso(record.acceptedAt) : null,
+    declinedAt: record.declinedAt ? toIso(record.declinedAt) : null,
+    releasedAt: record.releasedAt ? toIso(record.releasedAt) : null,
+    completedAt: record.completedAt ? toIso(record.completedAt) : null,
+    releaseReason: record.releaseReason ?? null,
+    releaseSource: record.releaseSource ?? null,
   }
 }
 

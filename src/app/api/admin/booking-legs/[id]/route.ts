@@ -1,6 +1,11 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { requireAdminPermission } from '@/lib/admin'
+import {
+  markDriverAssignmentCompleted,
+  markDriverAssignmentReleased,
+  recordDriverAssignmentChange,
+} from '@/lib/mobile/driverAssignmentHistory'
 import { notifyTripLifecyclePush } from '@/lib/mobile/notifications'
 import { notifyBookingAssignmentChanged } from '@/lib/notifications'
 import { prisma } from '@/lib/prisma'
@@ -89,22 +94,59 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
   const now = new Date()
   const nextStatus = data.status ?? (data.fleetVehicleId || data.driverId ? 'assigned' : undefined)
-  const bookingLeg = await prisma.bookingLeg.update({
-    where: { id },
-    data: {
-      fleetVehicleId: data.fleetVehicleId,
-      driverId: data.driverId,
-      status: nextStatus,
-      assignedAt: data.driverId || nextStatus === 'assigned' ? (leg.assignedAt ?? now) : undefined,
-      completedAt: nextStatus === 'completed' ? (leg.completedAt ?? now) : undefined,
-      cancelledAt: nextStatus === 'cancelled' ? (leg.cancelledAt ?? now) : undefined,
-      cancelledBy: nextStatus === 'cancelled' ? 'admin' : undefined,
-      notes: data.notes,
-    },
-    include: {
-      fleetVehicle: true,
-      driver: true,
-    },
+  const bookingLeg = await prisma.$transaction(async (tx) => {
+    const updated = await tx.bookingLeg.update({
+      where: { id },
+      data: {
+        fleetVehicleId: data.fleetVehicleId,
+        driverId: data.driverId,
+        status: nextStatus,
+        assignedAt:
+          data.driverId || nextStatus === 'assigned' ? (leg.assignedAt ?? now) : undefined,
+        completedAt: nextStatus === 'completed' ? (leg.completedAt ?? now) : undefined,
+        cancelledAt: nextStatus === 'cancelled' ? (leg.cancelledAt ?? now) : undefined,
+        cancelledBy: nextStatus === 'cancelled' ? 'admin' : undefined,
+        notes: data.notes,
+      },
+      include: {
+        fleetVehicle: true,
+        driver: true,
+      },
+    })
+
+    if (data.driverId !== undefined) {
+      await recordDriverAssignmentChange({
+        tx,
+        bookingLegId: leg.id,
+        previousDriverId: leg.driverId,
+        nextDriverId: data.driverId,
+        assignedAt:
+          data.driverId && data.driverId !== leg.driverId ? now : (updated.assignedAt ?? now),
+        occurredAt: now,
+        releaseReason: data.driverId ? 'reassigned' : 'admin_released',
+        releaseSource: 'admin',
+      })
+    }
+
+    if (updated.driverId && nextStatus === 'completed') {
+      await markDriverAssignmentCompleted({
+        tx,
+        bookingLegId: updated.id,
+        driverId: updated.driverId,
+        completedAt: updated.completedAt ?? now,
+      })
+    } else if ((updated.driverId || leg.driverId) && nextStatus === 'cancelled') {
+      await markDriverAssignmentReleased({
+        tx,
+        bookingLegId: updated.id,
+        driverId: updated.driverId ?? leg.driverId!,
+        releasedAt: updated.cancelledAt ?? now,
+        releaseReason: 'admin_cancelled',
+        releaseSource: 'admin',
+      })
+    }
+
+    return updated
   })
 
   if (
