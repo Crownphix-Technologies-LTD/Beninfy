@@ -122,6 +122,59 @@ Safe unresolved response when Google returns an address/region but no reliable c
 
 Flutter should treat `resolved: false` or `city: null` as "current location could not be matched to a supported booking city" and ask the customer to choose a pickup address manually.
 
+## Route City Boundary Validation
+
+Availability, quote, and booking creation validate that selected places belong to the selected route endpoints.
+
+For a route:
+
+```text
+Cotonou -> Lome
+```
+
+the payload must include normalized location evidence from Place Details, Saved Places, or backend reverse geocoding:
+
+```json
+{
+  "pickupCity": "Cotonou",
+  "pickupCountry": "Benin",
+  "pickupCountryCode": "BJ",
+  "destinationCity": "Lomé",
+  "destinationCountry": "Togo",
+  "destinationCountryCode": "TG"
+}
+```
+
+`dropoffCity`, `dropoffCountry`, and `dropoffCountryCode` are accepted aliases for destination fields in booking payloads.
+
+Stable boundary errors:
+
+- `PICKUP_OUTSIDE_ROUTE_CITY`
+- `DESTINATION_OUTSIDE_ROUTE_CITY`
+- `LOCATION_CITY_UNRESOLVED`
+
+Example error:
+
+```json
+{
+  "error": {
+    "code": "PICKUP_OUTSIDE_ROUTE_CITY",
+    "message": "Your pickup location must be within Cotonou",
+    "details": {
+      "field": "pickup",
+      "expectedCity": "Cotonou",
+      "expectedCountry": "Benin Republic",
+      "expectedCountryCode": "BJ",
+      "resolvedCity": "Porto-Novo",
+      "resolvedCountry": "Benin",
+      "resolvedCountryCode": "BJ"
+    }
+  }
+}
+```
+
+Known Beninfy aliases are normalized centrally, including `Lomé/Lome`, `Porto-Novo/Porto Novo`, and `Kpalimé/Kpalime`. A matching city with a conflicting country code is rejected.
+
 ## Booking Authority
 
 Places search does not make arbitrary city pairs bookable. Flutter may use the returned address, coordinates and extracted city to prefill booking, but the booking endpoint remains authoritative:
@@ -129,9 +182,10 @@ Places search does not make arbitrary city pairs bookable. Flutter may use the r
 - supported route pair comes from Beninfy route catalog
 - fare comes from backend pricing
 - availability comes from backend fleet reservation logic
+- pickup and destination place cities must match the selected route endpoints
 - unsupported city pairs remain rejected by the booking API
 
-Reverse geocoding does not make arbitrary GPS locations bookable. The booking API still matches the pickup/dropoff city pair against the Beninfy route catalog and rejects unsupported pairs.
+Reverse geocoding does not make arbitrary GPS locations bookable. The booking API still matches the pickup/dropoff city pair against the Beninfy route catalog and rejects unsupported pairs. Current-location pickup must first pass backend reverse geocoding and then route city boundary validation.
 
 Booking creation already accepts and persists:
 

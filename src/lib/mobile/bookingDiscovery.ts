@@ -8,6 +8,7 @@ import {
   getBookingLocations,
   getPublicRouteById,
   getPublicRoutes,
+  routePricingId,
 } from '@/lib/routeCatalog'
 import { getPublicVehicles } from '@/lib/vehicleCatalog'
 import {
@@ -17,6 +18,10 @@ import {
 } from '@/lib/availability'
 import { validateCouponCode, normalizeCouponCode } from '@/lib/coupons'
 import type { MobileErrorCode } from '@/lib/mobile/errors'
+import {
+  validateRouteLocationBoundaries,
+  type RouteLocationBoundaryInput,
+} from '@/lib/mobile/routeLocationBoundary'
 import type { Prisma } from '@prisma/client'
 import type { Route, Vehicle } from '@/types'
 
@@ -44,6 +49,15 @@ export const mobileDiscoverySelectionSchema = z.object({
   returnDate: z.string().trim().optional().nullable(),
   passengers: z.number().int().positive().max(50).default(1),
   pickupArea: z.enum(['mainland', 'island']).optional(),
+  pickupCity: z.string().trim().max(80).optional().nullable(),
+  pickupCountry: z.string().trim().max(80).optional().nullable(),
+  pickupCountryCode: z.string().trim().max(3).optional().nullable(),
+  destinationCity: z.string().trim().max(80).optional().nullable(),
+  destinationCountry: z.string().trim().max(80).optional().nullable(),
+  destinationCountryCode: z.string().trim().max(3).optional().nullable(),
+  dropoffCity: z.string().trim().max(80).optional().nullable(),
+  dropoffCountry: z.string().trim().max(80).optional().nullable(),
+  dropoffCountryCode: z.string().trim().max(3).optional().nullable(),
   couponCode: z.string().trim().optional().nullable(),
 })
 
@@ -81,6 +95,9 @@ export function mobileMoney(value: number): MobileMoneyDto {
 export function toMobileRouteDto(route: Route) {
   return {
     id: route.id,
+    canonicalRouteId: route.canonicalRouteId ?? route.id,
+    pricingRouteId: routePricingId(route),
+    direction: route.direction ?? 'explicit',
     origin: {
       city: route.from,
       code: route.fromCode,
@@ -122,6 +139,17 @@ export function toMobileVehicleDto(vehicle: Vehicle) {
   }
 }
 
+export function requiresPickupAreaForRoute(
+  route: Route,
+  pricingTargetId: string,
+  pricingTargetName?: string
+) {
+  return (
+    route.from.trim().toLowerCase() === 'lagos' &&
+    requiresLagosPickupArea(routePricingId(route), pricingTargetId, pricingTargetName)
+  )
+}
+
 export async function mobileRoutesCatalogue() {
   const routes = await getPublicRoutes()
   const bookingCities = await getBookingLocations()
@@ -148,13 +176,15 @@ export async function mobileVehiclesCatalogue() {
 export async function normalizeDiscoverySelection(
   input: MobileDiscoverySelectionInput,
   client: PrismaClientLike = prisma
-): Promise<MobileDiscoveryResult<{
-  selection: MobileDiscoverySelection
-  route: Route
-  departureDate: Date
-  returnDate: Date | null
-  datesToCheck: Date[]
-}>> {
+): Promise<
+  MobileDiscoveryResult<{
+    selection: MobileDiscoverySelection
+    route: Route
+    departureDate: Date
+    returnDate: Date | null
+    datesToCheck: Date[]
+  }>
+> {
   const parsed = mobileDiscoverySelectionSchema.safeParse(input)
   if (!parsed.success) {
     return {
@@ -168,6 +198,20 @@ export async function normalizeDiscoverySelection(
   const selection = parsed.data
   const route = await resolveRoute(selection, client)
   if (!route) return { ok: false, code: 'ROUTE_NOT_FOUND', message: 'Route not found' }
+
+  const boundary = validateRouteLocationBoundaries({
+    route,
+    pickup: pickupLocationFromSelection(selection),
+    destination: destinationLocationFromSelection(selection),
+  })
+  if (!boundary.ok) {
+    return {
+      ok: false,
+      code: boundary.code,
+      message: boundary.message,
+      details: boundary.details,
+    }
+  }
 
   return normalizeDiscoverySelectionForRoute(selection, route)
 }
@@ -234,7 +278,8 @@ export async function calculateMobileAvailability(
   if (!normalized.ok) return normalized
 
   const vehicle = await resolveVehicle(normalized.data.selection.vehicleId, client)
-  if (!vehicle) return { ok: false as const, code: 'VEHICLE_NOT_FOUND' as const, message: 'Vehicle not found' }
+  if (!vehicle)
+    return { ok: false as const, code: 'VEHICLE_NOT_FOUND' as const, message: 'Vehicle not found' }
   if (!vehicle.available) {
     return {
       ok: false as const,
@@ -294,7 +339,8 @@ export async function calculateMobileQuote(
   if (!normalized.ok) return normalized
 
   const vehicle = await resolveVehicle(normalized.data.selection.vehicleId, client)
-  if (!vehicle) return { ok: false as const, code: 'VEHICLE_NOT_FOUND' as const, message: 'Vehicle not found' }
+  if (!vehicle)
+    return { ok: false as const, code: 'VEHICLE_NOT_FOUND' as const, message: 'Vehicle not found' }
 
   const fleetVehicle = normalized.data.selection.fleetVehicleId
     ? await client.fleetVehicle.findUnique({
@@ -314,11 +360,7 @@ export async function calculateMobileQuote(
   const pricingTargetName = fleetVehicle?.label ?? vehicle.name
 
   if (
-    requiresLagosPickupArea(
-      normalized.data.route.id,
-      pricingTargetId,
-      pricingTargetName
-    ) &&
+    requiresPickupAreaForRoute(normalized.data.route, pricingTargetId, pricingTargetName) &&
     !normalized.data.selection.pickupArea
   ) {
     return {
@@ -330,12 +372,18 @@ export async function calculateMobileQuote(
 
   const fare = await calculateBookingPricing({
     routeId: normalized.data.route.id,
+    pricingRouteId: routePricingId(normalized.data.route),
     vehicleId: vehicle.id,
     vehicleName: vehicle.name,
     fleetVehicleId: fleetVehicle?.id,
     fleetVehicleLabel: fleetVehicle?.label,
     tripType: normalized.data.selection.tripType,
     pickupArea: normalized.data.selection.pickupArea as LagosPickupArea | undefined,
+    pickupAreaRequired: requiresPickupAreaForRoute(
+      normalized.data.route,
+      pricingTargetId,
+      pricingTargetName
+    ),
     client,
   })
 
@@ -405,8 +453,29 @@ export async function calculateMobileQuote(
 
 async function resolveRoute(selection: MobileDiscoverySelection, client: PrismaClientLike) {
   if (selection.routeId) return getPublicRouteById(selection.routeId, client)
-  if (selection.from && selection.to) return findPublicRouteByCities(selection.from, selection.to, client)
+  if (selection.from && selection.to)
+    return findPublicRouteByCities(selection.from, selection.to, client)
   return null
+}
+
+function pickupLocationFromSelection(
+  selection: MobileDiscoverySelection
+): RouteLocationBoundaryInput | null {
+  return {
+    city: selection.pickupCity,
+    country: selection.pickupCountry,
+    countryCode: selection.pickupCountryCode,
+  }
+}
+
+function destinationLocationFromSelection(
+  selection: MobileDiscoverySelection
+): RouteLocationBoundaryInput | null {
+  return {
+    city: selection.destinationCity ?? selection.dropoffCity,
+    country: selection.destinationCountry ?? selection.dropoffCountry,
+    countryCode: selection.destinationCountryCode ?? selection.dropoffCountryCode,
+  }
 }
 
 function parseTripDate(value: string) {
@@ -414,7 +483,10 @@ function parseTripDate(value: string) {
   return Number.isNaN(date.getTime()) ? null : date
 }
 
-async function resolveVehicle(vehicleId: string, client: PrismaClientLike): Promise<Vehicle | null> {
+async function resolveVehicle(
+  vehicleId: string,
+  client: PrismaClientLike
+): Promise<Vehicle | null> {
   const dbVehicle = await client.vehicle.findUnique({ where: { id: vehicleId } })
   if (dbVehicle) {
     return {
@@ -499,7 +571,11 @@ async function selectedFleetAvailability(
   }
 }
 
-async function categoryAvailability(vehicleId: string, datesToCheck: Date[], client: PrismaClientLike) {
+async function categoryAvailability(
+  vehicleId: string,
+  datesToCheck: Date[],
+  client: PrismaClientLike
+) {
   const checks = await Promise.all(
     datesToCheck.map(async (date) => {
       const availability = await getAvailableFleetVehicleCount(vehicleId, date, client)
@@ -520,8 +596,8 @@ async function categoryAvailability(vehicleId: string, datesToCheck: Date[], cli
     available,
     availableCount,
     physicalFleetCount,
-    selectableFleetUnits: (await getAvailableFleetVehicles(vehicleId, datesToCheck, client)).map((unit) =>
-      toMobileFleetVehicleDto(toFleetVehicleSafe(unit))
+    selectableFleetUnits: (await getAvailableFleetVehicles(vehicleId, datesToCheck, client)).map(
+      (unit) => toMobileFleetVehicleDto(toFleetVehicleSafe(unit))
     ),
     informationalOnly: true,
     dates: checks,

@@ -13,12 +13,14 @@ type PrismaClientLike = typeof prisma | Prisma.TransactionClient
 
 export type BookingPricingInput = {
   routeId: string
+  pricingRouteId?: string
   tripType: TripType
   vehicleId: string
   vehicleName: string
   fleetVehicleId?: string | null
   fleetVehicleLabel?: string | null
   pickupArea?: LagosPickupArea
+  pickupAreaRequired?: boolean
   client?: PrismaClientLike
 }
 
@@ -69,13 +71,12 @@ export async function calculateBookingPricing(
   input: BookingPricingInput
 ): Promise<BookingPricingResult> {
   const client = input.client ?? prisma
+  const pricingRouteId = input.pricingRouteId ?? input.routeId
   const pricingTargetId = input.fleetVehicleId ?? input.vehicleId
   const pricingTargetName = input.fleetVehicleLabel ?? input.vehicleName
-  const needsPickupArea = requiresLagosPickupArea(
-    input.routeId,
-    pricingTargetId,
-    pricingTargetName
-  )
+  const needsPickupArea =
+    input.pickupAreaRequired ??
+    requiresLagosPickupArea(pricingRouteId, pricingTargetId, pricingTargetName)
 
   if (needsPickupArea && !input.pickupArea) {
     return {
@@ -88,7 +89,7 @@ export async function calculateBookingPricing(
   const pricingScope = normalizePricingScope(input.pickupArea)
   const price = await lookupDatabaseDropoffFare({
     client,
-    routeId: input.routeId,
+    routeId: pricingRouteId,
     vehicleId: input.vehicleId,
     fleetVehicleId: input.fleetVehicleId,
     pricingScope,
@@ -100,12 +101,13 @@ export async function calculateBookingPricing(
   if (oneWayDropoffFare === null && legacyStaticPricingFallbackEnabled()) {
     console.warn('Using legacy static pricing fallback', {
       routeId: input.routeId,
+      pricingRouteId,
       vehicleId: input.vehicleId,
       fleetVehicleId: input.fleetVehicleId,
       pricingScope,
     })
     oneWayDropoffFare = getLegacyRouteDropoffPrice(
-      input.routeId,
+      pricingRouteId,
       pricingTargetId,
       pricingTargetName,
       input.pickupArea
@@ -122,7 +124,7 @@ export async function calculateBookingPricing(
   }
 
   const borderFee = await calculateRouteBorderFeeNGN({
-    routeId: input.routeId,
+    routeId: pricingRouteId,
     tripType: input.tripType,
     client,
   })
@@ -168,6 +170,7 @@ export async function getRouteStartingPriceNGN(routeId: string, client: PrismaCl
 async function lookupDatabaseDropoffFare(input: {
   client: PrismaClientLike
   routeId: string
+  pricingRouteId?: string
   vehicleId: string
   fleetVehicleId?: string | null
   pricingScope: RoutePriceScope

@@ -3,7 +3,7 @@ import { POST as createWebBooking } from '@/app/api/bookings/route'
 import { prisma } from '@/lib/prisma'
 import { checkRateLimit, requestIp } from '@/lib/rateLimit'
 import { requireMobilePrincipal } from '@/lib/mobile/auth'
-import { mobileError, mobileErrorFromCode } from '@/lib/mobile/errors'
+import { mobileError, mobileErrorFromCode, type MobileErrorCode } from '@/lib/mobile/errors'
 import { toCustomerBookingDetailDto, toCustomerBookingSummaryDto } from '@/lib/mobile/dtos'
 import { requireCompletedCustomerOnboarding } from '@/lib/mobile/onboarding'
 
@@ -92,6 +92,9 @@ export async function POST(req: Request) {
   const data = await response.json().catch(() => null)
   if (!response.ok) {
     const message = data?.error ?? 'Booking could not be created'
+    if (isMobileErrorCode(data?.code)) {
+      return mobileError(data.code, message, response.status, data.details)
+    }
     return mobileError(
       response.status === 409 ? 'TRIP_NOT_AVAILABLE' : 'VALIDATION_ERROR',
       message,
@@ -115,4 +118,12 @@ export async function POST(req: Request) {
   if (!booking) return NextResponse.json(data, { status: 201 })
 
   return Response.json({ booking: toCustomerBookingDetailDto(booking) }, { status: 201 })
+}
+
+function isMobileErrorCode(value: unknown): value is MobileErrorCode {
+  return (
+    value === 'PICKUP_OUTSIDE_ROUTE_CITY' ||
+    value === 'DESTINATION_OUTSIDE_ROUTE_CITY' ||
+    value === 'LOCATION_CITY_UNRESOLVED'
+  )
 }
