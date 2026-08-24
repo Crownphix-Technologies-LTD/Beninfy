@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { existsSync, readFileSync } from 'node:fs'
 import {
   toCustomerBookingDetailDto,
   toDriverAssignmentHistoryDto,
@@ -341,7 +342,26 @@ test('driver trip DTO exposes operational fields and excludes payment metadata',
       dropoffLatitude: 6.3703,
       dropoffLongitude: 2.3912,
       passengers: 2,
-      travelers: [],
+      travelers: [
+        {
+          sequence: 2,
+          fullName: 'Second Passenger',
+          email: 'second@example.com',
+          phone: '+234111',
+          passportId: 'A0000001',
+          nationality: 'NG',
+          lead: false,
+        },
+        {
+          sequence: 1,
+          fullName: 'Ada',
+          email: 'ada@example.com',
+          phone: '+234000',
+          passportId: 'A0000000',
+          nationality: 'NG',
+          lead: true,
+        },
+      ],
       specialRequirements: 'Call on arrival',
     },
   }
@@ -352,7 +372,30 @@ test('driver trip DTO exposes operational fields and excludes payment metadata',
   assert.equal(dto.specialRequirements, 'Call on arrival')
   assert.deepEqual(dto.pickupCoordinates, { latitude: 6.5244, longitude: 3.3792 })
   assert.deepEqual(dto.dropoffCoordinates, { latitude: 6.3703, longitude: 2.3912 })
+  assert.deepEqual(dto.passengerManifest, {
+    totalPassengers: 2,
+    entries: [
+      { sequence: 1, fullName: 'Ada', isLead: true },
+      { sequence: 2, fullName: 'Second Passenger', isLead: false },
+    ],
+  })
+  assert.deepEqual(dto.travelers, dto.passengerManifest.entries)
   assert.equal('paymentProviderMetadata' in dto, false)
+  assert.equal(JSON.stringify(dto).includes('passportId'), false)
+  assert.equal(JSON.stringify(dto).includes('second@example.com'), false)
+})
+
+test('driver change-password endpoint is driver scoped and returns replacement tokens', () => {
+  const routePath = 'src/app/api/mobile/v1/driver/change-password/route.ts'
+  assert.equal(existsSync(routePath), true)
+  const source = readFileSync(routePath, 'utf8')
+
+  assert.equal(source.includes("requireMobilePrincipal(req, 'DRIVER')"), true)
+  assert.equal(source.includes('changeDriverPassword'), true)
+  assert.equal(source.includes('otherSessionsRevoked: true'), true)
+  assert.equal(source.includes('accessToken'), true)
+  assert.equal(source.includes('refreshToken'), true)
+  assert.equal(source.includes('customer'), false)
 })
 
 test('driver profile DTO keeps duty and presence separate', () => {

@@ -36,6 +36,8 @@ Refresh token:
 | `POST /api/mobile/v1/auth/email/verify-otp` | IMPLEMENTED | CUSTOMER verify email OTP                   |
 | `POST /api/mobile/v1/auth/forgot-password`  | IMPLEMENTED | PUBLIC generic reset request                |
 | `POST /api/mobile/v1/auth/reset-password`   | IMPLEMENTED | PUBLIC single-use token reset               |
+| `POST /api/mobile/v1/customer/change-password` | IMPLEMENTED | CUSTOMER authenticated password change   |
+| `POST /api/mobile/v1/driver/change-password` | IMPLEMENTED | DRIVER authenticated password change      |
 | `GET /api/mobile/v1/auth/sessions`          | PLANNED     | CUSTOMER or DRIVER                          |
 | `DELETE /api/mobile/v1/auth/sessions/:id`   | PLANNED     | CUSTOMER or DRIVER                          |
 
@@ -95,6 +97,12 @@ Customer password change is implemented at:
 POST /api/mobile/v1/customer/change-password
 ```
 
+Driver password change is implemented at:
+
+```text
+POST /api/mobile/v1/driver/change-password
+```
+
 Request:
 
 ```json
@@ -108,7 +116,7 @@ Request:
 }
 ```
 
-The backend verifies the current password, enforces the same mobile password policy, updates the password hash, increments `sessionVersion`, revokes existing mobile sessions, and returns replacement mobile tokens for the current device.
+The backend verifies the current password, enforces the same mobile password policy, updates the password hash, increments `sessionVersion`, revokes existing mobile sessions, and returns replacement mobile tokens for the current device. The customer endpoint returns a customer profile DTO; the driver endpoint returns a driver profile DTO.
 
 Errors include `CURRENT_PASSWORD_INVALID` and `PASSWORD_INVALID`.
 

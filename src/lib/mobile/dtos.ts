@@ -142,9 +142,21 @@ export type DriverTripSummaryDto = {
   vehicle: FleetVehicleDto | null
 }
 
+export type DriverPassengerManifestEntryDto = {
+  sequence: number
+  fullName: string
+  isLead: boolean
+}
+
+export type DriverPassengerManifestDto = {
+  totalPassengers: number
+  entries: DriverPassengerManifestEntryDto[]
+}
+
 export type DriverTripDetailDto = DriverTripSummaryDto & {
   passengers: number
-  travelers: unknown
+  travelers: DriverPassengerManifestEntryDto[]
+  passengerManifest: DriverPassengerManifestDto
   specialRequirements: string | null
   timestamps: {
     assignedAt: string | null
@@ -246,6 +258,53 @@ function toIso(value: Dateish) {
 
 function displayReference(id: string) {
   return `BFY-${id.slice(-8).toUpperCase()}`
+}
+
+function manifestEntriesFromTravelers(input: unknown): DriverPassengerManifestEntryDto[] {
+  if (!Array.isArray(input)) return []
+  const entries = input
+    .map((traveler, index) => {
+      if (!traveler || typeof traveler !== 'object') return null
+      const record = traveler as Record<string, unknown>
+      const fullName =
+        typeof record.fullName === 'string'
+          ? record.fullName.trim()
+          : typeof record.name === 'string'
+            ? record.name.trim()
+            : ''
+      if (!fullName) return null
+      const rawSequence = Number(record.sequence)
+      return {
+        sequence: Number.isInteger(rawSequence) && rawSequence > 0 ? rawSequence : index + 1,
+        fullName,
+        isLead: record.lead === true || record.isLead === true,
+      }
+    })
+    .filter((entry): entry is DriverPassengerManifestEntryDto => Boolean(entry))
+    .sort((left, right) => left.sequence - right.sequence)
+  if (entries.length > 0 && !entries.some((entry) => entry.isLead)) {
+    entries[0] = { ...entries[0], isLead: true }
+  }
+  return entries
+}
+
+function toDriverPassengerManifest(input: {
+  totalPassengers: number
+  travelers: unknown
+  passengerName: string | null
+}): DriverPassengerManifestDto {
+  const entries = manifestEntriesFromTravelers(input.travelers)
+  if (entries.length === 0 && input.passengerName?.trim()) {
+    entries.push({
+      sequence: 1,
+      fullName: input.passengerName.trim(),
+      isLead: true,
+    })
+  }
+  return {
+    totalPassengers: input.totalPassengers,
+    entries,
+  }
 }
 
 function normalizeTripType(value: string): 'one-way' | 'round-trip' {
@@ -526,10 +585,16 @@ export function toDriverTripDetailDto(
     }
   }
 ): DriverTripDetailDto {
+  const passengerManifest = toDriverPassengerManifest({
+    totalPassengers: leg.booking.passengers,
+    travelers: leg.booking.travelers,
+    passengerName: leg.booking.passengerName,
+  })
   return {
     ...toDriverTripSummaryDto(leg),
     passengers: leg.booking.passengers,
-    travelers: leg.booking.travelers,
+    travelers: passengerManifest.entries,
+    passengerManifest,
     specialRequirements: leg.booking.specialRequirements,
     timestamps: {
       assignedAt: leg.assignedAt ? toIso(leg.assignedAt) : null,

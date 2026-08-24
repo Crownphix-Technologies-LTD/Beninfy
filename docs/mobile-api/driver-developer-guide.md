@@ -12,8 +12,10 @@ Current driver mobile API base:
 - `GET /auth/me`
 - `POST /auth/refresh`
 - `POST /auth/logout`
+- `POST /auth/logout-all`
 - `GET /driver/home`
 - `GET /driver/profile`
+- `POST /driver/change-password`
 - `PATCH /driver/availability`
 - `GET /driver/trips?view=all|upcoming|active|completed`
 - `GET /driver/trip-history`
@@ -200,8 +202,61 @@ Driver trip summary and detail DTOs include:
 
 Flutter should hand off pickup/dropoff coordinates to the platform navigation app or maps SDK. Do not derive ETA, polyline, or route pricing locally. Backend journey intelligence is optional and remains server-authoritative when exposed.
 
+## Passenger Manifest
+
+Driver trip detail includes a privacy-filtered operational manifest:
+
+```json
+{
+  "passengers": 2,
+  "travelers": [
+    { "sequence": 1, "fullName": "Ada Passenger", "isLead": true },
+    { "sequence": 2, "fullName": "Second Passenger", "isLead": false }
+  ],
+  "passengerManifest": {
+    "totalPassengers": 2,
+    "entries": [
+      { "sequence": 1, "fullName": "Ada Passenger", "isLead": true },
+      { "sequence": 2, "fullName": "Second Passenger", "isLead": false }
+    ]
+  }
+}
+```
+
+The driver manifest intentionally excludes passenger email addresses, passport numbers, nationality fields, payment details, coupon metadata, provider references, and internal admin notes. The summary-level `passengerPhone` remains the lead contact already approved for operational calling.
+
+## Driver Security
+
+Authenticated password change is implemented at:
+
+```text
+POST /api/mobile/v1/driver/change-password
+```
+
+Request:
+
+```json
+{
+  "currentPassword": "old-password",
+  "newPassword": "new-strong-password",
+  "device": {
+    "deviceId": "ios-device-id",
+    "platform": "ios"
+  }
+}
+```
+
+Success revokes previous mobile sessions, creates a replacement Driver session for the current device, and returns `driver`, `accessToken`, `refreshToken`, `tokenType`, and `expiresIn`. Errors include `CURRENT_PASSWORD_INVALID`, `PASSWORD_INVALID`, `DRIVER_NOT_LINKED`, and `DRIVER_INACTIVE`.
+
+## Offline Behavior
+
+Flutter may cache read-only Driver Home, trip summaries, trip detail, assignment history, notification list, and support config for display while offline. Cached records must be marked visually stale by the app and refreshed when connectivity returns.
+
+Driver lifecycle actions, location publishing, chat sending, notification read receipts, duty changes, and password changes require a live backend response. Flutter must not replay stale cached lifecycle actions or locally mark a trip progressed without the authoritative API response.
+
 ## Not Yet Available
 
 - Driver earnings
+- Driver document upload/download contracts
 
 Prisma models are not API contracts. Use the DTOs and docs in this directory as the source of truth.

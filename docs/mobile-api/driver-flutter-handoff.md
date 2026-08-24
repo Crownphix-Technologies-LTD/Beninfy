@@ -133,6 +133,42 @@ Success:
 { "ok": true }
 ```
 
+### `POST /api/mobile/v1/driver/change-password`
+
+Auth: Driver bearer token.
+
+Request:
+
+```json
+{
+  "currentPassword": "old-password",
+  "newPassword": "new-strong-password",
+  "device": {
+    "deviceId": "ios-device-id",
+    "platform": "ios"
+  }
+}
+```
+
+Success:
+
+```json
+{
+  "ok": true,
+  "session": {
+    "replaced": true,
+    "otherSessionsRevoked": true
+  },
+  "driver": "<DriverProfileDto>",
+  "accessToken": "...",
+  "refreshToken": "...",
+  "tokenType": "Bearer",
+  "expiresIn": 900
+}
+```
+
+Previous mobile sessions are revoked. Flutter must replace local tokens immediately.
+
 ### `GET /api/mobile/v1/auth/me`
 
 Auth: Driver bearer token.
@@ -363,7 +399,17 @@ Success:
   "trip": {
     "...summaryFields": "same as DriverTripSummaryDto",
     "passengers": 2,
-    "travelers": [],
+    "travelers": [
+      { "sequence": 1, "fullName": "Ada Passenger", "isLead": true },
+      { "sequence": 2, "fullName": "Second Passenger", "isLead": false }
+    ],
+    "passengerManifest": {
+      "totalPassengers": 2,
+      "entries": [
+        { "sequence": 1, "fullName": "Ada Passenger", "isLead": true },
+        { "sequence": 2, "fullName": "Second Passenger", "isLead": false }
+      ]
+    },
     "specialRequirements": "Call on arrival or null",
     "timestamps": {
       "assignedAt": "ISO date or null",
@@ -380,7 +426,7 @@ Success:
 }
 ```
 
-No customer email, customer payment state, payment provider references, coupon data, or internal admin notes are returned.
+No customer email, traveler email, passport number, nationality, customer payment state, payment provider references, coupon data, or internal admin notes are returned. The summary-level `passengerPhone` is the lead operational contact.
 
 ## Lifecycle Actions
 
