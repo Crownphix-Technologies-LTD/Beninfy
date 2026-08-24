@@ -150,9 +150,9 @@ export function requiresPickupAreaForRoute(
   )
 }
 
-export async function mobileRoutesCatalogue() {
-  const routes = await getPublicRoutes()
-  const bookingCities = await getBookingLocations()
+export async function mobileRoutesCatalogue(client: PrismaClientLike = prisma) {
+  const routes = await getPublicRoutes(client)
+  const bookingCities = await getBookingLocations(client)
   return {
     routes: routes.map(toMobileRouteDto),
     locations: bookingCities.map((city) => ({
