@@ -1,7 +1,9 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { existsSync, readFileSync } from 'node:fs'
 import {
   toCustomerBookingDetailDto,
+  toDriverAssignmentHistoryDto,
   toDriverProfileDto,
   toDriverTrackingSnapshotDto,
   toDriverTripDetailDto,
@@ -61,13 +63,21 @@ import {
 import {
   calculateFareBreakdown,
   mobileMoney,
+  normalizeDiscoverySelection,
   normalizeDiscoverySelectionForRoute,
   toMobileRouteDto,
   toMobileVehicleDto,
 } from '../src/lib/mobile/bookingDiscovery'
 import { calculateBookingPricing } from '../src/lib/bookingPricing'
 import { calculateRouteBorderFeeNGN } from '../src/lib/borderFeeCatalog'
-import { findPublicRouteByCities, getPublicRoutes } from '../src/lib/routeCatalog'
+import {
+  findPublicRouteByCities,
+  getPublicRouteById,
+  getPublicRoutes,
+  reverseBorderCrossings,
+  reverseProjectionRouteId,
+  routePricingId,
+} from '../src/lib/routeCatalog'
 import {
   classifyDriverTripView,
   driverTripOrderByForView,
@@ -112,6 +122,17 @@ import { toJourneyIntelligenceDto } from '../src/lib/mobile/journeyIntelligence'
 import { mobileSupportConfig } from '../src/lib/mobile/supportConfig'
 import { getFcmConfig } from '../src/lib/mobile/fcm'
 import { mobileErrorFromCode } from '../src/lib/mobile/errors'
+import {
+  normalizeSupportedRouteCity,
+  validateRouteLocationBoundaries,
+} from '../src/lib/mobile/routeLocationBoundary'
+import {
+  driverAssignmentHistoryOpenWhere,
+  driverAssignmentHistoryOrderBy,
+  driverAssignmentHistoryWhereForDriver,
+  driverAssignmentOutcome,
+  driverAssignmentOutcomeLabelKey,
+} from '../src/lib/mobile/driverAssignmentHistory'
 
 test('driver transition blocks terminal trips', () => {
   const result = evaluateDriverTripTransition({
@@ -215,6 +236,29 @@ test('driver decline releases assignment without cancelling customer leg', () =>
   }
 })
 
+test('driver assignment history outcomes are truthful driver-facing states', () => {
+  assert.equal(driverAssignmentOutcome({}), 'current')
+  assert.equal(driverAssignmentOutcome({ completedAt: '2026-08-18T10:00:00.000Z' }), 'completed')
+  assert.equal(driverAssignmentOutcome({ declinedAt: '2026-08-18T10:00:00.000Z' }), 'declined')
+  assert.equal(driverAssignmentOutcome({ supersededAt: '2026-08-18T10:00:00.000Z' }), 'reassigned')
+  assert.equal(driverAssignmentOutcome({ releasedAt: '2026-08-18T10:00:00.000Z' }), 'released')
+  assert.equal(driverAssignmentOutcomeLabelKey('declined'), 'driverAssignmentHistory.declined')
+})
+
+test('driver assignment history writes target the open assignment only', () => {
+  assert.deepEqual(
+    driverAssignmentHistoryOpenWhere({ bookingLegId: 'leg1', driverId: 'driver1' }),
+    {
+      bookingLegId: 'leg1',
+      driverId: 'driver1',
+      declinedAt: null,
+      releasedAt: null,
+      completedAt: null,
+      supersededAt: null,
+    }
+  )
+})
+
 test('booking completion waits for all round trip legs', () => {
   assert.equal(shouldCompleteBooking(['completed', 'assigned']), false)
   assert.equal(shouldCompleteBooking(['completed', 'completed']), true)
@@ -298,7 +342,26 @@ test('driver trip DTO exposes operational fields and excludes payment metadata',
       dropoffLatitude: 6.3703,
       dropoffLongitude: 2.3912,
       passengers: 2,
-      travelers: [],
+      travelers: [
+        {
+          sequence: 2,
+          fullName: 'Second Passenger',
+          email: 'second@example.com',
+          phone: '+234111',
+          passportId: 'A0000001',
+          nationality: 'NG',
+          lead: false,
+        },
+        {
+          sequence: 1,
+          fullName: 'Ada',
+          email: 'ada@example.com',
+          phone: '+234000',
+          passportId: 'A0000000',
+          nationality: 'NG',
+          lead: true,
+        },
+      ],
       specialRequirements: 'Call on arrival',
     },
   }
@@ -309,7 +372,30 @@ test('driver trip DTO exposes operational fields and excludes payment metadata',
   assert.equal(dto.specialRequirements, 'Call on arrival')
   assert.deepEqual(dto.pickupCoordinates, { latitude: 6.5244, longitude: 3.3792 })
   assert.deepEqual(dto.dropoffCoordinates, { latitude: 6.3703, longitude: 2.3912 })
+  assert.deepEqual(dto.passengerManifest, {
+    totalPassengers: 2,
+    entries: [
+      { sequence: 1, fullName: 'Ada', isLead: true },
+      { sequence: 2, fullName: 'Second Passenger', isLead: false },
+    ],
+  })
+  assert.deepEqual(dto.travelers, dto.passengerManifest.entries)
   assert.equal('paymentProviderMetadata' in dto, false)
+  assert.equal(JSON.stringify(dto).includes('passportId'), false)
+  assert.equal(JSON.stringify(dto).includes('second@example.com'), false)
+})
+
+test('driver change-password endpoint is driver scoped and returns replacement tokens', () => {
+  const routePath = 'src/app/api/mobile/v1/driver/change-password/route.ts'
+  assert.equal(existsSync(routePath), true)
+  const source = readFileSync(routePath, 'utf8')
+
+  assert.equal(source.includes("requireMobilePrincipal(req, 'DRIVER')"), true)
+  assert.equal(source.includes('changeDriverPassword'), true)
+  assert.equal(source.includes('otherSessionsRevoked: true'), true)
+  assert.equal(source.includes('accessToken'), true)
+  assert.equal(source.includes('refreshToken'), true)
+  assert.equal(source.includes('customer'), false)
 })
 
 test('driver profile DTO keeps duty and presence separate', () => {
@@ -973,9 +1059,310 @@ test('public route service excludes disabled database routes', async () => {
   const result = await getPublicRoutes(client as never)
 
   assert.deepEqual(whereClause, { available: true })
-  assert.equal(result.length, 1)
+  assert.equal(result.length, 2)
   assert.equal(result[0].id, 'lagos-cotonou')
   assert.equal(result[0].available, true)
+  assert.equal(result[1].id, reverseProjectionRouteId('lagos-cotonou'))
+})
+
+test('public route catalogue synthesizes missing reverse corridors without duplicating explicit reverses', async () => {
+  const client = {
+    route: {
+      findMany: async () => [
+        {
+          ...routes[0],
+          available: true,
+          borderFeeIds: ['nigeria-benin'],
+        },
+        {
+          ...routes.find((route) => route.id === 'cotonou-togo')!,
+          available: true,
+          borderFeeIds: ['benin-togo'],
+        },
+        {
+          ...routes.find((route) => route.id === 'lome-cotonou')!,
+          available: true,
+          borderFeeIds: ['benin-togo'],
+        },
+      ],
+    },
+  }
+
+  const result = await getPublicRoutes(client as never)
+  const pairs = result.map((route) => `${route.from}->${route.to}`)
+
+  assert.equal(pairs.includes('Lagos->Cotonou'), true)
+  assert.equal(pairs.includes('Cotonou->Lagos'), true)
+  assert.equal(pairs.includes('Cotonou->Lomé'), true)
+  assert.equal(pairs.filter((pair) => pair === 'Lomé->Cotonou').length, 1)
+
+  const reverseLagos = result.find((route) => route.from === 'Cotonou' && route.to === 'Lagos')
+  assert.equal(reverseLagos?.id, reverseProjectionRouteId('lagos-cotonou'))
+  assert.equal(reverseLagos?.pricingRouteId, 'lagos-cotonou')
+  assert.equal(reverseLagos?.direction, 'reverse_projection')
+
+  const explicitReverse = result.find((route) => route.from === 'Lomé' && route.to === 'Cotonou')
+  assert.equal(explicitReverse?.id, 'lome-cotonou')
+  assert.equal(explicitReverse?.direction, 'explicit')
+})
+
+test('supported Beninfy corridors resolve in both directions with explicit reverse preferred', async () => {
+  const rows = routes.map((route) => ({
+    ...route,
+    available: true,
+    borderFeeIds: [],
+  }))
+  const client = {
+    route: {
+      findFirst: async (args: {
+        where: { from?: { equals: string }; to?: { equals: string }; id?: string }
+      }) => {
+        if (args.where.id) return rows.find((route) => route.id === args.where.id) ?? null
+        return (
+          rows.find(
+            (route) =>
+              route.from.toLowerCase() === args.where.from?.equals.toLowerCase() &&
+              route.to.toLowerCase() === args.where.to?.equals.toLowerCase()
+          ) ?? null
+        )
+      },
+    },
+  }
+
+  const examples = [
+    ['Lagos', 'Cotonou', 'lagos-cotonou', 'explicit', 'lagos-cotonou'],
+    [
+      'Cotonou',
+      'Lagos',
+      reverseProjectionRouteId('lagos-cotonou'),
+      'reverse_projection',
+      'lagos-cotonou',
+    ],
+    ['Cotonou', 'Lomé', 'cotonou-togo', 'explicit', 'cotonou-togo'],
+    ['Lomé', 'Cotonou', 'lome-cotonou', 'explicit', 'lome-cotonou'],
+    ['Lomé', 'Accra', 'togo-ghana', 'explicit', 'togo-ghana'],
+    ['Accra', 'Lomé', 'accra-lome', 'explicit', 'accra-lome'],
+    ['Cotonou', 'Accra', 'cotonou-accra', 'explicit', 'cotonou-accra'],
+    ['Accra', 'Cotonou', 'accra-cotonou', 'explicit', 'accra-cotonou'],
+    ['Lagos', 'Lomé', 'lagos-togo', 'explicit', 'lagos-togo'],
+    ['Lomé', 'Lagos', reverseProjectionRouteId('lagos-togo'), 'reverse_projection', 'lagos-togo'],
+    ['Lagos', 'Accra', 'lagos-ghana', 'explicit', 'lagos-ghana'],
+    [
+      'Accra',
+      'Lagos',
+      reverseProjectionRouteId('lagos-ghana'),
+      'reverse_projection',
+      'lagos-ghana',
+    ],
+  ] as const
+
+  for (const [from, to, expectedId, expectedDirection, expectedPricingId] of examples) {
+    const route = await findPublicRouteByCities(from, to, client as never)
+    assert.equal(route?.id, expectedId)
+    assert.equal(route?.direction, expectedDirection)
+    assert.equal(route ? routePricingId(route) : null, expectedPricingId)
+    assert.equal(route?.from, from)
+    assert.equal(route?.to, to)
+  }
+})
+
+test('mobile booking discovery accepts reverse direction through backend route matching', async () => {
+  const rows = routes.map((route) => ({
+    ...route,
+    available: true,
+    borderFeeIds: [],
+  }))
+  const client = {
+    route: {
+      findFirst: async (args: {
+        where: { from?: { equals: string }; to?: { equals: string } }
+      }) => {
+        return (
+          rows.find(
+            (route) =>
+              route.from.toLowerCase() === args.where.from?.equals.toLowerCase() &&
+              route.to.toLowerCase() === args.where.to?.equals.toLowerCase()
+          ) ?? null
+        )
+      },
+    },
+  }
+
+  const result = await normalizeDiscoverySelection(
+    {
+      from: 'Cotonou',
+      to: 'Lagos',
+      vehicleId: 'saloon',
+      tripType: 'one-way',
+      departureDate: '2026-08-20T09:00:00.000Z',
+      passengers: 1,
+      pickupCity: 'Cotonou',
+      pickupCountryCode: 'BJ',
+      destinationCity: 'Lagos',
+      destinationCountryCode: 'NG',
+    },
+    client as never
+  )
+
+  assert.equal(result.ok, true)
+  if (result.ok) {
+    assert.equal(result.data.route.id, reverseProjectionRouteId('lagos-cotonou'))
+    assert.equal(result.data.route.from, 'Cotonou')
+    assert.equal(result.data.route.to, 'Lagos')
+    assert.equal(routePricingId(result.data.route), 'lagos-cotonou')
+  }
+})
+
+test('route location boundaries accept only places inside selected route endpoint cities', () => {
+  const cotonouLome = routes.find((route) => route.id === 'cotonou-togo')!
+  assert.deepEqual(
+    validateRouteLocationBoundaries({
+      route: cotonouLome,
+      pickup: { city: 'Cotonou', countryCode: 'BJ' },
+      destination: { city: 'Lome', countryCode: 'TG' },
+    }),
+    { ok: true }
+  )
+
+  const portoNovoPickup = validateRouteLocationBoundaries({
+    route: cotonouLome,
+    pickup: { city: 'Porto-Novo', countryCode: 'BJ' },
+    destination: { city: 'Lomé', countryCode: 'TG' },
+  })
+  assert.equal(portoNovoPickup.ok, false)
+  if (!portoNovoPickup.ok) {
+    assert.equal(portoNovoPickup.code, 'PICKUP_OUTSIDE_ROUTE_CITY')
+    assert.equal(portoNovoPickup.details.expectedCity, 'Cotonou')
+    assert.equal(portoNovoPickup.details.resolvedCity, 'Porto-Novo')
+  }
+
+  const accraDestination = validateRouteLocationBoundaries({
+    route: cotonouLome,
+    pickup: { city: 'Cotonou', countryCode: 'BJ' },
+    destination: { city: 'Accra', countryCode: 'GH' },
+  })
+  assert.equal(accraDestination.ok, false)
+  if (!accraDestination.ok) assert.equal(accraDestination.code, 'DESTINATION_OUTSIDE_ROUTE_CITY')
+})
+
+test('route location boundaries work for Lagos corridors and reverse projections', async () => {
+  const lagosCotonou = routes.find((route) => route.id === 'lagos-cotonou')!
+  assert.deepEqual(
+    validateRouteLocationBoundaries({
+      route: lagosCotonou,
+      pickup: { city: 'Lagos', countryCode: 'NG' },
+      destination: { city: 'Cotonou', countryCode: 'BJ' },
+    }),
+    { ok: true }
+  )
+
+  const wrongPickup = validateRouteLocationBoundaries({
+    route: lagosCotonou,
+    pickup: { city: 'Cotonou', countryCode: 'BJ' },
+    destination: { city: 'Cotonou', countryCode: 'BJ' },
+  })
+  assert.equal(wrongPickup.ok, false)
+  if (!wrongPickup.ok) assert.equal(wrongPickup.code, 'PICKUP_OUTSIDE_ROUTE_CITY')
+
+  const client = {
+    route: {
+      findFirst: async () => ({
+        ...lagosCotonou,
+        available: true,
+        borderFeeIds: ['nigeria-benin'],
+      }),
+    },
+  }
+  const reverse = await getPublicRouteById(
+    reverseProjectionRouteId('lagos-cotonou'),
+    client as never
+  )
+  assert.ok(reverse)
+  assert.deepEqual(
+    validateRouteLocationBoundaries({
+      route: reverse!,
+      pickup: { city: 'Cotonou', countryCode: 'BJ' },
+      destination: { city: 'Lagos', countryCode: 'NG' },
+    }),
+    { ok: true }
+  )
+})
+
+test('route location normalization supports known Beninfy aliases only', () => {
+  assert.equal(normalizeSupportedRouteCity('Lomé'), normalizeSupportedRouteCity('Lome'))
+  assert.equal(normalizeSupportedRouteCity('Porto-Novo'), normalizeSupportedRouteCity('Porto Novo'))
+  assert.equal(normalizeSupportedRouteCity('Kpalimé'), normalizeSupportedRouteCity('Kpalime'))
+})
+
+test('route location boundaries fail closed for country mismatch and unresolved city', () => {
+  const cotonouLome = routes.find((route) => route.id === 'cotonou-togo')!
+  const countryMismatch = validateRouteLocationBoundaries({
+    route: cotonouLome,
+    pickup: { city: 'Cotonou', countryCode: 'NG' },
+    destination: { city: 'Lomé', countryCode: 'TG' },
+  })
+  assert.equal(countryMismatch.ok, false)
+  if (!countryMismatch.ok) assert.equal(countryMismatch.code, 'PICKUP_OUTSIDE_ROUTE_CITY')
+
+  const unresolved = validateRouteLocationBoundaries({
+    route: cotonouLome,
+    pickup: { city: null, countryCode: 'BJ' },
+    destination: { city: 'Lomé', countryCode: 'TG' },
+  })
+  assert.equal(unresolved.ok, false)
+  if (!unresolved.ok) assert.equal(unresolved.code, 'LOCATION_CITY_UNRESOLVED')
+})
+
+test('saved and current-location mismatches use the same route boundary contract', () => {
+  const cotonouLome = routes.find((route) => route.id === 'cotonou-togo')!
+  const savedHomeLagos = validateRouteLocationBoundaries({
+    route: cotonouLome,
+    pickup: { city: 'Lagos', countryCode: 'NG' },
+    destination: { city: 'Lomé', countryCode: 'TG' },
+  })
+  assert.equal(savedHomeLagos.ok, false)
+  if (!savedHomeLagos.ok) assert.equal(savedHomeLagos.code, 'PICKUP_OUTSIDE_ROUTE_CITY')
+
+  const currentLocationOuidah = validateRouteLocationBoundaries({
+    route: cotonouLome,
+    pickup: { city: 'Ouidah', countryCode: 'BJ' },
+    destination: { city: 'Lomé', countryCode: 'TG' },
+  })
+  assert.equal(currentLocationOuidah.ok, false)
+  if (!currentLocationOuidah.ok)
+    assert.equal(currentLocationOuidah.code, 'PICKUP_OUTSIDE_ROUTE_CITY')
+})
+
+test('reverse route detail uses stable projection id and reversed border crossing order', async () => {
+  const client = {
+    route: {
+      findFirst: async () => ({
+        ...routes.find((route) => route.id === 'lagos-ghana')!,
+        available: true,
+        borderFeeIds: ['nigeria-benin', 'benin-togo', 'togo-ghana'],
+      }),
+    },
+  }
+
+  const route = await getPublicRouteById(reverseProjectionRouteId('lagos-ghana'), client as never)
+
+  assert.equal(route?.id, reverseProjectionRouteId('lagos-ghana'))
+  assert.equal(route?.from, 'Accra')
+  assert.equal(route?.to, 'Lagos')
+  assert.deepEqual(route?.borderCrossings, [
+    'Kodjoviakopé–Aflao',
+    'Sanvee Condji–Hillacondji',
+    'Kraké–Seme',
+  ])
+  assert.deepEqual(route?.borderFeeIds, ['togo-ghana', 'benin-togo', 'nigeria-benin'])
+  assert.equal(route ? routePricingId(route) : null, 'lagos-ghana')
+})
+
+test('border crossing labels reverse traversal direction', () => {
+  assert.deepEqual(reverseBorderCrossings(['Seme–Kraké', 'Hillacondji–Sanvee Condji']), [
+    'Sanvee Condji–Hillacondji',
+    'Kraké–Seme',
+  ])
 })
 
 test('database border fees are summed from route borderFeeIds and round-trip values', async () => {
@@ -1036,6 +1423,66 @@ test('database border fees are summed from route borderFeeIds and round-trip val
 
   assert.equal(result.ok, true)
   if (result.ok) assert.equal(result.amountNGN, 30800)
+})
+
+test('reverse projection pricing uses source corridor price without inventing a fare', async () => {
+  const routePriceLookups: string[] = []
+  const borderFeeLookups: string[] = []
+  const client = {
+    routePrice: {
+      findMany: async (args: { where: { routeId: string } }) => {
+        routePriceLookups.push(args.where.routeId)
+        return [{ vehicleId: 'saloon', pricingScope: 'default', amountNGN: 180000 }]
+      },
+    },
+    route: {
+      findFirst: async (args: { where: { id: string } }) => {
+        borderFeeLookups.push(args.where.id)
+        return { id: args.where.id, borderFeeIds: ['nigeria-benin'] }
+      },
+    },
+    borderFee: {
+      findMany: async () => [
+        {
+          id: 'nigeria-benin',
+          country: 'Benin',
+          countryFr: 'Benin',
+          border: 'Seme',
+          borderFr: 'Seme',
+          countries: ['Nigeria', 'Benin Republic'],
+          feePerPersonNGN: 5000,
+          feeRoundTripNGN: 10000,
+          popular: true,
+          icon: 'local_taxi',
+          services: [],
+          servicesFr: [],
+          documents: [],
+          documentsFr: [],
+          tips: [],
+          tipsFr: [],
+        },
+      ],
+    },
+  }
+
+  const result = await calculateBookingPricing({
+    routeId: reverseProjectionRouteId('lagos-cotonou'),
+    pricingRouteId: 'lagos-cotonou',
+    vehicleId: 'saloon',
+    vehicleName: 'Saloon',
+    tripType: 'one-way',
+    pickupAreaRequired: false,
+    client: client as never,
+  })
+
+  assert.equal(result.ok, true)
+  if (result.ok) {
+    assert.equal(result.routeId, reverseProjectionRouteId('lagos-cotonou'))
+    assert.equal(result.oneWayDropoffFare, 180000)
+    assert.equal(result.subtotalNGN, 185000)
+  }
+  assert.deepEqual(routePriceLookups, ['lagos-cotonou'])
+  assert.deepEqual(borderFeeLookups, ['lagos-cotonou'])
 })
 
 test('booking pricing prefers fleet override before category price', async () => {
@@ -1156,6 +1603,75 @@ test('driver trip view query scopes by authenticated driver and status', () => {
     driverId: 'driver1',
     status: { in: ['completed'] },
   })
+})
+
+test('driver assignment history query scopes by authenticated driver', () => {
+  assert.deepEqual(driverAssignmentHistoryWhereForDriver('driver1'), {
+    driverId: 'driver1',
+  })
+  assert.deepEqual(driverAssignmentHistoryOrderBy(), [{ assignedAt: 'desc' }, { id: 'desc' }])
+})
+
+test('driver assignment history DTO preserves released driver association', () => {
+  const dto = toDriverAssignmentHistoryDto({
+    id: 'history1',
+    bookingLegId: 'leg1',
+    driverId: 'driver1',
+    assignedAt: new Date('2026-08-18T08:00:00.000Z'),
+    acceptedAt: null,
+    declinedAt: null,
+    releasedAt: new Date('2026-08-18T08:30:00.000Z'),
+    completedAt: null,
+    supersededAt: null,
+    releaseReason: 'driver_cancelled',
+    releaseSource: 'driver',
+    bookingLeg: {
+      id: 'leg1',
+      bookingId: 'booking1',
+      direction: 'outbound',
+      from: 'Lagos',
+      to: 'Cotonou',
+      departureDate: new Date('2026-08-20T09:00:00.000Z'),
+      status: 'unassigned',
+    },
+  })
+
+  assert.equal(dto.assignmentHistoryId, 'history1')
+  assert.equal(dto.bookingLegId, 'leg1')
+  assert.equal(dto.outcome, 'released')
+  assert.equal(dto.outcomeLabelKey, 'driverAssignmentHistory.released')
+  assert.equal(dto.currentLegStatus, 'unassigned')
+  assert.equal(dto.releaseReason, 'driver_cancelled')
+  assert.equal(dto.releaseSource, 'driver')
+})
+
+test('driver assignment history DTO distinguishes reassigned-away outcome', () => {
+  const dto = toDriverAssignmentHistoryDto({
+    id: 'history1',
+    bookingLegId: 'leg1',
+    driverId: 'driver1',
+    assignedAt: new Date('2026-08-18T08:00:00.000Z'),
+    acceptedAt: null,
+    declinedAt: null,
+    releasedAt: new Date('2026-08-18T08:30:00.000Z'),
+    completedAt: null,
+    supersededAt: new Date('2026-08-18T08:30:00.000Z'),
+    releaseReason: 'reassigned',
+    releaseSource: 'admin',
+    bookingLeg: {
+      id: 'leg1',
+      bookingId: 'booking1',
+      direction: 'outbound',
+      from: 'Lagos',
+      to: 'Cotonou',
+      departureDate: new Date('2026-08-20T09:00:00.000Z'),
+      status: 'assigned',
+    },
+  })
+
+  assert.equal(dto.outcome, 'reassigned')
+  assert.equal(dto.outcomeLabelKey, 'driverAssignmentHistory.reassigned')
+  assert.equal(dto.currentLegStatus, 'assigned')
 })
 
 test('driver trip view sorting is operationally useful', () => {

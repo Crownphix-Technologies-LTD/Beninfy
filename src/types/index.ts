@@ -15,6 +15,10 @@ export interface PriceRange {
 
 export interface Route {
   id: RouteId
+  canonicalRouteId?: RouteId
+  pricingRouteId?: RouteId
+  sourceRouteId?: RouteId
+  direction?: 'explicit' | 'reverse_projection'
   from: string
   fromCode: string
   fromCountry: string

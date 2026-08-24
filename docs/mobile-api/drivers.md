@@ -30,16 +30,17 @@ This relationship is implemented by the mobile auth foundation. Driver requests 
 
 ## Implemented Endpoints
 
-| Endpoint                                                  | Status      | Notes                                                  |
-| --------------------------------------------------------- | ----------- | ------------------------------------------------------ |
-| `GET /api/mobile/v1/driver/profile`                       | IMPLEMENTED | Derived from authenticated driver principal.           |
-| `PATCH /api/mobile/v1/driver/availability`                | IMPLEMENTED | Driver-controlled persistent duty status.              |
-| `GET /api/mobile/v1/driver/trips?view=...`                | IMPLEMENTED | Assigned `BookingLeg` records with mobile views.       |
-| `GET /api/mobile/v1/driver/trips/:bookingLegId`           | IMPLEMENTED | Own assigned leg only.                                 |
-| `POST /api/mobile/v1/driver/trips/:bookingLegId/actions`  | IMPLEMENTED | Production server-authoritative lifecycle transitions. |
-| `POST /api/mobile/v1/driver/presence`                     | IMPLEMENTED | Realtime online/offline presence snapshot.             |
-| `GET /api/mobile/v1/driver/tracking`                      | IMPLEMENTED | Driver tracking eligibility snapshot.                  |
-| `POST /api/mobile/v1/driver/trips/:bookingLegId/location` | IMPLEMENTED | Trip-scoped latest location publishing.                |
+| Endpoint                                                  | Status      | Notes                                                   |
+| --------------------------------------------------------- | ----------- | ------------------------------------------------------- |
+| `GET /api/mobile/v1/driver/profile`                       | IMPLEMENTED | Derived from authenticated driver principal.            |
+| `PATCH /api/mobile/v1/driver/availability`                | IMPLEMENTED | Driver-controlled persistent duty status.               |
+| `GET /api/mobile/v1/driver/trips?view=...`                | IMPLEMENTED | Assigned `BookingLeg` records with mobile views.        |
+| `GET /api/mobile/v1/driver/trip-history`                  | IMPLEMENTED | Assignment history ledger for the authenticated driver. |
+| `GET /api/mobile/v1/driver/trips/:bookingLegId`           | IMPLEMENTED | Own assigned leg only.                                  |
+| `POST /api/mobile/v1/driver/trips/:bookingLegId/actions`  | IMPLEMENTED | Production server-authoritative lifecycle transitions.  |
+| `POST /api/mobile/v1/driver/presence`                     | IMPLEMENTED | Realtime online/offline presence snapshot.              |
+| `GET /api/mobile/v1/driver/tracking`                      | IMPLEMENTED | Driver tracking eligibility snapshot.                   |
+| `POST /api/mobile/v1/driver/trips/:bookingLegId/location` | IMPLEMENTED | Trip-scoped latest location publishing.                 |
 
 ## Persistent Duty Status
 
@@ -129,7 +130,7 @@ Completed/history:
 
 - `completed`
 
-Released/declined/cancelled assignments are not retained in the current driver's personal history because the leg is returned to operations and `driverId` is cleared.
+`GET /driver/trips` remains a current-assignment/current-trip view. It is scoped to the current `BookingLeg.driverId`.
 
 Sorting:
 
@@ -138,6 +139,64 @@ Sorting:
 - completed: newest completed first, then newest departure
 
 Pagination remains cursor based with `limit` and `cursor`. Cursor values are scoped to the selected `view`.
+
+## Assignment History
+
+`GET /api/mobile/v1/driver/trip-history`
+
+This endpoint reads `DriverTripAssignmentHistory`, an append-only assignment ledger. It returns only records for the authenticated driver. Flutter must not send `driverId`.
+
+Query params:
+
+- `limit`: optional, default `20`, max `50`
+- `cursor`: optional, from `pageInfo.nextCursor`
+
+Response:
+
+```json
+{
+  "history": [
+    {
+      "assignmentHistoryId": "history-id",
+      "bookingLegId": "leg-id",
+      "bookingId": "booking-id",
+      "reference": "booking-id",
+      "routeDisplayName": "Lagos to Cotonou",
+      "direction": "outbound",
+      "from": "Lagos",
+      "to": "Cotonou",
+      "departureDate": "2026-08-18T09:00:00.000Z",
+      "outcome": "declined",
+      "outcomeLabelKey": "driverAssignmentHistory.declined",
+      "currentLegStatus": "unassigned",
+      "assignedAt": "2026-08-18T08:00:00.000Z",
+      "acceptedAt": null,
+      "declinedAt": "2026-08-18T08:05:00.000Z",
+      "releasedAt": "2026-08-18T08:05:00.000Z",
+      "completedAt": null,
+      "releaseReason": "driver_declined",
+      "releaseSource": "driver"
+    }
+  ],
+  "pageInfo": {
+    "hasMore": false,
+    "nextCursor": null,
+    "limit": 20
+  }
+}
+```
+
+Outcomes:
+
+- `current`: the assignment is still open in the ledger.
+- `completed`: the driver's assignment reached trip completion.
+- `declined`: the driver declined the assignment.
+- `released`: the driver or operations released the assignment without assigning a replacement in the same operation.
+- `reassigned`: operations moved the leg away from this driver to another driver.
+
+Driver decline/release may clear current `BookingLeg.driverId` and return the leg to operations as `unassigned`. That does not necessarily mean the customer booking or `BookingLeg` was globally cancelled. Flutter should display the assignment outcome, not infer trip cancellation.
+
+Complete historical coverage begins from migration `20260818140000_driver_assignment_history`. The migration backfills only currently assigned driver/leg pairs because previously released drivers cannot be proven from the current `BookingLeg.driverId` alone.
 
 Implemented actions are documented in `trip-lifecycle.md`. Driver `decline` and `cancel` release the driver assignment and return the leg to operations; they do not cancel the customer booking.
 

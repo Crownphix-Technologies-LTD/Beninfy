@@ -4,6 +4,12 @@ import { prisma } from '@/lib/prisma'
 import type { Route } from '@/types'
 
 type PrismaClientLike = typeof prisma | Prisma.TransactionClient
+type PublicRoute = Route & {
+  canonicalRouteId: string
+  pricingRouteId: string
+  sourceRouteId: string
+  direction: 'explicit' | 'reverse_projection'
+}
 
 export async function ensureDefaultRoutes() {
   const existing = await prisma.route.findMany({ select: { id: true } })
@@ -53,9 +59,13 @@ export function toDomainRoute(route: {
   descriptionFr: string | null
   borderCrossings: string[]
   borderFeeIds?: string[] | null
-}): Route {
+}): PublicRoute {
   return {
     id: route.id,
+    canonicalRouteId: route.id,
+    pricingRouteId: route.id,
+    sourceRouteId: route.id,
+    direction: 'explicit',
     from: route.from,
     fromCode: route.fromCode ?? '',
     fromCountry: route.fromCountry ?? '',
@@ -78,10 +88,19 @@ export async function getPublicRoutes(client: PrismaClientLike = prisma) {
     where: { available: true },
     orderBy: [{ popular: 'desc' }, { from: 'asc' }, { to: 'asc' }],
   })
-  return routes.map(toDomainRoute)
+  return withReverseRouteProjections(routes.map(toDomainRoute))
 }
 
 export async function getPublicRouteById(routeId: string, client: PrismaClientLike = prisma) {
+  const synthetic = parseReverseProjectionRouteId(routeId)
+  if (synthetic) {
+    const source = await client.route.findFirst({
+      where: { id: synthetic.sourceRouteId, available: true },
+    })
+    if (!source) return null
+    return reverseRouteProjection(toDomainRoute(source))
+  }
+
   const route = await client.route.findFirst({ where: { id: routeId, available: true } })
   return route ? toDomainRoute(route) : null
 }
@@ -92,16 +111,23 @@ export async function findPublicRouteByCities(
   client: PrismaClientLike = prisma
 ) {
   const [fromCity, toCity] = [from.trim(), to.trim()]
-  const route = await client.route.findFirst({
+  const explicit = await client.route.findFirst({
     where: {
       available: true,
-      OR: [
-        { from: { equals: fromCity, mode: 'insensitive' }, to: { equals: toCity, mode: 'insensitive' } },
-        { from: { equals: toCity, mode: 'insensitive' }, to: { equals: fromCity, mode: 'insensitive' } },
-      ],
+      from: { equals: fromCity, mode: 'insensitive' },
+      to: { equals: toCity, mode: 'insensitive' },
     },
   })
-  return route ? toDomainRoute(route) : null
+  if (explicit) return toDomainRoute(explicit)
+
+  const reverseSource = await client.route.findFirst({
+    where: {
+      available: true,
+      from: { equals: toCity, mode: 'insensitive' },
+      to: { equals: fromCity, mode: 'insensitive' },
+    },
+  })
+  return reverseSource ? reverseRouteProjection(toDomainRoute(reverseSource)) : null
 }
 
 export async function getBookingLocations(client: PrismaClientLike = prisma) {
@@ -120,4 +146,72 @@ export async function getBookingLocations(client: PrismaClientLike = prisma) {
     })
   }
   return [...byCity.values()].sort((a, b) => a.city.localeCompare(b.city))
+}
+
+export function routePricingId(route: Pick<Route, 'id' | 'pricingRouteId'>) {
+  return route.pricingRouteId ?? route.id
+}
+
+export function routeCanonicalId(route: Pick<Route, 'id' | 'canonicalRouteId'>) {
+  return route.canonicalRouteId ?? route.id
+}
+
+export function reverseProjectionRouteId(sourceRouteId: string) {
+  return `${sourceRouteId}__reverse`
+}
+
+export function parseReverseProjectionRouteId(routeId: string) {
+  const suffix = '__reverse'
+  if (!routeId.endsWith(suffix)) return null
+  return { sourceRouteId: routeId.slice(0, -suffix.length) }
+}
+
+function cityPairKey(from: string, to: string) {
+  return `${from.trim().toLowerCase()}→${to.trim().toLowerCase()}`
+}
+
+function withReverseRouteProjections(routes: PublicRoute[]) {
+  const explicitPairs = new Set(routes.map((route) => cityPairKey(route.from, route.to)))
+  const projections: PublicRoute[] = []
+
+  for (const route of routes) {
+    if (explicitPairs.has(cityPairKey(route.to, route.from))) continue
+    projections.push(reverseRouteProjection(route))
+  }
+
+  return [...routes, ...projections]
+}
+
+function reverseRouteProjection(route: PublicRoute): PublicRoute {
+  return {
+    ...route,
+    id: reverseProjectionRouteId(route.id),
+    canonicalRouteId: routeCanonicalId(route),
+    pricingRouteId: routePricingId(route),
+    sourceRouteId: route.id,
+    direction: 'reverse_projection',
+    from: route.to,
+    fromCode: route.toCode,
+    fromCountry: route.toCountry,
+    to: route.from,
+    toCode: route.fromCode,
+    toCountry: route.fromCountry,
+    popular: false,
+    description: `Private Beninfy transport from ${route.to} to ${route.from} on the supported ${route.from} to ${route.to} corridor.`,
+    descriptionFr: `Transport privé Beninfy de ${route.to} à ${route.from} sur le corridor pris en charge ${route.from} - ${route.to}.`,
+    borderCrossings: reverseBorderCrossings(route.borderCrossings),
+    borderFeeIds: [...(route.borderFeeIds ?? [])].reverse(),
+  }
+}
+
+export function reverseBorderCrossings(crossings: string[]) {
+  return [...crossings].reverse().map(reverseBorderCrossingLabel)
+}
+
+function reverseBorderCrossingLabel(label: string) {
+  const separator = label.includes('–') ? '–' : label.includes('-') ? '-' : null
+  if (!separator) return label
+  const parts = label.split(separator).map((part) => part.trim())
+  if (parts.length !== 2 || !parts[0] || !parts[1]) return label
+  return `${parts[1]}${separator}${parts[0]}`
 }

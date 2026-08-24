@@ -18,27 +18,27 @@ Flutter must never send authoritative `driverId`, `userId`, trip ownership, paym
 
 ## Capability Matrix
 
-| Capability | Backend status | Provider dependency | Mobile API | Flutter-ready | Remaining blocker |
-| --- | --- | --- | --- | --- | --- |
-| Driver login | FULLY WIRED | None beyond DB/auth secret | `POST /auth/login` | Yes | Needs linked active driver user |
-| Token refresh/logout | FULLY WIRED | None beyond DB/auth secret | `/auth/refresh`, `/auth/logout`, `/auth/logout-all` | Yes | None |
-| Driver profile | FULLY WIRED | None | `GET /driver/profile` | Yes | None |
-| Duty status | FULLY WIRED | None | `PATCH /driver/availability` | Yes | Drivers cannot self-set `inactive` |
-| Presence | FULLY WIRED | Realtime token secret; Supabase client presence in Flutter | `POST /driver/presence` | Yes | Flutter must join presence channel |
-| Trip lists | FULLY WIRED | None | `GET /driver/trips?view=...` | Yes | Needs assigned trips |
-| Trip detail | FULLY WIRED | None | `GET /driver/trips/:bookingLegId` | Yes | None |
-| Lifecycle actions | FULLY WIRED | None | `POST /driver/trips/:bookingLegId/actions` | Yes | Booking must be confirmed |
-| Decline/release | FULLY WIRED | None | same actions endpoint | Yes | Reassignment remains operations responsibility |
-| Location publishing | FULLY WIRED | Supabase Broadcast optional | `POST /driver/trips/:bookingLegId/location` | Yes | Requires active lifecycle state |
-| Journey intelligence | PROVIDER-CONFIG REQUIRED | `GOOGLE_ROUTES_API_KEY` | tracking DTO | Yes, null-safe | Optional ETA/polyline only |
-| Supabase Broadcast | PROVIDER-CONFIG REQUIRED | `SUPABASE_URL`, `SUPABASE_SECRET_KEY` | tracking/chat realtime metadata | Yes, REST fallback works | Configure provider for realtime |
-| Supabase Presence | PARTIAL | Flutter must use Supabase Presence with backend token metadata | `POST /driver/presence` | Yes | Backend persists presence snapshot; provider join is client-side |
-| Chat | FULLY WIRED | Supabase Broadcast optional | `/trips/:bookingLegId/chat*` | Yes | Chat send only during active assigned lifecycle |
-| Push notifications | PROVIDER-CONFIG REQUIRED | `PUSH_PROVIDER=fcm`, Firebase env | `/devices/push-token`, `/notifications` | Yes | Provider setup needed for external push |
-| Support config | FULLY WIRED | Support env names | `GET /config/support` | Yes | Configure channels |
-| Driver history | FULLY WIRED for completed assigned legs | None | `GET /driver/trips?view=completed` | Yes | Declined/released assignments are not retained as driver history |
-| Incident reporting | MISSING | N/A | None | No | Future approved scope |
-| Earnings/payouts | NOT REQUIRED | N/A | None | No | Out of current scope |
+| Capability           | Backend status           | Provider dependency                                            | Mobile API                                          | Flutter-ready            | Remaining blocker                                                           |
+| -------------------- | ------------------------ | -------------------------------------------------------------- | --------------------------------------------------- | ------------------------ | --------------------------------------------------------------------------- |
+| Driver login         | FULLY WIRED              | None beyond DB/auth secret                                     | `POST /auth/login`                                  | Yes                      | Needs linked active driver user                                             |
+| Token refresh/logout | FULLY WIRED              | None beyond DB/auth secret                                     | `/auth/refresh`, `/auth/logout`, `/auth/logout-all` | Yes                      | None                                                                        |
+| Driver profile       | FULLY WIRED              | None                                                           | `GET /driver/profile`                               | Yes                      | None                                                                        |
+| Duty status          | FULLY WIRED              | None                                                           | `PATCH /driver/availability`                        | Yes                      | Drivers cannot self-set `inactive`                                          |
+| Presence             | FULLY WIRED              | Realtime token secret; Supabase client presence in Flutter     | `POST /driver/presence`                             | Yes                      | Flutter must join presence channel                                          |
+| Trip lists           | FULLY WIRED              | None                                                           | `GET /driver/trips?view=...`                        | Yes                      | Needs assigned trips                                                        |
+| Trip detail          | FULLY WIRED              | None                                                           | `GET /driver/trips/:bookingLegId`                   | Yes                      | None                                                                        |
+| Lifecycle actions    | FULLY WIRED              | None                                                           | `POST /driver/trips/:bookingLegId/actions`          | Yes                      | Booking must be confirmed                                                   |
+| Decline/release      | FULLY WIRED              | None                                                           | same actions endpoint                               | Yes                      | Reassignment remains operations responsibility                              |
+| Location publishing  | FULLY WIRED              | Supabase Broadcast optional                                    | `POST /driver/trips/:bookingLegId/location`         | Yes                      | Requires active lifecycle state                                             |
+| Journey intelligence | PROVIDER-CONFIG REQUIRED | `GOOGLE_ROUTES_API_KEY`                                        | tracking DTO                                        | Yes, null-safe           | Optional ETA/polyline only                                                  |
+| Supabase Broadcast   | PROVIDER-CONFIG REQUIRED | `SUPABASE_URL`, `SUPABASE_SECRET_KEY`                          | tracking/chat realtime metadata                     | Yes, REST fallback works | Configure provider for realtime                                             |
+| Supabase Presence    | PARTIAL                  | Flutter must use Supabase Presence with backend token metadata | `POST /driver/presence`                             | Yes                      | Backend persists presence snapshot; provider join is client-side            |
+| Chat                 | FULLY WIRED              | Supabase Broadcast optional                                    | `/trips/:bookingLegId/chat*`                        | Yes                      | Chat send only during active assigned lifecycle                             |
+| Push notifications   | PROVIDER-CONFIG REQUIRED | `PUSH_PROVIDER=fcm`, Firebase env                              | `/devices/push-token`, `/notifications`             | Yes                      | Provider setup needed for external push                                     |
+| Support config       | FULLY WIRED              | Support env names                                              | `GET /config/support`                               | Yes                      | Configure channels                                                          |
+| Driver history       | FULLY WIRED              | None                                                           | `GET /driver/trip-history`                          | Yes                      | Complete released/declined history starts from assignment-history migration |
+| Incident reporting   | MISSING                  | N/A                                                            | None                                                | No                       | Future approved scope                                                       |
+| Earnings/payouts     | NOT REQUIRED             | N/A                                                            | None                                                | No                       | Out of current scope                                                        |
 
 ## Auth
 
@@ -132,6 +132,42 @@ Success:
 ```json
 { "ok": true }
 ```
+
+### `POST /api/mobile/v1/driver/change-password`
+
+Auth: Driver bearer token.
+
+Request:
+
+```json
+{
+  "currentPassword": "old-password",
+  "newPassword": "new-strong-password",
+  "device": {
+    "deviceId": "ios-device-id",
+    "platform": "ios"
+  }
+}
+```
+
+Success:
+
+```json
+{
+  "ok": true,
+  "session": {
+    "replaced": true,
+    "otherSessionsRevoked": true
+  },
+  "driver": "<DriverProfileDto>",
+  "accessToken": "...",
+  "refreshToken": "...",
+  "tokenType": "Bearer",
+  "expiresIn": 900
+}
+```
+
+Previous mobile sessions are revoked. Flutter must replace local tokens immediately.
 
 ### `GET /api/mobile/v1/auth/me`
 
@@ -305,6 +341,51 @@ Success:
 
 Ownership: returns only legs assigned to the authenticated driver.
 
+## Assignment History
+
+### `GET /api/mobile/v1/driver/trip-history?limit=20&cursor=<historyId>`
+
+Auth: Driver bearer token.
+
+This is separate from trip lists. It returns assignment-history records for the authenticated driver, including assignments that are no longer current because the leg was declined, released, or reassigned.
+
+Success:
+
+```json
+{
+  "history": [
+    {
+      "assignmentHistoryId": "historyId",
+      "bookingLegId": "bookingLegId",
+      "bookingId": "bookingId",
+      "reference": "BFY-XXXXXXXX",
+      "routeDisplayName": "Lagos to Cotonou",
+      "direction": "outbound",
+      "from": "Lagos",
+      "to": "Cotonou",
+      "departureDate": "ISO date",
+      "outcome": "current|completed|declined|released|reassigned",
+      "outcomeLabelKey": "driverAssignmentHistory.completed",
+      "currentLegStatus": "assigned|unassigned|completed|cancelled|...",
+      "assignedAt": "ISO date",
+      "acceptedAt": "ISO date or null",
+      "declinedAt": "ISO date or null",
+      "releasedAt": "ISO date or null",
+      "completedAt": "ISO date or null",
+      "releaseReason": "structured reason or null",
+      "releaseSource": "driver|admin|customer|system|null"
+    }
+  ],
+  "pageInfo": {
+    "hasMore": false,
+    "nextCursor": null,
+    "limit": 20
+  }
+}
+```
+
+Flutter must show these as assignment outcomes. A `released` or `reassigned` record does not necessarily mean the passenger trip was cancelled.
+
 ## Trip Detail
 
 ### `GET /api/mobile/v1/driver/trips/:bookingLegId`
@@ -318,7 +399,17 @@ Success:
   "trip": {
     "...summaryFields": "same as DriverTripSummaryDto",
     "passengers": 2,
-    "travelers": [],
+    "travelers": [
+      { "sequence": 1, "fullName": "Ada Passenger", "isLead": true },
+      { "sequence": 2, "fullName": "Second Passenger", "isLead": false }
+    ],
+    "passengerManifest": {
+      "totalPassengers": 2,
+      "entries": [
+        { "sequence": 1, "fullName": "Ada Passenger", "isLead": true },
+        { "sequence": 2, "fullName": "Second Passenger", "isLead": false }
+      ]
+    },
     "specialRequirements": "Call on arrival or null",
     "timestamps": {
       "assignedAt": "ISO date or null",
@@ -335,7 +426,7 @@ Success:
 }
 ```
 
-No customer email, customer payment state, payment provider references, coupon data, or internal admin notes are returned.
+No customer email, traveler email, passport number, nationality, customer payment state, payment provider references, coupon data, or internal admin notes are returned. The summary-level `passengerPhone` is the lead operational contact.
 
 ## Lifecycle Actions
 
@@ -367,17 +458,17 @@ Success:
 
 Authoritative transitions:
 
-| Action | From | To | Notes |
-| --- | --- | --- | --- |
-| `accept` | `assigned` | `assigned` | Records accepted timestamp; idempotent after accept |
-| `decline` | `assigned`, `driver_en_route` | `unassigned` | Releases driver; does not cancel customer booking |
-| `start_en_route` | `assigned` | `driver_en_route` | Requires assigned fleet vehicle |
-| `dispatch` | `assigned` | `driver_en_route` | Backward-compatible alias |
-| `arrive` | `driver_en_route`, `dispatched` | `driver_arrived` | Idempotent once arrived |
-| `passenger_onboard` | `driver_arrived` | `passenger_onboard` | Requires vehicle |
-| `start_trip` | `passenger_onboard` | `in_progress` | Requires vehicle |
-| `complete` | `in_progress` | `completed` | Booking completes only when every round-trip leg is completed |
-| `cancel` | `assigned`, `driver_en_route`, `driver_arrived` | `unassigned` | Releases driver; does not cancel customer booking |
+| Action              | From                                            | To                  | Notes                                                         |
+| ------------------- | ----------------------------------------------- | ------------------- | ------------------------------------------------------------- |
+| `accept`            | `assigned`                                      | `assigned`          | Records accepted timestamp; idempotent after accept           |
+| `decline`           | `assigned`, `driver_en_route`                   | `unassigned`        | Releases driver; does not cancel customer booking             |
+| `start_en_route`    | `assigned`                                      | `driver_en_route`   | Requires assigned fleet vehicle                               |
+| `dispatch`          | `assigned`                                      | `driver_en_route`   | Backward-compatible alias                                     |
+| `arrive`            | `driver_en_route`, `dispatched`                 | `driver_arrived`    | Idempotent once arrived                                       |
+| `passenger_onboard` | `driver_arrived`                                | `passenger_onboard` | Requires vehicle                                              |
+| `start_trip`        | `passenger_onboard`                             | `in_progress`       | Requires vehicle                                              |
+| `complete`          | `in_progress`                                   | `completed`         | Booking completes only when every round-trip leg is completed |
+| `cancel`            | `assigned`, `driver_en_route`, `driver_arrived` | `unassigned`        | Releases driver; does not cancel customer booking             |
 
 Rules:
 
@@ -717,25 +808,25 @@ Do not hardcode support contacts in Flutter.
 
 Names only:
 
-| Variable | Driver relevance | Local status in `.env` | Production need |
-| --- | --- | --- | --- |
-| `DATABASE_URL` | DB | PRESENT | PRODUCTION REQUIRED |
-| `DIRECT_URL` | migrations | PRESENT | PRODUCTION REQUIRED |
-| `MOBILE_AUTH_SECRET` | mobile token signing | MISSING locally; `AUTH_SECRET` fallback present | PRODUCTION REQUIRED |
-| `AUTH_SECRET` | fallback token secret | PRESENT | PRODUCTION REQUIRED |
-| `REALTIME_AUTH_SECRET` | realtime/presence token signing | MISSING locally; auth fallback works | PRODUCTION REQUIRED |
-| `SUPABASE_URL` | Broadcast/storage server URL | MISSING locally; `NEXT_PUBLIC_SUPABASE_URL` present | PRODUCTION REQUIRED for realtime/storage |
-| `SUPABASE_SECRET_KEY` | Broadcast/storage server key | MISSING locally | PRODUCTION REQUIRED for realtime/storage |
-| `GOOGLE_ROUTES_API_KEY` | ETA/polyline | MISSING locally | OPTIONAL but production recommended |
-| `PUSH_PROVIDER` | push provider selection | MISSING locally | PRODUCTION REQUIRED for push |
-| `FIREBASE_PROJECT_ID` | FCM | MISSING locally | PRODUCTION REQUIRED for push |
-| `FIREBASE_CLIENT_EMAIL` | FCM | MISSING locally | PRODUCTION REQUIRED for push |
-| `FIREBASE_PRIVATE_KEY` | FCM | MISSING locally | PRODUCTION REQUIRED for push |
-| `WORKER_SECRET` / `CRON_SECRET` | worker auth | MISSING locally | PRODUCTION REQUIRED |
-| `SMTP_*` | email notifications | PRESENT locally for listed SMTP names | PRODUCTION REQUIRED for email |
-| `SUPPORT_EMAIL` | support config | MISSING locally; SMTP sender fallback exists | PRODUCTION REQUIRED |
-| `SUPPORT_PHONE` | support config | MISSING locally | PRODUCTION REQUIRED |
-| `SUPPORT_WHATSAPP` | support config | MISSING locally | PRODUCTION REQUIRED |
+| Variable                        | Driver relevance                | Local status in `.env`                              | Production need                          |
+| ------------------------------- | ------------------------------- | --------------------------------------------------- | ---------------------------------------- |
+| `DATABASE_URL`                  | DB                              | PRESENT                                             | PRODUCTION REQUIRED                      |
+| `DIRECT_URL`                    | migrations                      | PRESENT                                             | PRODUCTION REQUIRED                      |
+| `MOBILE_AUTH_SECRET`            | mobile token signing            | MISSING locally; `AUTH_SECRET` fallback present     | PRODUCTION REQUIRED                      |
+| `AUTH_SECRET`                   | fallback token secret           | PRESENT                                             | PRODUCTION REQUIRED                      |
+| `REALTIME_AUTH_SECRET`          | realtime/presence token signing | MISSING locally; auth fallback works                | PRODUCTION REQUIRED                      |
+| `SUPABASE_URL`                  | Broadcast/storage server URL    | MISSING locally; `NEXT_PUBLIC_SUPABASE_URL` present | PRODUCTION REQUIRED for realtime/storage |
+| `SUPABASE_SECRET_KEY`           | Broadcast/storage server key    | MISSING locally                                     | PRODUCTION REQUIRED for realtime/storage |
+| `GOOGLE_ROUTES_API_KEY`         | ETA/polyline                    | MISSING locally                                     | OPTIONAL but production recommended      |
+| `PUSH_PROVIDER`                 | push provider selection         | MISSING locally                                     | PRODUCTION REQUIRED for push             |
+| `FIREBASE_PROJECT_ID`           | FCM                             | MISSING locally                                     | PRODUCTION REQUIRED for push             |
+| `FIREBASE_CLIENT_EMAIL`         | FCM                             | MISSING locally                                     | PRODUCTION REQUIRED for push             |
+| `FIREBASE_PRIVATE_KEY`          | FCM                             | MISSING locally                                     | PRODUCTION REQUIRED for push             |
+| `WORKER_SECRET` / `CRON_SECRET` | worker auth                     | MISSING locally                                     | PRODUCTION REQUIRED                      |
+| `SMTP_*`                        | email notifications             | PRESENT locally for listed SMTP names               | PRODUCTION REQUIRED for email            |
+| `SUPPORT_EMAIL`                 | support config                  | MISSING locally; SMTP sender fallback exists        | PRODUCTION REQUIRED                      |
+| `SUPPORT_PHONE`                 | support config                  | MISSING locally                                     | PRODUCTION REQUIRED                      |
+| `SUPPORT_WHATSAPP`              | support config                  | MISSING locally                                     | PRODUCTION REQUIRED                      |
 
 ## Gap Classification
 

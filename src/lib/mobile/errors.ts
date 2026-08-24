@@ -58,6 +58,9 @@ export type MobileErrorCode =
   | 'INVALID_TRIP_DATES'
   | 'INVALID_RETURN_DATE'
   | 'PICKUP_AREA_REQUIRED'
+  | 'PICKUP_OUTSIDE_ROUTE_CITY'
+  | 'DESTINATION_OUTSIDE_ROUTE_CITY'
+  | 'LOCATION_CITY_UNRESOLVED'
   | 'PLACE_NOT_FOUND'
   | 'PLACE_SEARCH_FAILED'
   | 'PLACE_SEARCH_UNAVAILABLE'
@@ -238,6 +241,12 @@ export function mobileErrorFromCode(code: MobileErrorCode, message?: string) {
       return mobileError(code, message ?? 'Return date is required for round trips', 400)
     case 'PICKUP_AREA_REQUIRED':
       return mobileError(code, message ?? 'Pickup fare zone is required for this route', 400)
+    case 'PICKUP_OUTSIDE_ROUTE_CITY':
+      return mobileError(code, message ?? 'Pickup location is outside the selected route city', 400)
+    case 'DESTINATION_OUTSIDE_ROUTE_CITY':
+      return mobileError(code, message ?? 'Destination is outside the selected route city', 400)
+    case 'LOCATION_CITY_UNRESOLVED':
+      return mobileError(code, message ?? 'Location city could not be resolved', 400)
     case 'PLACE_NOT_FOUND':
       return mobileError(code, message ?? 'Place not found', 404)
     case 'PLACE_SEARCH_FAILED':

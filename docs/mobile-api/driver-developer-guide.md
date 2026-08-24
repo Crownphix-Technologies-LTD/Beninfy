@@ -12,10 +12,13 @@ Current driver mobile API base:
 - `GET /auth/me`
 - `POST /auth/refresh`
 - `POST /auth/logout`
+- `POST /auth/logout-all`
 - `GET /driver/home`
 - `GET /driver/profile`
+- `POST /driver/change-password`
 - `PATCH /driver/availability`
 - `GET /driver/trips?view=all|upcoming|active|completed`
+- `GET /driver/trip-history`
 - `GET /driver/trips/:bookingLegId`
 - `POST /driver/trips/:bookingLegId/actions`
 - `POST /driver/presence`
@@ -66,7 +69,8 @@ Dashboard flow:
 4. Toggle duty with `PATCH /driver/availability`.
 5. Load `GET /driver/trips?view=active`.
 6. Load `GET /driver/trips?view=upcoming`.
-7. History uses `GET /driver/trips?view=completed`.
+7. Current completed assigned trips use `GET /driver/trips?view=completed`.
+8. Assignment history uses `GET /driver/trip-history`.
 
 `GET /driver/profile` remains available for profile refresh. Driver profile includes `image` and `avatarUrl` when the linked user account has an image.
 
@@ -132,6 +136,57 @@ Allowed current actions:
 
 The backend decides whether each transition is valid. The app must handle standardized error codes such as `INVALID_TRANSITION`, `TRIP_NOT_FOUND`, `TRIP_NOT_ASSIGNED`, `DRIVER_INACTIVE`, and `VEHICLE_NOT_ASSIGNED`.
 
+## Assignment History
+
+Implemented:
+
+`GET /api/mobile/v1/driver/trip-history?limit=20&cursor=...`
+
+Response:
+
+```json
+{
+  "history": [
+    {
+      "assignmentHistoryId": "history-id",
+      "bookingLegId": "leg-id",
+      "bookingId": "booking-id",
+      "reference": "booking-id",
+      "routeDisplayName": "Lagos to Cotonou",
+      "direction": "outbound",
+      "from": "Lagos",
+      "to": "Cotonou",
+      "departureDate": "2026-08-18T09:00:00.000Z",
+      "outcome": "reassigned",
+      "outcomeLabelKey": "driverAssignmentHistory.reassigned",
+      "currentLegStatus": "assigned",
+      "assignedAt": "2026-08-18T08:00:00.000Z",
+      "acceptedAt": null,
+      "declinedAt": null,
+      "releasedAt": "2026-08-18T08:20:00.000Z",
+      "completedAt": null,
+      "releaseReason": "reassigned",
+      "releaseSource": "admin"
+    }
+  ],
+  "pageInfo": {
+    "hasMore": false,
+    "nextCursor": null,
+    "limit": 20
+  }
+}
+```
+
+Supported outcomes:
+
+- `current`
+- `completed`
+- `declined`
+- `released`
+- `reassigned`
+
+Flutter should render these as assignment outcomes. A `released` or `reassigned` record means this driver's assignment ended; it does not necessarily mean the customer trip was cancelled.
+
 ## Navigation To Pickup
 
 Driver trip summary and detail DTOs include:
@@ -147,8 +202,61 @@ Driver trip summary and detail DTOs include:
 
 Flutter should hand off pickup/dropoff coordinates to the platform navigation app or maps SDK. Do not derive ETA, polyline, or route pricing locally. Backend journey intelligence is optional and remains server-authoritative when exposed.
 
+## Passenger Manifest
+
+Driver trip detail includes a privacy-filtered operational manifest:
+
+```json
+{
+  "passengers": 2,
+  "travelers": [
+    { "sequence": 1, "fullName": "Ada Passenger", "isLead": true },
+    { "sequence": 2, "fullName": "Second Passenger", "isLead": false }
+  ],
+  "passengerManifest": {
+    "totalPassengers": 2,
+    "entries": [
+      { "sequence": 1, "fullName": "Ada Passenger", "isLead": true },
+      { "sequence": 2, "fullName": "Second Passenger", "isLead": false }
+    ]
+  }
+}
+```
+
+The driver manifest intentionally excludes passenger email addresses, passport numbers, nationality fields, payment details, coupon metadata, provider references, and internal admin notes. The summary-level `passengerPhone` remains the lead contact already approved for operational calling.
+
+## Driver Security
+
+Authenticated password change is implemented at:
+
+```text
+POST /api/mobile/v1/driver/change-password
+```
+
+Request:
+
+```json
+{
+  "currentPassword": "old-password",
+  "newPassword": "new-strong-password",
+  "device": {
+    "deviceId": "ios-device-id",
+    "platform": "ios"
+  }
+}
+```
+
+Success revokes previous mobile sessions, creates a replacement Driver session for the current device, and returns `driver`, `accessToken`, `refreshToken`, `tokenType`, and `expiresIn`. Errors include `CURRENT_PASSWORD_INVALID`, `PASSWORD_INVALID`, `DRIVER_NOT_LINKED`, and `DRIVER_INACTIVE`.
+
+## Offline Behavior
+
+Flutter may cache read-only Driver Home, trip summaries, trip detail, assignment history, notification list, and support config for display while offline. Cached records must be marked visually stale by the app and refreshed when connectivity returns.
+
+Driver lifecycle actions, location publishing, chat sending, notification read receipts, duty changes, and password changes require a live backend response. Flutter must not replay stale cached lifecycle actions or locally mark a trip progressed without the authoritative API response.
+
 ## Not Yet Available
 
 - Driver earnings
+- Driver document upload/download contracts
 
 Prisma models are not API contracts. Use the DTOs and docs in this directory as the source of truth.

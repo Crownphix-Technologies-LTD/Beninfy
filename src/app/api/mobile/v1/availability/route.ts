@@ -15,10 +15,15 @@ export async function POST(req: Request) {
     })
 
   const body = await req.json().catch(() => null)
-  if (!body || typeof body !== 'object') return mobileValidationError('Invalid availability request')
+  if (!body || typeof body !== 'object')
+    return mobileValidationError('Invalid availability request')
 
   const result = await calculateMobileAvailability(body)
-  if (!result.ok) return mobileErrorFromCode(result.code, result.message)
+  if (!result.ok) {
+    if (result.details !== undefined)
+      return mobileError(result.code, result.message, 400, result.details)
+    return mobileErrorFromCode(result.code, result.message)
+  }
 
   return Response.json(result.data)
 }

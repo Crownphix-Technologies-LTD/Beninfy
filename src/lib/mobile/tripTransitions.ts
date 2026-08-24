@@ -3,6 +3,12 @@ import { writeAuditLog } from '@/lib/auditLog'
 import type { MobileErrorCode } from '@/lib/mobile/errors'
 import type { MobilePrincipal } from '@/lib/mobile/auth'
 import { notifyTripLifecyclePush } from '@/lib/mobile/notifications'
+import {
+  markDriverAssignmentAccepted,
+  markDriverAssignmentCompleted,
+  markDriverAssignmentDeclined,
+  markDriverAssignmentReleased,
+} from '@/lib/mobile/driverAssignmentHistory'
 import { prisma } from '@/lib/prisma'
 import {
   DRIVER_ACTION_TRANSITIONS,
@@ -190,6 +196,40 @@ export async function applyDriverTripAction({
       })
 
       if (changed.count !== 1) return { changed: false as const, completedBooking: false }
+
+      if (action === 'accept') {
+        await markDriverAssignmentAccepted({
+          tx,
+          bookingLegId: leg.id,
+          driverId: principal.driverId!,
+          acceptedAt: now,
+        })
+      } else if (action === 'decline') {
+        await markDriverAssignmentDeclined({
+          tx,
+          bookingLegId: leg.id,
+          driverId: principal.driverId!,
+          declinedAt: now,
+          releaseReason: reasonCode,
+        })
+      } else if (action === 'cancel') {
+        await markDriverAssignmentReleased({
+          tx,
+          bookingLegId: leg.id,
+          driverId: principal.driverId!,
+          releasedAt: now,
+          releaseReason: reasonCode ?? 'driver_cancelled',
+          releaseSource: 'driver',
+        })
+      } else if (transition.nextStatus === 'completed') {
+        await markDriverAssignmentCompleted({
+          tx,
+          bookingLegId: leg.id,
+          driverId: principal.driverId!,
+          completedAt: now,
+        })
+      }
+
       const completedBooking =
         transition.nextStatus === 'completed'
           ? await syncBookingCompletion(leg.bookingId, tx)

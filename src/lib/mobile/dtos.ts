@@ -16,6 +16,11 @@ import {
 import { type MobileOnboardingDto, toMobileOnboardingDto } from '@/lib/mobile/onboarding'
 import { classifyDriverTripView, type DriverTripView } from '@/lib/mobile/driverOperations'
 import {
+  driverAssignmentOutcome,
+  driverAssignmentOutcomeLabelKey,
+  type DriverAssignmentHistoryOutcome,
+} from '@/lib/mobile/driverAssignmentHistory'
+import {
   toJourneyIntelligenceDto,
   type JourneyIntelligenceDto,
 } from '@/lib/mobile/journeyIntelligence'
@@ -137,9 +142,21 @@ export type DriverTripSummaryDto = {
   vehicle: FleetVehicleDto | null
 }
 
+export type DriverPassengerManifestEntryDto = {
+  sequence: number
+  fullName: string
+  isLead: boolean
+}
+
+export type DriverPassengerManifestDto = {
+  totalPassengers: number
+  entries: DriverPassengerManifestEntryDto[]
+}
+
 export type DriverTripDetailDto = DriverTripSummaryDto & {
   passengers: number
-  travelers: unknown
+  travelers: DriverPassengerManifestEntryDto[]
+  passengerManifest: DriverPassengerManifestDto
   specialRequirements: string | null
   timestamps: {
     assignedAt: string | null
@@ -152,6 +169,28 @@ export type DriverTripDetailDto = DriverTripSummaryDto & {
     completedAt: string | null
     cancelledAt: string | null
   }
+}
+
+export type DriverAssignmentHistoryDto = {
+  assignmentHistoryId: string
+  bookingLegId: string
+  bookingId: string
+  reference: string
+  routeDisplayName: string
+  direction: string
+  from: string
+  to: string
+  departureDate: string
+  outcome: DriverAssignmentHistoryOutcome
+  outcomeLabelKey: string
+  currentLegStatus: MobileBookingLegStatus
+  assignedAt: string
+  acceptedAt: string | null
+  declinedAt: string | null
+  releasedAt: string | null
+  completedAt: string | null
+  releaseReason: string | null
+  releaseSource: string | null
 }
 
 export type DriverHomeDto = {
@@ -219,6 +258,53 @@ function toIso(value: Dateish) {
 
 function displayReference(id: string) {
   return `BFY-${id.slice(-8).toUpperCase()}`
+}
+
+function manifestEntriesFromTravelers(input: unknown): DriverPassengerManifestEntryDto[] {
+  if (!Array.isArray(input)) return []
+  const entries = input
+    .map((traveler, index) => {
+      if (!traveler || typeof traveler !== 'object') return null
+      const record = traveler as Record<string, unknown>
+      const fullName =
+        typeof record.fullName === 'string'
+          ? record.fullName.trim()
+          : typeof record.name === 'string'
+            ? record.name.trim()
+            : ''
+      if (!fullName) return null
+      const rawSequence = Number(record.sequence)
+      return {
+        sequence: Number.isInteger(rawSequence) && rawSequence > 0 ? rawSequence : index + 1,
+        fullName,
+        isLead: record.lead === true || record.isLead === true,
+      }
+    })
+    .filter((entry): entry is DriverPassengerManifestEntryDto => Boolean(entry))
+    .sort((left, right) => left.sequence - right.sequence)
+  if (entries.length > 0 && !entries.some((entry) => entry.isLead)) {
+    entries[0] = { ...entries[0], isLead: true }
+  }
+  return entries
+}
+
+function toDriverPassengerManifest(input: {
+  totalPassengers: number
+  travelers: unknown
+  passengerName: string | null
+}): DriverPassengerManifestDto {
+  const entries = manifestEntriesFromTravelers(input.travelers)
+  if (entries.length === 0 && input.passengerName?.trim()) {
+    entries.push({
+      sequence: 1,
+      fullName: input.passengerName.trim(),
+      isLead: true,
+    })
+  }
+  return {
+    totalPassengers: input.totalPassengers,
+    entries,
+  }
 }
 
 function normalizeTripType(value: string): 'one-way' | 'round-trip' {
@@ -499,10 +585,16 @@ export function toDriverTripDetailDto(
     }
   }
 ): DriverTripDetailDto {
+  const passengerManifest = toDriverPassengerManifest({
+    totalPassengers: leg.booking.passengers,
+    travelers: leg.booking.travelers,
+    passengerName: leg.booking.passengerName,
+  })
   return {
     ...toDriverTripSummaryDto(leg),
     passengers: leg.booking.passengers,
-    travelers: leg.booking.travelers,
+    travelers: passengerManifest.entries,
+    passengerManifest,
     specialRequirements: leg.booking.specialRequirements,
     timestamps: {
       assignedAt: leg.assignedAt ? toIso(leg.assignedAt) : null,
@@ -515,6 +607,52 @@ export function toDriverTripDetailDto(
       completedAt: leg.completedAt ? toIso(leg.completedAt) : null,
       cancelledAt: leg.cancelledAt ? toIso(leg.cancelledAt) : null,
     },
+  }
+}
+
+export function toDriverAssignmentHistoryDto(record: {
+  id: string
+  bookingLegId: string
+  driverId: string
+  assignedAt: Dateish
+  acceptedAt?: Dateish | null
+  declinedAt?: Dateish | null
+  releasedAt?: Dateish | null
+  completedAt?: Dateish | null
+  supersededAt?: Dateish | null
+  releaseReason?: string | null
+  releaseSource?: string | null
+  bookingLeg: {
+    id: string
+    bookingId: string
+    direction: string
+    from: string
+    to: string
+    departureDate: Dateish
+    status: string
+  }
+}): DriverAssignmentHistoryDto {
+  const outcome = driverAssignmentOutcome(record)
+  return {
+    assignmentHistoryId: record.id,
+    bookingLegId: record.bookingLegId,
+    bookingId: record.bookingLeg.bookingId,
+    reference: displayReference(record.bookingLeg.bookingId),
+    routeDisplayName: `${record.bookingLeg.from} to ${record.bookingLeg.to}`,
+    direction: record.bookingLeg.direction,
+    from: record.bookingLeg.from,
+    to: record.bookingLeg.to,
+    departureDate: toIso(record.bookingLeg.departureDate),
+    outcome,
+    outcomeLabelKey: driverAssignmentOutcomeLabelKey(outcome),
+    currentLegStatus: record.bookingLeg.status as MobileBookingLegStatus,
+    assignedAt: toIso(record.assignedAt),
+    acceptedAt: record.acceptedAt ? toIso(record.acceptedAt) : null,
+    declinedAt: record.declinedAt ? toIso(record.declinedAt) : null,
+    releasedAt: record.releasedAt ? toIso(record.releasedAt) : null,
+    completedAt: record.completedAt ? toIso(record.completedAt) : null,
+    releaseReason: record.releaseReason ?? null,
+    releaseSource: record.releaseSource ?? null,
   }
 }
 

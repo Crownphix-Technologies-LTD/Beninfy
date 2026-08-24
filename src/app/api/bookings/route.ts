@@ -6,10 +6,11 @@ import { auth } from '@/lib/auth'
 import { requireCustomer } from '@/lib/customer'
 import { isAdminRole } from '@/lib/roles'
 import { prisma } from '@/lib/prisma'
-import { requiresLagosPickupArea } from '@/data/pricing'
 import { vehicles as catalogVehicles } from '@/data/vehicles'
 import { calculateBookingPricing } from '@/lib/bookingPricing'
-import { findPublicRouteByCities } from '@/lib/routeCatalog'
+import { findPublicRouteByCities, routePricingId } from '@/lib/routeCatalog'
+import { requiresPickupAreaForRoute } from '@/lib/mobile/bookingDiscovery'
+import { validateRouteLocationBoundaries } from '@/lib/mobile/routeLocationBoundary'
 import {
   assertFleetVehicleAvailable,
   assertVehicleTypeAvailable,
@@ -55,9 +56,18 @@ const createSchema = z.object({
   pickupAddress: z.string().trim().max(240).optional(),
   pickupLatitude: z.number().min(-90).max(90).optional().nullable(),
   pickupLongitude: z.number().min(-180).max(180).optional().nullable(),
+  pickupCity: z.string().trim().max(80).optional().nullable(),
+  pickupCountry: z.string().trim().max(80).optional().nullable(),
+  pickupCountryCode: z.string().trim().max(3).optional().nullable(),
   dropoffAddress: z.string().trim().max(240).optional(),
   dropoffLatitude: z.number().min(-90).max(90).optional().nullable(),
   dropoffLongitude: z.number().min(-180).max(180).optional().nullable(),
+  dropoffCity: z.string().trim().max(80).optional().nullable(),
+  dropoffCountry: z.string().trim().max(80).optional().nullable(),
+  dropoffCountryCode: z.string().trim().max(3).optional().nullable(),
+  destinationCity: z.string().trim().max(80).optional().nullable(),
+  destinationCountry: z.string().trim().max(80).optional().nullable(),
+  destinationCountryCode: z.string().trim().max(3).optional().nullable(),
   specialRequirements: z.string().trim().max(1000).optional(),
   pickupArea: z.enum(['mainland', 'island']).optional(),
   couponCode: z.string().trim().max(60).optional(),
@@ -174,7 +184,7 @@ export async function POST(req: Request) {
   const matchedRoute = await findPublicRouteByCities(data.from, data.to)
   if (
     matchedRoute &&
-    requiresLagosPickupArea(matchedRoute.id, vehicle.id, vehicle.name) &&
+    requiresPickupAreaForRoute(matchedRoute, vehicle.id, vehicle.name) &&
     !data.pickupArea
   ) {
     return NextResponse.json(
@@ -184,6 +194,25 @@ export async function POST(req: Request) {
   }
   if (!matchedRoute) {
     return NextResponse.json({ error: 'This route is not available for booking' }, { status: 400 })
+  }
+  const boundary = validateRouteLocationBoundaries({
+    route: matchedRoute,
+    pickup: {
+      city: data.pickupCity,
+      country: data.pickupCountry,
+      countryCode: data.pickupCountryCode,
+    },
+    destination: {
+      city: data.destinationCity ?? data.dropoffCity,
+      country: data.destinationCountry ?? data.dropoffCountry,
+      countryCode: data.destinationCountryCode ?? data.dropoffCountryCode,
+    },
+  })
+  if (!boundary.ok) {
+    return NextResponse.json(
+      { error: boundary.message, code: boundary.code, details: boundary.details },
+      { status: 400 }
+    )
   }
   const selectedFleetVehicle = data.fleetVehicleId
     ? await prisma.fleetVehicle.findUnique({
@@ -202,12 +231,14 @@ export async function POST(req: Request) {
   }
   const pricing = await calculateBookingPricing({
     routeId: matchedRoute.id,
+    pricingRouteId: routePricingId(matchedRoute),
     vehicleId: vehicle.id,
     vehicleName: vehicle.name,
     fleetVehicleId: selectedFleetVehicle?.id,
     fleetVehicleLabel: selectedFleetVehicle?.label,
     tripType: data.tripType,
     pickupArea: data.pickupArea,
+    pickupAreaRequired: requiresPickupAreaForRoute(matchedRoute, vehicle.id, vehicle.name),
   })
   if (!pricing.ok) {
     return NextResponse.json(

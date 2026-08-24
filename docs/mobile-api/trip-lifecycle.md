@@ -67,6 +67,26 @@ Driver `decline` and driver `cancel` do not cancel the customer booking. They re
 
 Customer/admin booking cancellation is separate and marks the booking and active legs as cancelled.
 
+## Driver Assignment History
+
+`BookingLeg.driverId` remains the source of truth for current assignment ownership. When a driver assignment is created, accepted, declined, released, reassigned, or completed, the backend also updates `DriverTripAssignmentHistory`.
+
+Flutter must not reconstruct driver history from audit logs or current `BookingLeg.driverId`. Use:
+
+```text
+GET /api/mobile/v1/driver/trip-history
+```
+
+This history endpoint returns driver-facing assignment outcomes:
+
+- `current`
+- `completed`
+- `declined`
+- `released`
+- `reassigned`
+
+Driver cancellation/release can clear the current driver assignment without globally cancelling the trip. The history outcome describes the driver's assignment, not the commercial booking state.
+
 ## Booking Completion
 
 One-way booking: completed when its only leg is completed.

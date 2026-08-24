@@ -53,4 +53,29 @@ Before creating a booking, Flutter should:
 
 The booking creation endpoint remains authoritative and can reject a stale quote if the selected vehicle becomes unavailable.
 
+Route matching is bidirectional for supported Beninfy corridors. Flutter may send the selected `routeId` from discovery or compatible `from`/`to` city fields, but the backend still resolves the authoritative corridor, price source, border fees, and availability. Flutter must not create local reverse routes.
+
+Booking creation repeats route city boundary validation. The final booking payload must include normalized place city/country fields matching the selected route:
+
+```json
+{
+  "pickupAddress": "Rue Bel Air, Cotonou",
+  "pickupLatitude": 6.3703,
+  "pickupLongitude": 2.3912,
+  "pickupCity": "Cotonou",
+  "pickupCountryCode": "BJ",
+  "dropoffAddress": "Lomé city centre",
+  "dropoffLatitude": 6.1725,
+  "dropoffLongitude": 1.2314,
+  "dropoffCity": "Lomé",
+  "dropoffCountryCode": "TG"
+}
+```
+
+Customer Flutter should localize:
+
+- `PICKUP_OUTSIDE_ROUTE_CITY`: "Your pickup location must be within {expectedCity}."
+- `DESTINATION_OUTSIDE_ROUTE_CITY`: "Your destination must be within {expectedCity}."
+- `LOCATION_CITY_UNRESOLVED`: ask the customer to search/select another location.
+
 Customer cancellation is whole-booking only in this phase. Partial return-leg cancellation after an outbound leg has completed is not supported.
