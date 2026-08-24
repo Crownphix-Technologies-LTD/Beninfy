@@ -62,6 +62,7 @@ import {
 } from '../src/lib/mobile/onboarding'
 import {
   calculateFareBreakdown,
+  mobileRoutesCatalogue,
   mobileMoney,
   normalizeDiscoverySelection,
   normalizeDiscoverySelectionForRoute,
@@ -1104,6 +1105,50 @@ test('public route catalogue synthesizes missing reverse corridors without dupli
   const explicitReverse = result.find((route) => route.from === 'Lomé' && route.to === 'Cotonou')
   assert.equal(explicitReverse?.id, 'lome-cotonou')
   assert.equal(explicitReverse?.direction, 'explicit')
+})
+
+test('mobile routes catalogue exposes bidirectional destination options from projections', async () => {
+  const rows = [
+    {
+      ...routes.find((route) => route.id === 'lagos-cotonou')!,
+      available: true,
+      borderFeeIds: ['nigeria-benin'],
+    },
+    {
+      ...routes.find((route) => route.id === 'cotonou-togo')!,
+      available: true,
+      borderFeeIds: ['benin-togo'],
+    },
+    {
+      ...routes.find((route) => route.id === 'togo-ghana')!,
+      available: true,
+      borderFeeIds: ['togo-ghana'],
+    },
+  ]
+  const client = {
+    route: {
+      findMany: async () => rows,
+    },
+  }
+
+  const catalogue = await mobileRoutesCatalogue(client as never)
+  const byId = new Map(catalogue.routes.map((route) => [route.id, route]))
+  const destinationsFrom = (city: string) =>
+    catalogue.routes
+      .filter((route) => route.origin.city === city)
+      .map((route) => route.destination.city)
+      .sort()
+
+  assert.equal(byId.get('lagos-cotonou')?.origin.city, 'Lagos')
+  assert.equal(byId.get('lagos-cotonou')?.destination.city, 'Cotonou')
+  assert.equal(byId.get(reverseProjectionRouteId('lagos-cotonou'))?.origin.city, 'Cotonou')
+  assert.equal(byId.get(reverseProjectionRouteId('lagos-cotonou'))?.destination.city, 'Lagos')
+  assert.equal(byId.get(reverseProjectionRouteId('lagos-cotonou'))?.pricingRouteId, 'lagos-cotonou')
+  assert.equal(byId.get(reverseProjectionRouteId('lagos-cotonou'))?.direction, 'reverse_projection')
+  assert.deepEqual(destinationsFrom('Lagos'), ['Cotonou'])
+  assert.deepEqual(destinationsFrom('Cotonou'), ['Lagos', 'Lomé'])
+  assert.deepEqual(destinationsFrom('Lomé'), ['Accra', 'Cotonou'])
+  assert.deepEqual(destinationsFrom('Accra'), ['Lomé'])
 })
 
 test('supported Beninfy corridors resolve in both directions with explicit reverse preferred', async () => {
