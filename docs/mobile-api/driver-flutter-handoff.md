@@ -235,7 +235,8 @@ Rules:
 - Driver can self-set only `available` or `off_duty`.
 - `inactive` is an operations/admin-controlled state.
 - Inactive drivers cannot authenticate or update availability.
-- Driver cannot go `off_duty` while assigned to an active trip.
+- `off_duty` drivers are not eligible for new assignments.
+- `off_duty` does not release existing assignments or block valid lifecycle actions on trips already assigned to the driver.
 - Presence does not mutate duty status.
 
 Errors:

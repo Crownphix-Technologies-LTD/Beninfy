@@ -80,6 +80,8 @@ import {
   routePricingId,
 } from '../src/lib/routeCatalog'
 import {
+  canDriverExecuteAssignedTrip,
+  canDriverReceiveNewAssignment,
   classifyDriverTripView,
   driverTripOrderByForView,
   driverTripWhereForView,
@@ -1609,6 +1611,60 @@ test('driver duty status allows only driver-controlled states', () => {
   assert.equal(isDriverDutyStatus('off_duty'), true)
   assert.equal(isDriverDutyStatus('inactive'), false)
   assert.equal(isDriverDutyStatus('online'), false)
+})
+
+test('driver duty separates new assignment eligibility from owned trip action eligibility', () => {
+  assert.equal(canDriverReceiveNewAssignment('available'), true)
+  assert.equal(canDriverReceiveNewAssignment('off_duty'), false)
+  assert.equal(canDriverReceiveNewAssignment('inactive'), false)
+
+  assert.equal(canDriverExecuteAssignedTrip('available'), true)
+  assert.equal(canDriverExecuteAssignedTrip('off_duty'), true)
+  assert.equal(canDriverExecuteAssignedTrip('inactive'), false)
+})
+
+test('off-duty assigned drivers still use authoritative lifecycle actions', () => {
+  const assigned = evaluateDriverTripTransition({
+    status: 'assigned',
+    action: 'start_en_route',
+    hasDriver: true,
+    hasFleetVehicle: true,
+    bookingStatus: 'confirmed',
+  })
+  assert.equal(canDriverExecuteAssignedTrip('off_duty'), true)
+  assert.equal(assigned.ok, true)
+  if (assigned.ok) assert.equal(assigned.nextStatus, 'driver_en_route')
+
+  const activeSequence = [
+    ['driver_en_route', 'arrive', 'driver_arrived'],
+    ['driver_arrived', 'passenger_onboard', 'passenger_onboard'],
+    ['passenger_onboard', 'start_trip', 'in_progress'],
+    ['in_progress', 'complete', 'completed'],
+  ] as const
+
+  for (const [status, action, nextStatus] of activeSequence) {
+    const result = evaluateDriverTripTransition({
+      status,
+      action,
+      hasDriver: true,
+      hasFleetVehicle: true,
+      bookingStatus: 'confirmed',
+    })
+    assert.equal(canDriverExecuteAssignedTrip('off_duty'), true)
+    assert.equal(result.ok, true)
+    if (result.ok) assert.equal(result.nextStatus, nextStatus)
+  }
+})
+
+test('off-duty assignment ownership remains visible in driver trip views', () => {
+  assert.deepEqual(driverTripWhereForView('driver1', 'upcoming'), {
+    driverId: 'driver1',
+    status: { in: ['assigned'] },
+  })
+  assert.deepEqual(driverTripWhereForView('driver1', 'active'), {
+    driverId: 'driver1',
+    status: { in: ['dispatched', 'driver_en_route', 'driver_arrived', 'passenger_onboard', 'in_progress'] },
+  })
 })
 
 test('driver trip view normalization is stable', () => {

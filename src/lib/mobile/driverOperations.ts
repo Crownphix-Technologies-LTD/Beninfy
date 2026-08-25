@@ -6,6 +6,8 @@ import type { MobilePrincipal } from '@/lib/mobile/auth'
 
 export const DRIVER_DUTY_STATUSES = ['available', 'off_duty'] as const
 export type DriverDutyStatus = (typeof DRIVER_DUTY_STATUSES)[number]
+export const DRIVER_NEW_ASSIGNMENT_STATUSES = ['available'] as const
+export const DRIVER_ASSIGNED_TRIP_ACTION_STATUSES = ['available', 'off_duty'] as const
 
 export const DRIVER_TRIP_VIEWS = ['all', 'upcoming', 'active', 'completed'] as const
 export type DriverTripView = (typeof DRIVER_TRIP_VIEWS)[number]
@@ -22,6 +24,22 @@ export const COMPLETED_DRIVER_TRIP_STATUSES = ['completed'] as const
 
 export function isDriverDutyStatus(value: unknown): value is DriverDutyStatus {
   return typeof value === 'string' && DRIVER_DUTY_STATUSES.includes(value as DriverDutyStatus)
+}
+
+export function canDriverReceiveNewAssignment(value: unknown) {
+  return (
+    typeof value === 'string' &&
+    DRIVER_NEW_ASSIGNMENT_STATUSES.includes(value as (typeof DRIVER_NEW_ASSIGNMENT_STATUSES)[number])
+  )
+}
+
+export function canDriverExecuteAssignedTrip(value: unknown) {
+  return (
+    typeof value === 'string' &&
+    DRIVER_ASSIGNED_TRIP_ACTION_STATUSES.includes(
+      value as (typeof DRIVER_ASSIGNED_TRIP_ACTION_STATUSES)[number]
+    )
+  )
 }
 
 export function normalizeDriverTripView(value: string | null | undefined) {
@@ -92,22 +110,6 @@ export async function updateDriverDutyStatus({
   if (!driver) return { ok: false as const, code: 'DRIVER_NOT_LINKED' as MobileErrorCode }
   if (driver.status === 'inactive') {
     return { ok: false as const, code: 'DRIVER_INACTIVE' as MobileErrorCode }
-  }
-
-  if (status === 'off_duty') {
-    const activeTripCount = await prisma.bookingLeg.count({
-      where: {
-        driverId: driver.id,
-        status: { in: [...ACTIVE_DRIVER_TRIP_STATUSES] },
-      },
-    })
-    if (activeTripCount > 0) {
-      return {
-        ok: false as const,
-        code: 'ACTIVE_TRIP_PREVENTS_OFF_DUTY' as MobileErrorCode,
-        details: { activeTripCount },
-      }
-    }
   }
 
   const changed = await prisma.driver.updateMany({

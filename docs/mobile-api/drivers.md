@@ -47,7 +47,7 @@ This relationship is implemented by the mobile auth foundation. Driver requests 
 `Driver.status` is the persistent operations duty state:
 
 - `available`: driver is eligible for new assignments and can execute assigned trips.
-- `off_duty`: driver is active but not eligible for new assignments.
+- `off_duty`: driver is active, not eligible for new assignments, and can continue executing trips already assigned to them.
 - `inactive`: admin/operations disabled state. Driver cannot self-reactivate.
 
 The driver app may only set:
@@ -64,15 +64,7 @@ or:
 
 Drivers cannot set `inactive`.
 
-If a driver currently has an active operational trip, setting `off_duty` returns `ACTIVE_TRIP_PREVENTS_OFF_DUTY`.
-
-Active operational states for this rule are:
-
-- `dispatched`
-- `driver_en_route`
-- `driver_arrived`
-- `passenger_onboard`
-- `in_progress`
+Setting `off_duty` does not release current assignments, cancel trips, clear `driverId`, reset lifecycle state, or hide assigned trips. It only removes the driver from new-assignment eligibility.
 
 ## Presence Is Separate
 
