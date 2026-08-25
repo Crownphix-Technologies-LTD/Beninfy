@@ -739,8 +739,8 @@ Success:
     {
       "id": "notificationId",
       "type": "trip.driver_assigned",
-      "title": "Driver assigned",
-      "body": "A Beninfy driver has been assigned to your trip.",
+      "title": "New trip assigned",
+      "body": "A new trip has been assigned to you.",
       "payload": {
         "type": "trip.driver_assigned",
         "version": 1,
@@ -762,6 +762,8 @@ Success:
 ```
 
 Driver app should route using `payload.type`, `payload.bookingId`, and `payload.bookingLegId`. Do not depend on screen names from the backend.
+
+Notification title/body are server-rendered and persisted. Driver notifications use driver-facing templates; Flutter must not reuse customer copy locally. Language resolution prefers the persisted user locale, then the active push-device language, then English. `trip.assignment_removed` is informational and non-actionable.
 
 Driver-relevant event types currently include:
 

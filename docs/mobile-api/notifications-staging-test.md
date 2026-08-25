@@ -31,10 +31,11 @@ Apply pending migrations in this order:
 15. Verify dedupe prevents duplicate notification records for the same event occurrence.
 16. Simulate an invalid-token provider response with a mock adapter/test.
 17. Verify the backend marks only that device token invalid.
-18. Register one English device and one French device.
-19. Verify notification language resolution prefers the latest active device language and falls back to English.
+18. Set the user's persisted locale to French, with no active push device, and verify the notification is stored in French.
+19. Register one English device and one French device. Verify notification language resolution prefers persisted user locale, then push-device language, then English.
 20. Log out from the app and unregister the device token.
 21. Verify future events for that user/app are `skipped_no_device` if no other active device exists.
+22. Verify driver `trip.driver_assigned` and `trip.completed` copy differs from customer copy.
 
 ## Expected Behavior
 

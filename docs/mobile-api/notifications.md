@@ -42,6 +42,14 @@ Rules:
 - Re-registration upserts by device/app or token/app to support token rotation.
 - Language supports `en` and `fr`; unsupported values fall back to English.
 
+Notification title/body are rendered on the server and persisted at event creation time. Language resolution uses:
+
+1. the authenticated user's persisted `User.locale` when set
+2. the latest active push device language for the matching app audience
+3. English
+
+Templates are audience-aware. Customer notifications keep customer-facing copy; driver notifications use driver-facing copy for audience-specific events such as `trip.driver_assigned` and `trip.completed`.
+
 Errors include:
 
 - `UNAUTHENTICATED`
@@ -132,6 +140,8 @@ Implemented event keys:
 - `trip.cancelled`
 
 Payloads are stable and machine-readable. They do not contain full Prisma records, secrets, provider metadata, or private driver details.
+
+`trip.assignment_removed` remains informational and non-actionable. It carries routing metadata only; Flutter must not infer lifecycle actions from it.
 
 ## Flutter Contract
 

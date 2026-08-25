@@ -30,6 +30,7 @@ import {
   normalizeNotificationLanguage,
   principalOwnsAppType,
   pushPayloadToData,
+  resolveNotificationLanguagePreference,
   templateFor,
   validatePushToken,
 } from '../src/lib/mobile/notifications'
@@ -590,8 +591,72 @@ test('push app ownership is derived from authenticated mobile principal', () => 
 test('notification localization resolves French and falls back to English', () => {
   assert.equal(normalizeNotificationLanguage('fr-BJ'), 'fr')
   assert.equal(normalizeNotificationLanguage('de'), 'en')
-  assert.equal(templateFor('trip.driver_arrived', 'fr')?.title, 'Chauffeur arrive')
-  assert.equal(templateFor('trip.driver_arrived', 'en')?.title, 'Driver arrived')
+  assert.equal(templateFor('trip.driver_arrived', 'fr', 'customer')?.title, 'Chauffeur arrive')
+  assert.equal(templateFor('trip.driver_arrived', 'en', 'customer')?.title, 'Driver arrived')
+})
+
+test('notification language prefers persisted user locale before push device language', () => {
+  assert.equal(
+    resolveNotificationLanguagePreference({
+      userLocale: 'fr',
+      deviceLanguage: null,
+    }),
+    'fr'
+  )
+  assert.equal(
+    resolveNotificationLanguagePreference({
+      userLocale: 'fr',
+      deviceLanguage: 'en',
+    }),
+    'fr'
+  )
+  assert.equal(
+    resolveNotificationLanguagePreference({
+      userLocale: null,
+      deviceLanguage: 'fr-BJ',
+    }),
+    'fr'
+  )
+  assert.equal(
+    resolveNotificationLanguagePreference({
+      userLocale: null,
+      deviceLanguage: null,
+    }),
+    'en'
+  )
+})
+
+test('notification templates are audience-specific where product copy differs', () => {
+  const customerAssigned = templateFor('trip.driver_assigned', 'en', 'customer')
+  const driverAssigned = templateFor('trip.driver_assigned', 'en', 'driver')
+  const driverAssignedFr = templateFor('trip.driver_assigned', 'fr', 'driver')
+  const customerCompleted = templateFor('trip.completed', 'en', 'customer')
+  const driverCompleted = templateFor('trip.completed', 'en', 'driver')
+  const driverCompletedFr = templateFor('trip.completed', 'fr', 'driver')
+
+  assert.equal(customerAssigned?.body, 'A Beninfy driver has been assigned to your trip.')
+  assert.equal(driverAssigned?.body, 'A new trip has been assigned to you.')
+  assert.equal(driverAssignedFr?.body, 'Un nouveau trajet vous a ete assigne.')
+  assert.notEqual(driverAssigned?.body, customerAssigned?.body)
+
+  assert.equal(customerCompleted?.body, 'Your Beninfy trip is complete. Thank you for travelling with us.')
+  assert.equal(driverCompleted?.body, 'Trip completed successfully.')
+  assert.equal(driverCompletedFr?.body, 'Trajet termine avec succes.')
+  assert.notEqual(driverCompleted?.body, customerCompleted?.body)
+})
+
+test('assignment removed notification remains non-actionable driver metadata', () => {
+  const template = templateFor('trip.assignment_removed', 'en', 'driver')
+  const data = pushPayloadToData({
+    type: 'trip.assignment_removed',
+    version: 1,
+    bookingId: 'booking1',
+    bookingLegId: 'leg1',
+  })
+
+  assert.equal(template?.body.includes('removed'), true)
+  assert.equal('action' in data, false)
+  assert.equal('allowedActions' in data, false)
 })
 
 test('push payload data remains stable and string-only', () => {
