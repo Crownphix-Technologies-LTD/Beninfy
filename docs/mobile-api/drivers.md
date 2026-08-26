@@ -28,6 +28,31 @@ model Driver {
 
 This relationship is implemented by the mobile auth foundation. Driver requests must never succeed simply because the client supplied a `driverId`.
 
+## Admin Driver Account Provisioning
+
+Drivers do not self-register in the Driver app. Operations provisions Driver app access from the Beninfy backoffice.
+
+Admin flow:
+
+1. Open Backoffice -> Drivers.
+2. Create a driver with full name, phone, login email, operational status, and supported operational fields.
+3. Leave `Initial password` blank to let the backend generate a strong temporary password, or enter an approved initial password that satisfies the mobile password policy.
+4. The backend creates a `User` with `role: "driver"`, stores only a bcrypt password hash, and links `Driver.userId`.
+5. The success banner shows the email and temporary password once. Share it securely out-of-band.
+6. The driver signs in through `POST /api/mobile/v1/auth/login` with `principalType: "DRIVER"`.
+7. The driver may change the password in the Driver app through `POST /api/mobile/v1/driver/change-password`.
+
+Existing Driver rows without a linked account show `No login` in the backoffice. Use the row action `Create Driver app login` to provision/link a login account. If a safe unlinked non-admin user already exists for the same email, the backend requires explicit admin confirmation before linking and can reset a one-time temporary password for handoff.
+
+Normal Driver reads never return plaintext passwords or password hashes. Temporary credentials are returned only in the create/provision response.
+
+Driver account auth state is separate from operational duty status:
+
+- `User.disabledAt`: disables authentication/session access.
+- `Driver.status`: controls transport operations availability.
+
+Forced first-login password change is not currently represented in schema. The Driver Security screen supports manual password change after first login.
+
 ## Implemented Endpoints
 
 | Endpoint                                                  | Status      | Notes                                                   |

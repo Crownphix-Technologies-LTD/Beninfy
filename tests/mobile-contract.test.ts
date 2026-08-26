@@ -138,6 +138,12 @@ import {
   driverAssignmentOutcomeLabelKey,
   pageDriverAssignmentHistoryRecords,
 } from '../src/lib/mobile/driverAssignmentHistory'
+import {
+  canLinkExistingUserToDriver,
+  generateDriverTemporaryPassword,
+  normalizeDriverLoginEmail,
+  sanitizeDriverForAdmin,
+} from '../src/lib/admin/driverProvisioning'
 
 test('driver transition blocks terminal trips', () => {
   const result = evaluateDriverTripTransition({
@@ -1084,6 +1090,68 @@ test('mobile password policy is stable for registration and reset', () => {
   assert.equal(validateMobilePassword('1234567'), false)
   assert.equal(validateMobilePassword('stronger-password'), true)
   assert.equal(validateMobilePassword('x'.repeat(101)), false)
+})
+
+test('admin driver provisioning normalizes login email and creates strong temporary passwords', () => {
+  assert.equal(normalizeDriverLoginEmail(' Driver@Test.COM '), 'driver@test.com')
+  assert.equal(normalizeDriverLoginEmail('   '), null)
+
+  const temporaryPassword = generateDriverTemporaryPassword()
+  assert.equal(validateMobilePassword(temporaryPassword), true)
+  assert.match(temporaryPassword, /^Bfy-[A-Za-z0-9_-]{16}$/)
+})
+
+test('admin driver DTO exposes login state but never password hash', () => {
+  const driver = sanitizeDriverForAdmin({
+    id: 'driver1',
+    userId: 'user1',
+    name: 'Driver One',
+    phone: '+22951019134',
+    email: 'driver@example.com',
+    status: 'available',
+    homeCity: 'Cotonou',
+    licenseNumber: 'LIC-1',
+    notes: null,
+    createdAt: new Date('2026-08-18T08:00:00.000Z'),
+    updatedAt: new Date('2026-08-18T08:00:00.000Z'),
+    user: {
+      id: 'user1',
+      email: 'driver@example.com',
+      role: 'driver',
+      disabledAt: null,
+    },
+  })
+
+  assert.equal(driver.loginAccount.exists, true)
+  assert.equal(driver.loginAccount.email, 'driver@example.com')
+  assert.equal(driver.loginAccount.role, 'driver')
+  assert.equal('hashedPassword' in driver, false)
+  assert.equal('temporaryPassword' in driver, false)
+})
+
+test('admin driver provisioning only links safe unassigned non-admin users', () => {
+  assert.equal(canLinkExistingUserToDriver({ role: 'user', disabledAt: null, driver: null }), true)
+  assert.equal(canLinkExistingUserToDriver({ role: 'driver', disabledAt: null, driver: null }), true)
+  assert.equal(canLinkExistingUserToDriver({ role: 'admin', disabledAt: null, driver: null }), false)
+  assert.equal(
+    canLinkExistingUserToDriver({ role: 'user', disabledAt: null, driver: { id: 'driver2' } }),
+    false
+  )
+})
+
+test('admin driver creation provisions mobile auth user and never stores plaintext password metadata', () => {
+  const createRoute = readFileSync('src/app/api/admin/drivers/route.ts', 'utf8')
+  const accountRoute = readFileSync('src/app/api/admin/drivers/[id]/account/route.ts', 'utf8')
+
+  assert.equal(createRoute.includes("role: 'driver'"), true)
+  assert.equal(createRoute.includes('hashedPassword'), true)
+  assert.equal(createRoute.includes('userId: user.id'), true)
+  assert.equal(createRoute.includes('temporaryPasswordReturned'), false)
+  assert.equal(accountRoute.includes("role: 'driver'"), true)
+  assert.equal(accountRoute.includes('hashedPassword'), true)
+  assert.equal(accountRoute.includes('temporaryPasswordReturned'), true)
+  assert.equal(accountRoute.includes('linkExistingUser'), true)
+  assert.equal(accountRoute.includes('canLinkExistingUserToDriver'), true)
 })
 
 test('mobile route discovery DTO is customer safe and stable', () => {

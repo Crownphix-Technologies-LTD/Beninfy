@@ -10,7 +10,7 @@ import {
   adminSecondaryButtonClass,
 } from '@/components/admin/AdminUI'
 
-export type FieldType = 'text' | 'number' | 'textarea' | 'boolean' | 'array' | 'select'
+export type FieldType = 'text' | 'password' | 'number' | 'textarea' | 'boolean' | 'array' | 'select'
 
 export interface FieldDef {
   name: string
@@ -44,6 +44,8 @@ interface Props<T extends { id: string }> {
   canEdit?: boolean
   canDelete?: boolean
   defaultValues?: Partial<Record<string, unknown>>
+  onSaveSuccess?: (data: Record<string, unknown>, mode: 'create' | 'edit') => void
+  rowActions?: (item: T, helpers: { reload: () => Promise<void>; setError: (message: string | null) => void }) => React.ReactNode
 }
 
 export function CrudTable<T extends { id: string } & Record<string, unknown>>({
@@ -59,6 +61,8 @@ export function CrudTable<T extends { id: string } & Record<string, unknown>>({
   canEdit = true,
   canDelete = true,
   defaultValues = {},
+  onSaveSuccess,
+  rowActions,
 }: Props<T>) {
   const [items, setItems] = useState<T[]>([])
   const [loading, setLoading] = useState(true)
@@ -199,6 +203,7 @@ export function CrudTable<T extends { id: string } & Record<string, unknown>>({
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(data.error ?? 'Save failed')
+      onSaveSuccess?.(data as Record<string, unknown>, open.mode)
       await load()
       close()
     } catch (e) {
@@ -282,6 +287,7 @@ export function CrudTable<T extends { id: string } & Record<string, unknown>>({
                           <span className="material-symbols-outlined text-[17px]">edit</span>
                         </button>
                       )}
+                      {rowActions?.(item, { reload: load, setError })}
                       {canDelete && itemUrl && (
                         <button onClick={() => handleDelete(item.id)} disabled={deleting === item.id} className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-red-100 text-red-600 transition-colors hover:bg-red-50 disabled:opacity-50" title="Delete">
                           <span className="material-symbols-outlined text-[17px]">{deleting === item.id ? 'more_horiz' : 'delete'}</span>
@@ -380,7 +386,7 @@ export function CrudTable<T extends { id: string } & Record<string, unknown>>({
                 <div key={f.name}>
                   <label className={adminLabelClass}>{f.label}{f.required && ' *'}</label>
                   <input
-                    type={f.type === 'number' ? 'number' : 'text'}
+                    type={f.type === 'number' ? 'number' : f.type === 'password' ? 'password' : 'text'}
                     value={String(value)}
                     onChange={(e) => setForm({ ...form, [f.name]: e.target.value })}
                     required={f.required && open.mode === 'create'}
