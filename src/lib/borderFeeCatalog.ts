@@ -85,16 +85,24 @@ export async function getPublicBorderFees(client: PrismaClientLike = prisma) {
 export async function calculateRouteBorderFeeNGN(input: {
   routeId: string
   tripType: TripType
+  passengerCount?: number
   client?: PrismaClientLike
 }) {
   const client = input.client ?? prisma
+  const passengerCount = Math.max(1, Math.trunc(input.passengerCount ?? 1))
   const route = await client.route.findFirst({
     where: { id: input.routeId, available: true },
     select: { id: true, borderFeeIds: true },
   })
   if (!route) return { ok: false as const, code: 'ROUTE_NOT_FOUND' as const, amountNGN: 0 }
   if (route.borderFeeIds.length === 0) {
-    return { ok: true as const, amountNGN: 0, borderFees: [] as BorderFee[] }
+    return {
+      ok: true as const,
+      amountNGN: 0,
+      perPassengerNGN: 0,
+      passengerCount,
+      borderFees: [] as BorderFee[],
+    }
   }
 
   const rows = await client.borderFee.findMany({ where: { id: { in: route.borderFeeIds } } })
@@ -109,14 +117,16 @@ export async function calculateRouteBorderFeeNGN(input: {
     }
   }
 
-  const amountNGN = route.borderFeeIds.reduce((sum, id) => {
+  const perPassengerNGN = route.borderFeeIds.reduce((sum, id) => {
     const fee = byId.get(id)!
     return sum + (input.tripType === 'round-trip' ? fee.feeRoundTripNGN : fee.feePerPersonNGN)
   }, 0)
 
   return {
     ok: true as const,
-    amountNGN,
+    amountNGN: perPassengerNGN * passengerCount,
+    perPassengerNGN,
+    passengerCount,
     borderFees: route.borderFeeIds.map((id) => toDomainBorderFee(byId.get(id)!)),
   }
 }

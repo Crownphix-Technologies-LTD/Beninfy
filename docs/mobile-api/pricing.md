@@ -17,7 +17,7 @@ Final price precedence:
 4. Vehicle/category default route price.
 5. Explicit legacy static fallback only when `ALLOW_LEGACY_STATIC_PRICING_FALLBACK=true`.
 
-Border fees come from `Route.borderFeeIds` and Prisma `BorderFee` records.
+Border fees come from `Route.borderFeeIds` and Prisma `BorderFee` records. They are per-passenger fees: the backend calculates `borderFeePerPassenger * passengers` and includes that total in the authoritative quote. Flutter must not multiply border fees locally.
 
 Bidirectional corridors:
 
@@ -73,6 +73,25 @@ Quote responses may include:
     "code": "lagos_mainland",
     "label": "Mainland",
     "pricingScope": "mainland"
+  },
+  "pricing": {
+    "borderFee": {
+      "perPassenger": {
+        "currency": "NGN",
+        "value": 5000,
+        "minorUnit": "kobo",
+        "minorValue": 500000,
+        "formatted": "NGN 5,000"
+      },
+      "passengerCount": 2,
+      "total": {
+        "currency": "NGN",
+        "value": 10000,
+        "minorUnit": "kobo",
+        "minorValue": 1000000,
+        "formatted": "NGN 10,000"
+      }
+    }
   }
 }
 ```
@@ -80,3 +99,5 @@ Quote responses may include:
 If `pickupFareZone` is `null`, Flutter should not show a Lagos fare-zone control. If it is present, Flutter may show it as read-only.
 
 Mobile must treat the quote as display/pre-payment guidance. Booking creation and payment settlement still recheck price and fleet availability on the backend.
+
+If passenger count changes, Flutter must request a fresh quote before booking/payment. The existing `pricing.borderFees` money field remains the total border fee for compatibility; prefer `pricing.borderFee` for the per-passenger breakdown.

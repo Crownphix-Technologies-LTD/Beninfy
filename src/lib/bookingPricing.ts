@@ -21,6 +21,7 @@ export type BookingPricingInput = {
   fleetVehicleLabel?: string | null
   pickupArea?: LagosPickupArea
   pickupAreaRequired?: boolean
+  passengerCount?: number
   client?: PrismaClientLike
 }
 
@@ -34,6 +35,8 @@ export type BookingPricingResult =
       oneWayDropoffFare: number
       legCount: number
       rideFareNGN: number
+      borderFeePerPassengerNGN: number
+      borderFeePassengerCount: number
       borderFeeNGN: number
       subtotalNGN: number
       source: 'database' | 'legacy-static'
@@ -53,6 +56,8 @@ export function calculateFareBreakdown(input: {
   oneWayDropoffFare: number
   tripType: TripType
   borderFeeNGN: number
+  borderFeePerPassengerNGN?: number
+  borderFeePassengerCount?: number
 }) {
   const legCount = input.tripType === 'round-trip' ? 2 : 1
   const rideFareNGN = input.oneWayDropoffFare * legCount
@@ -62,6 +67,8 @@ export function calculateFareBreakdown(input: {
     oneWayDropoffFare: input.oneWayDropoffFare,
     legCount,
     rideFareNGN,
+    borderFeePerPassengerNGN: input.borderFeePerPassengerNGN ?? input.borderFeeNGN,
+    borderFeePassengerCount: input.borderFeePassengerCount ?? 1,
     borderFeeNGN: input.borderFeeNGN,
     subtotalNGN,
   }
@@ -74,6 +81,7 @@ export async function calculateBookingPricing(
   const pricingRouteId = input.pricingRouteId ?? input.routeId
   const pricingTargetId = input.fleetVehicleId ?? input.vehicleId
   const pricingTargetName = input.fleetVehicleLabel ?? input.vehicleName
+  const passengerCount = Math.max(1, Math.trunc(input.passengerCount ?? 1))
   const needsPickupArea =
     input.pickupAreaRequired ??
     requiresLagosPickupArea(pricingRouteId, pricingTargetId, pricingTargetName)
@@ -126,6 +134,7 @@ export async function calculateBookingPricing(
   const borderFee = await calculateRouteBorderFeeNGN({
     routeId: pricingRouteId,
     tripType: input.tripType,
+    passengerCount,
     client,
   })
   if (!borderFee.ok) {
@@ -150,6 +159,8 @@ export async function calculateBookingPricing(
     ...calculateFareBreakdown({
       oneWayDropoffFare,
       tripType: input.tripType,
+      borderFeePerPassengerNGN: borderFee.perPassengerNGN,
+      borderFeePassengerCount: borderFee.passengerCount,
       borderFeeNGN: borderFee.amountNGN,
     }),
   }

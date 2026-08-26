@@ -233,6 +233,7 @@ export async function POST(req: Request) {
     fleetVehicleId: selectedFleetVehicle?.id,
     fleetVehicleLabel: selectedFleetVehicle?.label,
     tripType: data.tripType,
+    passengerCount: data.passengers,
     pickupArea: resolvedPickupArea,
     pickupAreaRequired: false,
   })

@@ -1214,11 +1214,15 @@ test('mobile fare breakdown doubles only ride fare for round trips', () => {
       oneWayDropoffFare: 180000,
       tripType: 'round-trip',
       borderFeeNGN: 40000,
+      borderFeePerPassengerNGN: 20000,
+      borderFeePassengerCount: 2,
     }),
     {
       oneWayDropoffFare: 180000,
       legCount: 2,
       rideFareNGN: 360000,
+      borderFeePerPassengerNGN: 20000,
+      borderFeePassengerCount: 2,
       borderFeeNGN: 40000,
       subtotalNGN: 400000,
     }
@@ -1726,8 +1730,8 @@ test('client-supplied Lagos pickup area does not control mobile quote pricing', 
         vehicleId: saloon.id,
         tripType: 'one-way',
         departureDate: '2026-08-20T09:00:00.000Z',
-        passengers: 1,
-        pickupCity,
+      passengers: 2,
+      pickupCity,
         pickupCountryCode: 'NG',
         destinationCity: 'Cotonou',
         destinationCountryCode: 'BJ',
@@ -1742,6 +1746,10 @@ test('client-supplied Lagos pickup area does not control mobile quote pricing', 
       assert.equal(result.data.quote.pickupArea, 'mainland')
       assert.equal(result.data.quote.pickupFareZone?.code, 'lagos_mainland')
       assert.equal(result.data.quote.pricing.oneWayDropoffFare.value, 160000)
+      assert.equal(result.data.quote.pricing.borderFee.perPassenger.value, 5000)
+      assert.equal(result.data.quote.pricing.borderFee.passengerCount, 2)
+      assert.equal(result.data.quote.pricing.borderFee.total.value, 10000)
+      assert.equal(result.data.quote.pricing.subtotal.value, 170000)
     }
   }
 })
@@ -1823,7 +1831,7 @@ test('border crossing labels reverse traversal direction', () => {
   ])
 })
 
-test('database border fees are summed from route borderFeeIds and round-trip values', async () => {
+test('database border fees are summed per passenger from route borderFeeIds', async () => {
   const client = {
     route: {
       findFirst: async () => ({
@@ -1873,14 +1881,93 @@ test('database border fees are summed from route borderFeeIds and round-trip val
     },
   }
 
+  const passengers = [1, 2, 4] as const
+
+  for (const passengerCount of passengers) {
+    const result = await calculateRouteBorderFeeNGN({
+      routeId: 'lagos-togo',
+      tripType: 'round-trip',
+      passengerCount,
+      client: client as never,
+    })
+
+    assert.equal(result.ok, true)
+    if (result.ok) {
+      assert.equal(result.perPassengerNGN, 30800)
+      assert.equal(result.passengerCount, passengerCount)
+      assert.equal(result.amountNGN, 30800 * passengerCount)
+    }
+  }
+})
+
+test('route border fees return zero when no border fee is configured', async () => {
+  const client = {
+    route: {
+      findFirst: async () => ({ id: 'local-route', borderFeeIds: [] }),
+    },
+    borderFee: {
+      findMany: async () => [],
+    },
+  }
+
   const result = await calculateRouteBorderFeeNGN({
-    routeId: 'lagos-togo',
-    tripType: 'round-trip',
+    routeId: 'local-route',
+    tripType: 'one-way',
+    passengerCount: 4,
     client: client as never,
   })
 
   assert.equal(result.ok, true)
-  if (result.ok) assert.equal(result.amountNGN, 30800)
+  if (result.ok) {
+    assert.equal(result.perPassengerNGN, 0)
+    assert.equal(result.passengerCount, 4)
+    assert.equal(result.amountNGN, 0)
+  }
+})
+
+test('explicit reverse route border fee configuration is authoritative', async () => {
+  const routeLookups: string[] = []
+  const client = {
+    route: {
+      findFirst: async (args: { where: { id: string } }) => {
+        routeLookups.push(args.where.id)
+        return { id: args.where.id, borderFeeIds: ['ghana-togo-reverse'] }
+      },
+    },
+    borderFee: {
+      findMany: async () => [
+        {
+          id: 'ghana-togo-reverse',
+          country: 'Togo',
+          countryFr: 'Togo',
+          border: 'Aflao reverse',
+          borderFr: 'Aflao reverse',
+          countries: ['Ghana', 'Togo'],
+          feePerPersonNGN: 7000,
+          feeRoundTripNGN: 14000,
+          popular: false,
+          icon: 'currency_exchange',
+          services: [],
+          servicesFr: [],
+          documents: [],
+          documentsFr: [],
+          tips: [],
+          tipsFr: [],
+        },
+      ],
+    },
+  }
+
+  const result = await calculateRouteBorderFeeNGN({
+    routeId: 'accra-lome',
+    tripType: 'one-way',
+    passengerCount: 2,
+    client: client as never,
+  })
+
+  assert.equal(result.ok, true)
+  if (result.ok) assert.equal(result.amountNGN, 14000)
+  assert.deepEqual(routeLookups, ['accra-lome'])
 })
 
 test('reverse projection pricing uses source corridor price without inventing a fare', async () => {
@@ -1929,6 +2016,7 @@ test('reverse projection pricing uses source corridor price without inventing a 
     vehicleId: 'saloon',
     vehicleName: 'Saloon',
     tripType: 'one-way',
+    passengerCount: 2,
     pickupAreaRequired: false,
     client: client as never,
   })
@@ -1937,7 +2025,9 @@ test('reverse projection pricing uses source corridor price without inventing a 
   if (result.ok) {
     assert.equal(result.routeId, reverseProjectionRouteId('lagos-cotonou'))
     assert.equal(result.oneWayDropoffFare, 180000)
-    assert.equal(result.subtotalNGN, 185000)
+    assert.equal(result.borderFeePerPassengerNGN, 5000)
+    assert.equal(result.borderFeePassengerCount, 2)
+    assert.equal(result.subtotalNGN, 190000)
   }
   assert.deepEqual(routePriceLookups, ['lagos-cotonou'])
   assert.deepEqual(borderFeeLookups, ['lagos-cotonou'])
@@ -1985,13 +2075,15 @@ test('booking pricing prefers fleet override before category price', async () =>
     fleetVehicleId: 'rav4-unit-1',
     fleetVehicleLabel: 'RAV4',
     tripType: 'one-way',
+    passengerCount: 4,
     client: client as never,
   })
 
   assert.equal(result.ok, true)
   if (result.ok) {
     assert.equal(result.oneWayDropoffFare, 375000)
-    assert.equal(result.subtotalNGN, 380000)
+    assert.equal(result.borderFeeNGN, 20000)
+    assert.equal(result.subtotalNGN, 395000)
     assert.equal(result.source, 'database')
   }
 })
@@ -2001,9 +2093,12 @@ test('quote and booking pricing share the same fare core', async () => {
     oneWayDropoffFare: 250000,
     tripType: 'round-trip',
     borderFeeNGN: 10000,
+    borderFeePerPassengerNGN: 5000,
+    borderFeePassengerCount: 2,
   })
 
   assert.equal(result.rideFareNGN, 500000)
+  assert.equal(result.borderFeePassengerCount, 2)
   assert.equal(result.subtotalNGN, 510000)
 })
 
