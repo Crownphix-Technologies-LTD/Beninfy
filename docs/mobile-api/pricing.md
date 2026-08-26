@@ -6,7 +6,7 @@ Implemented endpoints:
 
 | Endpoint                               | Status      | Notes                                                                                                                                   |
 | -------------------------------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `POST /api/mobile/v1/pricing/quote`    | IMPLEMENTED | Returns server-calculated quote for route, date, passengers, pickup area, vehicle/fleet choice. Requires completed customer onboarding. |
+| `POST /api/mobile/v1/pricing/quote`    | IMPLEMENTED | Returns server-calculated quote for route, date, passengers, backend-resolved pickup fare zone, vehicle/fleet choice. Requires completed customer onboarding. |
 | `POST /api/mobile/v1/coupons/validate` | IMPLEMENTED | Validates coupon against the same server-side quote payload. Requires completed customer onboarding.                                    |
 
 Final price precedence:
@@ -25,6 +25,7 @@ Bidirectional corridors:
 - Generated reverse projections reuse the source corridor `pricingRouteId`.
 - The backend, not Flutter, decides whether a selected route ID is explicit or generated.
 - Lagos pickup-area pricing applies only when the actual selected route origin is Lagos.
+- Flutter must not let the customer choose Mainland/Island. The backend resolves Lagos pickup fare zone from the selected pickup location metadata.
 
 Quote request JSON:
 
@@ -48,6 +49,34 @@ Quote request JSON:
 
 `routeId` is preferred. `from` and `to` are accepted for compatibility with the web booking shape.
 
-Route city boundary validation runs before pickup-area pricing and fare calculation. A quote is rejected if the normalized pickup city does not match the route origin or the normalized destination city does not match the route destination.
+`pickupArea` is accepted only for backwards compatibility and is not authoritative. Quote calculation uses the backend-resolved `pickupFareZone.pricingScope`.
+
+Route service-area validation runs before pickup-zone pricing and fare calculation. A quote is rejected if the pickup or destination location is outside the configured service area for the selected route endpoint, or if the country code conflicts.
+
+Quote responses may include:
+
+```json
+{
+  "pickupServiceArea": {
+    "serviceArea": { "city": "Lagos", "countryCode": "NG" },
+    "resolvedLocality": "Ikeja",
+    "resolvedCountry": null,
+    "resolvedCountryCode": "NG"
+  },
+  "destinationServiceArea": {
+    "serviceArea": { "city": "Cotonou", "countryCode": "BJ" },
+    "resolvedLocality": "Cotonou",
+    "resolvedCountry": null,
+    "resolvedCountryCode": "BJ"
+  },
+  "pickupFareZone": {
+    "code": "lagos_mainland",
+    "label": "Mainland",
+    "pricingScope": "mainland"
+  }
+}
+```
+
+If `pickupFareZone` is `null`, Flutter should not show a Lagos fare-zone control. If it is present, Flutter may show it as read-only.
 
 Mobile must treat the quote as display/pre-payment guidance. Booking creation and payment settlement still recheck price and fleet availability on the backend.

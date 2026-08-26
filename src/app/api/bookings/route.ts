@@ -9,8 +9,10 @@ import { prisma } from '@/lib/prisma'
 import { vehicles as catalogVehicles } from '@/data/vehicles'
 import { calculateBookingPricing } from '@/lib/bookingPricing'
 import { findPublicRouteByCities, routePricingId } from '@/lib/routeCatalog'
-import { requiresPickupAreaForRoute } from '@/lib/mobile/bookingDiscovery'
-import { validateRouteLocationBoundaries } from '@/lib/mobile/routeLocationBoundary'
+import {
+  resolvePickupFareZoneForRoute,
+  validateRouteLocationBoundaries,
+} from '@/lib/mobile/routeLocationBoundary'
 import {
   assertFleetVehicleAvailable,
   assertVehicleTypeAvailable,
@@ -182,16 +184,6 @@ export async function POST(req: Request) {
   }
 
   const matchedRoute = await findPublicRouteByCities(data.from, data.to)
-  if (
-    matchedRoute &&
-    requiresPickupAreaForRoute(matchedRoute, vehicle.id, vehicle.name) &&
-    !data.pickupArea
-  ) {
-    return NextResponse.json(
-      { error: 'Pickup area is required for Lagos saloon pricing' },
-      { status: 400 }
-    )
-  }
   if (!matchedRoute) {
     return NextResponse.json({ error: 'This route is not available for booking' }, { status: 400 })
   }
@@ -214,6 +206,10 @@ export async function POST(req: Request) {
       { status: 400 }
     )
   }
+  const resolvedPickupArea = resolvePickupFareZoneForRoute({
+    route: matchedRoute,
+    pickup: boundary.metadata.pickupServiceArea,
+  })?.pricingScope
   const selectedFleetVehicle = data.fleetVehicleId
     ? await prisma.fleetVehicle.findUnique({
         where: { id: data.fleetVehicleId },
@@ -237,8 +233,8 @@ export async function POST(req: Request) {
     fleetVehicleId: selectedFleetVehicle?.id,
     fleetVehicleLabel: selectedFleetVehicle?.label,
     tripType: data.tripType,
-    pickupArea: data.pickupArea,
-    pickupAreaRequired: requiresPickupAreaForRoute(matchedRoute, vehicle.id, vehicle.name),
+    pickupArea: resolvedPickupArea,
+    pickupAreaRequired: false,
   })
   if (!pricing.ok) {
     return NextResponse.json(

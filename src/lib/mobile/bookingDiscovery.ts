@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { vehicles as catalogVehicles } from '@/data/vehicles'
-import { requiresLagosPickupArea, type LagosPickupArea } from '@/data/pricing'
+import { requiresLagosPickupArea } from '@/data/pricing'
 import { calculateBookingPricing, calculateFareBreakdown } from '@/lib/bookingPricing'
 import { prisma } from '@/lib/prisma'
 import {
@@ -19,7 +19,9 @@ import {
 import { validateCouponCode, normalizeCouponCode } from '@/lib/coupons'
 import type { MobileErrorCode } from '@/lib/mobile/errors'
 import {
+  getRouteServiceArea,
   validateRouteLocationBoundaries,
+  type RouteServiceAreaValidationMetadata,
   type RouteLocationBoundaryInput,
 } from '@/lib/mobile/routeLocationBoundary'
 import type { Prisma } from '@prisma/client'
@@ -93,6 +95,8 @@ export function mobileMoney(value: number): MobileMoneyDto {
 }
 
 export function toMobileRouteDto(route: Route) {
+  const originServiceArea = getRouteServiceArea(route.from)
+  const destinationServiceArea = getRouteServiceArea(route.to)
   return {
     id: route.id,
     canonicalRouteId: route.canonicalRouteId ?? route.id,
@@ -102,11 +106,17 @@ export function toMobileRouteDto(route: Route) {
       city: route.from,
       code: route.fromCode,
       country: route.fromCountry,
+      serviceArea: originServiceArea
+        ? { city: originServiceArea.city, countryCode: originServiceArea.countryCode }
+        : null,
     },
     destination: {
       city: route.to,
       code: route.toCode,
       country: route.toCountry,
+      serviceArea: destinationServiceArea
+        ? { city: destinationServiceArea.city, countryCode: destinationServiceArea.countryCode }
+        : null,
     },
     displayName: `${route.from} to ${route.to}`,
     durationHours: route.durationHours,
@@ -183,6 +193,7 @@ export async function normalizeDiscoverySelection(
     departureDate: Date
     returnDate: Date | null
     datesToCheck: Date[]
+    locationMetadata: RouteServiceAreaValidationMetadata
   }>
 > {
   const parsed = mobileDiscoverySelectionSchema.safeParse(input)
@@ -213,7 +224,16 @@ export async function normalizeDiscoverySelection(
     }
   }
 
-  return normalizeDiscoverySelectionForRoute(selection, route)
+  const normalized = normalizeDiscoverySelectionForRoute(selection, route)
+  if (!normalized.ok) return normalized
+
+  return {
+    ok: true,
+    data: {
+      ...normalized.data,
+      locationMetadata: boundary.metadata,
+    },
+  }
 }
 
 export function normalizeDiscoverySelectionForRoute(
@@ -225,6 +245,7 @@ export function normalizeDiscoverySelectionForRoute(
   departureDate: Date
   returnDate: Date | null
   datesToCheck: Date[]
+  locationMetadata?: RouteServiceAreaValidationMetadata
 }> {
   const departureDateValue = selection.departureDate ?? selection.date
   if (!departureDateValue) {
@@ -322,6 +343,10 @@ export async function calculateMobileAvailability(
       departureDate: normalized.data.departureDate.toISOString(),
       returnDate: normalized.data.returnDate?.toISOString() ?? null,
       passengers: normalized.data.selection.passengers,
+      pickupServiceArea: normalized.data.locationMetadata.pickupServiceArea,
+      destinationServiceArea: normalized.data.locationMetadata.destinationServiceArea,
+      pickupResolvedLocality: normalized.data.locationMetadata.pickupServiceArea.resolvedLocality,
+      pickupFareZone: normalized.data.locationMetadata.pickupFareZone,
       availability,
       informationalOnly: true,
     },
@@ -356,19 +381,7 @@ export async function calculateMobileQuote(
       })
     : null
 
-  const pricingTargetId = fleetVehicle?.id ?? vehicle.id
-  const pricingTargetName = fleetVehicle?.label ?? vehicle.name
-
-  if (
-    requiresPickupAreaForRoute(normalized.data.route, pricingTargetId, pricingTargetName) &&
-    !normalized.data.selection.pickupArea
-  ) {
-    return {
-      ok: false as const,
-      code: 'PICKUP_AREA_REQUIRED' as const,
-      message: 'Pickup fare zone is required for this route and vehicle',
-    }
-  }
+  const resolvedPickupArea = normalized.data.locationMetadata.pickupFareZone?.pricingScope
 
   const fare = await calculateBookingPricing({
     routeId: normalized.data.route.id,
@@ -378,12 +391,8 @@ export async function calculateMobileQuote(
     fleetVehicleId: fleetVehicle?.id,
     fleetVehicleLabel: fleetVehicle?.label,
     tripType: normalized.data.selection.tripType,
-    pickupArea: normalized.data.selection.pickupArea as LagosPickupArea | undefined,
-    pickupAreaRequired: requiresPickupAreaForRoute(
-      normalized.data.route,
-      pricingTargetId,
-      pricingTargetName
-    ),
+    pickupArea: resolvedPickupArea,
+    pickupAreaRequired: false,
     client,
   })
 
@@ -424,7 +433,11 @@ export async function calculateMobileQuote(
         departureDate: normalized.data.departureDate.toISOString(),
         returnDate: normalized.data.returnDate?.toISOString() ?? null,
         passengers: normalized.data.selection.passengers,
-        pickupArea: normalized.data.selection.pickupArea ?? null,
+        pickupArea: resolvedPickupArea ?? null,
+        pickupServiceArea: normalized.data.locationMetadata.pickupServiceArea,
+        destinationServiceArea: normalized.data.locationMetadata.destinationServiceArea,
+        pickupResolvedLocality: normalized.data.locationMetadata.pickupServiceArea.resolvedLocality,
+        pickupFareZone: normalized.data.locationMetadata.pickupFareZone,
         currency: 'NGN' as const,
         pricing: {
           oneWayDropoffFare: mobileMoney(fare.oneWayDropoffFare),

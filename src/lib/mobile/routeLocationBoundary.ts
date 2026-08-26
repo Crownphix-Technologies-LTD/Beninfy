@@ -1,5 +1,6 @@
 import type { Route } from '@/types'
 import type { MobileErrorCode } from '@/lib/mobile/errors'
+import type { LagosPickupArea } from '@/data/pricing'
 
 export type RouteLocationBoundaryInput = {
   city?: string | null
@@ -8,7 +9,7 @@ export type RouteLocationBoundaryInput = {
 }
 
 export type RouteLocationBoundaryResult =
-  | { ok: true }
+  | { ok: true; metadata: RouteServiceAreaValidationMetadata }
   | {
       ok: false
       code: Extract<
@@ -27,6 +28,34 @@ export type RouteLocationBoundaryResult =
       }
     }
 
+export type RouteServiceArea = {
+  city: string
+  countryCode: string
+  acceptedLocalities: string[]
+}
+
+export type RouteServiceAreaMatch = {
+  serviceArea: {
+    city: string
+    countryCode: string
+  }
+  resolvedLocality: string
+  resolvedCountry: string | null
+  resolvedCountryCode: string | null
+}
+
+export type LagosPickupFareZone = {
+  code: 'lagos_mainland' | 'lagos_island'
+  label: 'Mainland' | 'Island'
+  pricingScope: LagosPickupArea
+}
+
+export type RouteServiceAreaValidationMetadata = {
+  pickupServiceArea: RouteServiceAreaMatch
+  destinationServiceArea: RouteServiceAreaMatch
+  pickupFareZone: LagosPickupFareZone | null
+}
+
 const CITY_ALIASES: Record<string, string> = {
   lome: 'lome',
   'porto novo': 'porto novo',
@@ -34,6 +63,77 @@ const CITY_ALIASES: Record<string, string> = {
   'porto-novo': 'porto novo',
   kpalime: 'kpalime',
 }
+
+const SERVICE_AREAS: Record<string, RouteServiceArea> = {
+  lagos: {
+    city: 'Lagos',
+    countryCode: 'NG',
+    acceptedLocalities: [
+      'Lagos',
+      'Ikeja',
+      'Lekki',
+      'Badagry',
+      'Ikorodu',
+      'Yaba',
+      'Surulere',
+      'Gbagada',
+      'Maryland',
+      'Victoria Island',
+      'Ikoyi',
+      'Lagos Island',
+      'Ajah',
+      'Oniru',
+      'Banana Island',
+    ],
+  },
+  cotonou: {
+    city: 'Cotonou',
+    countryCode: 'BJ',
+    acceptedLocalities: ['Cotonou'],
+  },
+  'porto novo': {
+    city: 'Porto Novo',
+    countryCode: 'BJ',
+    acceptedLocalities: ['Porto Novo', 'Porto-Novo'],
+  },
+  ouidah: {
+    city: 'Ouidah',
+    countryCode: 'BJ',
+    acceptedLocalities: ['Ouidah'],
+  },
+  lome: {
+    city: 'Lomé',
+    countryCode: 'TG',
+    acceptedLocalities: ['Lomé', 'Lome'],
+  },
+  aneho: {
+    city: 'Aneho',
+    countryCode: 'TG',
+    acceptedLocalities: ['Aneho', 'Aného'],
+  },
+  kpalime: {
+    city: 'Kpalime',
+    countryCode: 'TG',
+    acceptedLocalities: ['Kpalime', 'Kpalimé'],
+  },
+  accra: {
+    city: 'Accra',
+    countryCode: 'GH',
+    acceptedLocalities: ['Accra'],
+  },
+}
+
+const LAGOS_MAINLAND_LOCALITIES = new Set(
+  ['Lagos', 'Ikeja', 'Badagry', 'Yaba', 'Surulere', 'Gbagada', 'Maryland', 'Ikorodu'].map(
+    normalizeSupportedRouteCity
+  )
+)
+
+const LAGOS_ISLAND_LOCALITIES = new Set(
+  ['Lekki', 'Victoria Island', 'Ikoyi', 'Lagos Island', 'Ajah', 'Oniru', 'Banana Island'].map(
+    normalizeSupportedRouteCity
+  )
+)
 
 const ROUTE_COUNTRY_CODES: Record<string, string> = {
   nigeria: 'NG',
@@ -75,7 +175,12 @@ export function expectedCountryCodeForRouteCountry(country: string | null | unde
   return normalizeSupportedCountryCode({ country })
 }
 
-function locationMatchesRouteEndpoint({
+export function getRouteServiceArea(city: string | null | undefined) {
+  const key = normalizeSupportedRouteCity(city)
+  return SERVICE_AREAS[key] ?? null
+}
+
+export function locationMatchesRouteServiceArea({
   field,
   expectedCity,
   expectedCountry,
@@ -85,8 +190,11 @@ function locationMatchesRouteEndpoint({
   expectedCity: string
   expectedCountry: string | null
   location: RouteLocationBoundaryInput | null | undefined
-}): RouteLocationBoundaryResult {
-  const expectedCountryCode = expectedCountryCodeForRouteCountry(expectedCountry)
+}):
+  | { ok: true; match: RouteServiceAreaMatch }
+  | Extract<RouteLocationBoundaryResult, { ok: false }> {
+  const serviceArea = getRouteServiceArea(expectedCity)
+  const expectedCountryCode = serviceArea?.countryCode ?? expectedCountryCodeForRouteCountry(expectedCountry)
   const resolvedCity = location?.city?.trim() || null
   const resolvedCountry = location?.country?.trim() || null
   const resolvedCountryCode = normalizeSupportedCountryCode({
@@ -115,31 +223,79 @@ function locationMatchesRouteEndpoint({
     }
   }
 
-  if (normalizeSupportedRouteCity(resolvedCity) !== normalizeSupportedRouteCity(expectedCity)) {
-    return {
-      ok: false,
-      code: field === 'pickup' ? 'PICKUP_OUTSIDE_ROUTE_CITY' : 'DESTINATION_OUTSIDE_ROUTE_CITY',
-      message:
-        field === 'pickup'
-          ? `Your pickup location must be within ${expectedCity}`
-          : `Your destination must be within ${expectedCity}`,
-      details,
-    }
-  }
-
   if (expectedCountryCode && resolvedCountryCode && expectedCountryCode !== resolvedCountryCode) {
     return {
       ok: false,
       code: field === 'pickup' ? 'PICKUP_OUTSIDE_ROUTE_CITY' : 'DESTINATION_OUTSIDE_ROUTE_CITY',
       message:
         field === 'pickup'
-          ? `Your pickup location must be within ${expectedCity}`
-          : `Your destination must be within ${expectedCity}`,
+          ? `Your pickup location must be within the ${expectedCity} service area`
+          : `Your destination must be within the ${expectedCity} service area`,
       details,
     }
   }
 
-  return { ok: true }
+  const normalizedResolvedCity = normalizeSupportedRouteCity(resolvedCity)
+  const acceptedLocalities = serviceArea?.acceptedLocalities ?? [expectedCity]
+  const belongsToServiceArea = acceptedLocalities
+    .map(normalizeSupportedRouteCity)
+    .includes(normalizedResolvedCity)
+
+  if (!belongsToServiceArea) {
+    return {
+      ok: false,
+      code: field === 'pickup' ? 'PICKUP_OUTSIDE_ROUTE_CITY' : 'DESTINATION_OUTSIDE_ROUTE_CITY',
+      message:
+        field === 'pickup'
+          ? `Your pickup location must be within the ${expectedCity} service area`
+          : `Your destination must be within the ${expectedCity} service area`,
+      details,
+    }
+  }
+
+  return {
+    ok: true,
+    match: {
+      serviceArea: {
+        city: serviceArea?.city ?? expectedCity,
+        countryCode: expectedCountryCode ?? '',
+      },
+      resolvedLocality: resolvedCity,
+      resolvedCountry,
+      resolvedCountryCode,
+    },
+  }
+}
+
+export function resolveLagosPickupFareZone(
+  location: RouteLocationBoundaryInput | RouteServiceAreaMatch | null | undefined
+): LagosPickupFareZone | null {
+  const locality = isServiceAreaMatch(location) ? location.resolvedLocality : location?.city
+  const normalized = normalizeSupportedRouteCity(locality)
+  if (LAGOS_MAINLAND_LOCALITIES.has(normalized)) {
+    return { code: 'lagos_mainland', label: 'Mainland', pricingScope: 'mainland' }
+  }
+  if (LAGOS_ISLAND_LOCALITIES.has(normalized)) {
+    return { code: 'lagos_island', label: 'Island', pricingScope: 'island' }
+  }
+  return null
+}
+
+function isServiceAreaMatch(
+  location: RouteLocationBoundaryInput | RouteServiceAreaMatch | null | undefined
+): location is RouteServiceAreaMatch {
+  return Boolean(location && 'resolvedLocality' in location)
+}
+
+export function resolvePickupFareZoneForRoute({
+  route,
+  pickup,
+}: {
+  route: Pick<Route, 'from' | 'fromCountry'>
+  pickup: RouteLocationBoundaryInput | RouteServiceAreaMatch | null | undefined
+}) {
+  if (normalizeSupportedRouteCity(route.from) !== 'lagos') return null
+  return resolveLagosPickupFareZone(pickup)
 }
 
 export function validateRouteLocationBoundaries({
@@ -151,7 +307,7 @@ export function validateRouteLocationBoundaries({
   pickup?: RouteLocationBoundaryInput | null
   destination?: RouteLocationBoundaryInput | null
 }): RouteLocationBoundaryResult {
-  const pickupResult = locationMatchesRouteEndpoint({
+  const pickupResult = locationMatchesRouteServiceArea({
     field: 'pickup',
     expectedCity: route.from,
     expectedCountry: route.fromCountry,
@@ -159,10 +315,20 @@ export function validateRouteLocationBoundaries({
   })
   if (!pickupResult.ok) return pickupResult
 
-  return locationMatchesRouteEndpoint({
+  const destinationResult = locationMatchesRouteServiceArea({
     field: 'destination',
     expectedCity: route.to,
     expectedCountry: route.toCountry,
     location: destination,
   })
+  if (!destinationResult.ok) return destinationResult
+
+  return {
+    ok: true,
+    metadata: {
+      pickupServiceArea: pickupResult.match,
+      destinationServiceArea: destinationResult.match,
+      pickupFareZone: resolvePickupFareZoneForRoute({ route, pickup: pickupResult.match }),
+    },
+  }
 }

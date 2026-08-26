@@ -19,8 +19,8 @@ Mobile route DTOs expose only customer-safe fields:
 - canonicalRouteId
 - pricingRouteId
 - direction
-- origin city/code/country
-- destination city/code/country
+- origin city/code/country and read-only service area metadata
+- destination city/code/country and read-only service area metadata
 - displayName
 - durationHours
 - popular
@@ -41,6 +41,8 @@ For generated reverse projections, origin/destination are swapped and `borderCro
 
 Pricing must be fetched or calculated server-side. Flutter must not keep an authoritative price table.
 
+Route endpoint cities represent Beninfy service areas, not necessarily exact Google locality names. For example, a Lagos route endpoint may accept explicitly configured Lagos service-area localities such as Ikeja, Lekki, Badagry, or Ikorodu without rewriting the route from `Accra -> Lagos` to `Accra -> Badagry`. The backend validates service-area membership and country code; Flutter must not keep locality allow-lists.
+
 `GET /api/mobile/v1/routes` success response:
 
 ```json
@@ -51,8 +53,18 @@ Pricing must be fetched or calculated server-side. Flutter must not keep an auth
       "canonicalRouteId": "lagos-cotonou",
       "pricingRouteId": "lagos-cotonou",
       "direction": "explicit",
-      "origin": { "city": "Lagos", "code": "LOS", "country": "Nigeria" },
-      "destination": { "city": "Cotonou", "code": "COT", "country": "Benin Republic" },
+      "origin": {
+        "city": "Lagos",
+        "code": "LOS",
+        "country": "Nigeria",
+        "serviceArea": { "city": "Lagos", "countryCode": "NG" }
+      },
+      "destination": {
+        "city": "Cotonou",
+        "code": "COT",
+        "country": "Benin Republic",
+        "serviceArea": { "city": "Cotonou", "countryCode": "BJ" }
+      },
       "displayName": "Lagos to Cotonou",
       "durationHours": 3.5,
       "popular": true,
