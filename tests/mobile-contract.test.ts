@@ -55,6 +55,8 @@ import {
 } from '../src/lib/mobile/paymentPolicy'
 import {
   hashOtpCode,
+  normalizePasswordResetPrincipalType,
+  passwordResetUserWhere,
   normalizeMobileLocale,
   normalizeMobilePhone,
   toMobileOnboardingDto,
@@ -1092,6 +1094,61 @@ test('mobile password policy is stable for registration and reset', () => {
   assert.equal(validateMobilePassword('1234567'), false)
   assert.equal(validateMobilePassword('stronger-password'), true)
   assert.equal(validateMobilePassword('x'.repeat(101)), false)
+})
+
+test('mobile password reset lookup supports customer and provisioned driver principals', () => {
+  assert.equal(normalizePasswordResetPrincipalType(undefined), 'CUSTOMER')
+  assert.equal(normalizePasswordResetPrincipalType('CUSTOMER'), 'CUSTOMER')
+  assert.equal(normalizePasswordResetPrincipalType('DRIVER'), 'DRIVER')
+
+  assert.deepEqual(
+    passwordResetUserWhere({ email: ' Driver@Test.COM ', principalType: 'DRIVER' }),
+    {
+      email: 'driver@test.com',
+      role: 'driver',
+      disabledAt: null,
+      hashedPassword: { not: null },
+      driver: { isNot: null },
+    }
+  )
+  assert.deepEqual(passwordResetUserWhere({ email: ' Customer@Test.COM ' }), {
+    email: 'customer@test.com',
+    role: 'user',
+    disabledAt: null,
+    hashedPassword: { not: null },
+  })
+})
+
+test('driver password reset remains recovery only and non-enumerating', () => {
+  const forgotRoute = readFileSync(
+    'src/app/api/mobile/v1/auth/forgot-password/route.ts',
+    'utf8'
+  )
+  const onboardingSource = readFileSync('src/lib/mobile/onboarding.ts', 'utf8')
+  const notificationSource = readFileSync('src/lib/notifications.ts', 'utf8')
+
+  assert.equal(forgotRoute.includes("principalType: z.enum(['CUSTOMER', 'DRIVER']).optional()"), true)
+  assert.equal(
+    forgotRoute.includes('If the account exists, a password reset email has been sent.'),
+    true
+  )
+  assert.equal(onboardingSource.includes("role: principalType === 'DRIVER' ? 'driver' : 'user'"), true)
+  assert.equal(onboardingSource.includes("driver: { isNot: null }"), true)
+  assert.equal(onboardingSource.includes('prisma.user.create'), false)
+  assert.equal(onboardingSource.includes('prisma.driver.create'), false)
+  assert.equal(onboardingSource.includes("const appScheme = principalType === 'DRIVER' ? 'beninfy-driver' : 'beninfy'"), true)
+  assert.equal(notificationSource.includes('Beninfy driver account'), true)
+  assert.equal(notificationSource.includes('compte chauffeur Beninfy'), true)
+})
+
+test('password reset completion consumes tokens and revokes old mobile sessions', () => {
+  const onboardingSource = readFileSync('src/lib/mobile/onboarding.ts', 'utf8')
+
+  assert.equal(onboardingSource.includes('sessionVersion: { increment: 1 }'), true)
+  assert.equal(onboardingSource.includes('prisma.mobileSession.updateMany'), true)
+  assert.equal(onboardingSource.includes('where: { userId: record.userId, revokedAt: null }'), true)
+  assert.equal(onboardingSource.includes('data: { revokedAt: now }'), true)
+  assert.equal(onboardingSource.includes('data: { consumedAt: now }'), true)
 })
 
 test('admin driver provisioning normalizes login email and creates strong temporary passwords', () => {

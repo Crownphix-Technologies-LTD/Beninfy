@@ -83,11 +83,38 @@ Transactional customer endpoints such as bookings, payment, and tracking return 
 
 Forgot password always returns a generic success response to prevent account enumeration.
 
+Customer reset request:
+
+```json
+{
+  "email": "customer@example.com",
+  "principalType": "CUSTOMER",
+  "locale": "en"
+}
+```
+
+Driver reset request:
+
+```json
+{
+  "email": "driver@example.com",
+  "principalType": "DRIVER",
+  "locale": "fr"
+}
+```
+
+`principalType` defaults to `CUSTOMER` for backward compatibility. Driver recovery works only for existing Beninfy-provisioned `User(role=driver)` accounts linked to a `Driver` record. It never creates a user, creates a driver, links an unlinked driver, or changes roles.
+
 Reset links use a single-use hashed token. A successful reset updates the password, increments the mobile session version, and revokes active mobile sessions. The email contains both a web URL and the app deep-link format:
 
 ```text
 beninfy://reset-password?token=<token>
+beninfy-driver://reset-password?token=<token>
 ```
+
+Flutter should complete reset by submitting the received token to `POST /api/mobile/v1/auth/reset-password` with the new password, then return to sign-in. A forgotten-password reset does not issue tokens automatically.
+
+Driver account creation remains admin-only through the backoffice. Driver forgotten-password recovery and authenticated driver password change are self-service recovery/security capabilities, not registration.
 
 ## Authenticated Password Change
 

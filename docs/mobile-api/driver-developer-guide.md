@@ -9,6 +9,8 @@ Current driver mobile API base:
 ## Implemented Endpoints
 
 - `POST /auth/login`
+- `POST /auth/forgot-password`
+- `POST /auth/reset-password`
 - `GET /auth/me`
 - `POST /auth/refresh`
 - `POST /auth/logout`
@@ -237,6 +239,39 @@ Driver trip detail includes a privacy-filtered operational manifest:
 The driver manifest intentionally excludes passenger email addresses, passport numbers, nationality fields, payment details, coupon metadata, provider references, and internal admin notes. The summary-level `passengerPhone` remains the lead contact already approved for operational calling.
 
 ## Driver Security
+
+Forgot-password recovery is implemented with the shared mobile auth endpoints.
+
+Request reset:
+
+```text
+POST /api/mobile/v1/auth/forgot-password
+```
+
+```json
+{
+  "email": "driver@example.com",
+  "principalType": "DRIVER",
+  "locale": "fr"
+}
+```
+
+The response is always generic. If an existing provisioned driver login matches, the backend sends a single-use reset token by email with Driver-facing EN/FR copy and the deep link `beninfy-driver://reset-password?token=<token>`.
+
+Complete reset:
+
+```text
+POST /api/mobile/v1/auth/reset-password
+```
+
+```json
+{
+  "token": "email-token",
+  "password": "new-strong-password"
+}
+```
+
+Successful reset revokes previous Driver mobile sessions. The Driver app should route back to Sign In.
 
 Authenticated password change is implemented at:
 
