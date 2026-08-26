@@ -20,7 +20,10 @@ import { validateCouponCode, normalizeCouponCode } from '@/lib/coupons'
 import type { MobileErrorCode } from '@/lib/mobile/errors'
 import {
   getRouteServiceArea,
+  normalizeSupportedCountryCode,
+  normalizeSupportedRouteCity,
   validateRouteLocationBoundaries,
+  type RouteLocationBoundaryResult,
   type RouteServiceAreaValidationMetadata,
   type RouteLocationBoundaryInput,
 } from '@/lib/mobile/routeLocationBoundary'
@@ -216,6 +219,7 @@ export async function normalizeDiscoverySelection(
     destination: destinationLocationFromSelection(selection),
   })
   if (!boundary.ok) {
+    logServiceAreaRejection(selection, route, boundary)
     return {
       ok: false,
       code: boundary.code,
@@ -471,10 +475,87 @@ export async function calculateMobileQuote(
 }
 
 async function resolveRoute(selection: MobileDiscoverySelection, client: PrismaClientLike) {
-  if (selection.routeId) return getPublicRouteById(selection.routeId, client)
+  if (selection.routeId) {
+    const route = await getPublicRouteById(selection.routeId, client)
+    if (!route) return null
+    if (selection.from && selection.to && !routeMatchesSelection(route, selection)) {
+      const directionalRoute = await findPublicRouteByCities(selection.from, selection.to, client)
+      return directionalRoute ?? route
+    }
+    return route
+  }
   if (selection.from && selection.to)
     return findPublicRouteByCities(selection.from, selection.to, client)
   return null
+}
+
+function routeMatchesSelection(route: Route, selection: MobileDiscoverySelection) {
+  if (!selection.from || !selection.to) return true
+  return (
+    normalizeSupportedRouteCity(route.from) === normalizeSupportedRouteCity(selection.from) &&
+    normalizeSupportedRouteCity(route.to) === normalizeSupportedRouteCity(selection.to)
+  )
+}
+
+function diagnosticsEnabled() {
+  return process.env.NODE_ENV !== 'production' || process.env.VERCEL_ENV === 'preview'
+}
+
+function logServiceAreaRejection(
+  selection: MobileDiscoverySelection,
+  route: Route,
+  boundary: Extract<RouteLocationBoundaryResult, { ok: false }>
+) {
+  if (!diagnosticsEnabled()) return
+
+  const details = boundary.details
+  const serviceArea = getRouteServiceArea(details.expectedCity)
+  const normalizedResolvedCity = normalizeSupportedRouteCity(details.resolvedCity)
+  const acceptedLocalityMatch = Boolean(
+    details.resolvedCity &&
+    (serviceArea?.acceptedLocalities ?? [details.expectedCity])
+      .map(normalizeSupportedRouteCity)
+      .includes(normalizedResolvedCity)
+  )
+  const normalizedResolvedCountryCode = normalizeSupportedCountryCode({
+    country: details.resolvedCountry,
+    countryCode: details.resolvedCountryCode,
+  })
+  const failureReason = !details.resolvedCity
+    ? 'city_unresolved'
+    : details.expectedCountryCode &&
+        normalizedResolvedCountryCode &&
+        details.expectedCountryCode !== normalizedResolvedCountryCode
+      ? 'country_mismatch'
+      : !acceptedLocalityMatch
+        ? 'locality_outside_service_area'
+        : 'unknown'
+
+  console.warn('Mobile route service-area validation rejected request', {
+    routeId: selection.routeId ?? route.id,
+    resolvedRouteId: route.id,
+    routeOriginCity: route.from,
+    routeDestinationCity: route.to,
+    routeDestinationCountryCode: normalizeSupportedCountryCode({
+      country: route.toCountry,
+    }),
+    receivedDestinationCity: selection.destinationCity ?? selection.dropoffCity ?? null,
+    receivedDestinationCountryCode:
+      selection.destinationCountryCode ?? selection.dropoffCountryCode ?? null,
+    normalizedDestinationCity: normalizeSupportedRouteCity(
+      selection.destinationCity ?? selection.dropoffCity
+    ),
+    normalizedDestinationCountryCode: normalizeSupportedCountryCode({
+      country: selection.destinationCountry ?? selection.dropoffCountry,
+      countryCode: selection.destinationCountryCode ?? selection.dropoffCountryCode,
+    }),
+    rejectedField: details.field,
+    rejectedExpectedCity: details.expectedCity,
+    rejectedResolvedCity: details.resolvedCity,
+    resolvedServiceAreaKey: normalizeSupportedRouteCity(details.expectedCity),
+    acceptedLocalityMatch,
+    failureReason,
+  })
 }
 
 function pickupLocationFromSelection(
