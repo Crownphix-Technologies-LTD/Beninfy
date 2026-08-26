@@ -29,8 +29,9 @@ Routes reference border fees through `Route.borderFeeIds`.
 
 Fee calculation:
 
-- one-way: sum `BorderFee.feePerPersonNGN` for the route's `borderFeeIds`;
-- round-trip: sum `BorderFee.feeRoundTripNGN` for the route's `borderFeeIds`;
+- one-way per passenger: sum `BorderFee.feePerPersonNGN` for the route's `borderFeeIds`;
+- round-trip per passenger: sum `BorderFee.feeRoundTripNGN` for the route's `borderFeeIds`;
+- total border fee: selected per-passenger sum multiplied by booking passenger count;
 - if a referenced fee is missing, quote/booking returns configuration failure instead of silently charging stale data.
 
 ## Shared Fare Core

@@ -55,6 +55,8 @@ The booking creation endpoint remains authoritative and can reject a stale quote
 
 Route matching is bidirectional for supported Beninfy corridors. Flutter may send the selected `routeId` from discovery or compatible `from`/`to` city fields, but the backend still resolves the authoritative corridor, price source, border fees, and availability. Flutter must not create local reverse routes.
 
+Booking creation recomputes the passenger-aware border fee server-side using the existing route `borderFeeIds` and the submitted passenger count. Client-submitted totals or display-only fee calculations are never authoritative.
+
 Booking creation repeats route service-area validation. The final booking payload must include normalized place locality/country fields for the selected route:
 
 ```json

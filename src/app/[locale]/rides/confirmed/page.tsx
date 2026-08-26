@@ -121,6 +121,7 @@ export default async function BookingConfirmedPage({ params, searchParams }: Pro
           fleetVehicleId: displayFleetVehicle?.id,
           fleetVehicleLabel: displayFleetVehicle?.label,
           tripType,
+          passengerCount: dbBooking?.passengers ?? 1,
         })
       : null
   const borderFee = fallbackPricing?.ok ? fallbackPricing.borderFeeNGN : 0
