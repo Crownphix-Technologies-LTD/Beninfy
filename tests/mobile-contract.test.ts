@@ -63,6 +63,7 @@ import {
 } from '../src/lib/mobile/onboarding'
 import {
   calculateFareBreakdown,
+  calculateMobileQuote,
   mobileRoutesCatalogue,
   mobileMoney,
   normalizeDiscoverySelection,
@@ -128,6 +129,7 @@ import { getFcmConfig } from '../src/lib/mobile/fcm'
 import { mobileErrorFromCode } from '../src/lib/mobile/errors'
 import {
   normalizeSupportedRouteCity,
+  resolvePickupFareZoneForRoute,
   validateRouteLocationBoundaries,
 } from '../src/lib/mobile/routeLocationBoundary'
 import {
@@ -1443,14 +1445,17 @@ test('mobile booking discovery accepts reverse direction through backend route m
 
 test('route location boundaries accept only places inside selected route endpoint cities', () => {
   const cotonouLome = routes.find((route) => route.id === 'cotonou-togo')!
-  assert.deepEqual(
-    validateRouteLocationBoundaries({
-      route: cotonouLome,
-      pickup: { city: 'Cotonou', countryCode: 'BJ' },
-      destination: { city: 'Lome', countryCode: 'TG' },
-    }),
-    { ok: true }
-  )
+  const valid = validateRouteLocationBoundaries({
+    route: cotonouLome,
+    pickup: { city: 'Cotonou', countryCode: 'BJ' },
+    destination: { city: 'Lome', countryCode: 'TG' },
+  })
+  assert.equal(valid.ok, true)
+  if (valid.ok) {
+    assert.equal(valid.metadata.pickupServiceArea.serviceArea.city, 'Cotonou')
+    assert.equal(valid.metadata.destinationServiceArea.serviceArea.city, 'Lomé')
+    assert.equal(valid.metadata.pickupFareZone, null)
+  }
 
   const portoNovoPickup = validateRouteLocationBoundaries({
     route: cotonouLome,
@@ -1475,14 +1480,16 @@ test('route location boundaries accept only places inside selected route endpoin
 
 test('route location boundaries work for Lagos corridors and reverse projections', async () => {
   const lagosCotonou = routes.find((route) => route.id === 'lagos-cotonou')!
-  assert.deepEqual(
-    validateRouteLocationBoundaries({
-      route: lagosCotonou,
-      pickup: { city: 'Lagos', countryCode: 'NG' },
-      destination: { city: 'Cotonou', countryCode: 'BJ' },
-    }),
-    { ok: true }
-  )
+  const validLagos = validateRouteLocationBoundaries({
+    route: lagosCotonou,
+    pickup: { city: 'Lagos', countryCode: 'NG' },
+    destination: { city: 'Cotonou', countryCode: 'BJ' },
+  })
+  assert.equal(validLagos.ok, true)
+  if (validLagos.ok) {
+    assert.equal(validLagos.metadata.pickupServiceArea.serviceArea.city, 'Lagos')
+    assert.equal(validLagos.metadata.pickupFareZone?.code, 'lagos_mainland')
+  }
 
   const wrongPickup = validateRouteLocationBoundaries({
     route: lagosCotonou,
@@ -1506,14 +1513,231 @@ test('route location boundaries work for Lagos corridors and reverse projections
     client as never
   )
   assert.ok(reverse)
-  assert.deepEqual(
-    validateRouteLocationBoundaries({
-      route: reverse!,
-      pickup: { city: 'Cotonou', countryCode: 'BJ' },
-      destination: { city: 'Lagos', countryCode: 'NG' },
-    }),
-    { ok: true }
+  const reverseBoundary = validateRouteLocationBoundaries({
+    route: reverse!,
+    pickup: { city: 'Cotonou', countryCode: 'BJ' },
+    destination: { city: 'Lagos', countryCode: 'NG' },
+  })
+  assert.equal(reverseBoundary.ok, true)
+  if (reverseBoundary.ok) assert.equal(reverseBoundary.metadata.pickupFareZone, null)
+})
+
+test('route service areas accept configured operational localities without rewriting route identity', () => {
+  const accraLagos = {
+    ...routes.find((route) => route.id === 'lagos-ghana')!,
+    from: 'Accra',
+    fromCountry: 'Ghana',
+    to: 'Lagos',
+    toCountry: 'Nigeria',
+  }
+  const badagryDestination = validateRouteLocationBoundaries({
+    route: accraLagos,
+    pickup: { city: 'Accra', countryCode: 'GH' },
+    destination: { city: 'Badagry', countryCode: 'NG' },
+  })
+  assert.equal(badagryDestination.ok, true)
+  if (badagryDestination.ok) {
+    assert.equal(badagryDestination.metadata.destinationServiceArea.serviceArea.city, 'Lagos')
+    assert.equal(badagryDestination.metadata.destinationServiceArea.resolvedLocality, 'Badagry')
+    assert.equal(accraLagos.to, 'Lagos')
+    assert.equal(badagryDestination.metadata.pickupFareZone, null)
+  }
+
+  const unrelatedNigeriaDestination = validateRouteLocationBoundaries({
+    route: accraLagos,
+    pickup: { city: 'Accra', countryCode: 'GH' },
+    destination: { city: 'Abuja', countryCode: 'NG' },
+  })
+  assert.equal(unrelatedNigeriaDestination.ok, false)
+  if (!unrelatedNigeriaDestination.ok)
+    assert.equal(unrelatedNigeriaDestination.code, 'DESTINATION_OUTSIDE_ROUTE_CITY')
+
+  const wrongCountryLocality = validateRouteLocationBoundaries({
+    route: accraLagos,
+    pickup: { city: 'Accra', countryCode: 'GH' },
+    destination: { city: 'Badagry', countryCode: 'BJ' },
+  })
+  assert.equal(wrongCountryLocality.ok, false)
+  if (!wrongCountryLocality.ok)
+    assert.equal(wrongCountryLocality.code, 'DESTINATION_OUTSIDE_ROUTE_CITY')
+})
+
+test('route service areas support current Beninfy endpoint corridors in both directions', () => {
+  const routeCases = [
+    ['lagos-cotonou', false, 'Ikeja', 'NG', 'Cotonou', 'BJ'],
+    ['lagos-cotonou', true, 'Cotonou', 'BJ', 'Lekki', 'NG'],
+    ['lagos-ouidah', false, 'Badagry', 'NG', 'Ouidah', 'BJ'],
+    ['lagos-ouidah', true, 'Ouidah', 'BJ', 'Ikeja', 'NG'],
+    ['lagos-porto-novo', false, 'Ikorodu', 'NG', 'Porto-Novo', 'BJ'],
+    ['lagos-porto-novo', true, 'Porto Novo', 'BJ', 'Lekki', 'NG'],
+    ['lagos-aneho', false, 'Lagos', 'NG', 'Aného', 'TG'],
+    ['lagos-aneho', true, 'Aneho', 'TG', 'Ikeja', 'NG'],
+    ['lagos-kpalime', false, 'Lekki', 'NG', 'Kpalimé', 'TG'],
+    ['lagos-kpalime', true, 'Kpalime', 'TG', 'Badagry', 'NG'],
+    ['cotonou-togo', false, 'Cotonou', 'BJ', 'Lomé', 'TG'],
+    ['cotonou-togo', true, 'Lome', 'TG', 'Cotonou', 'BJ'],
+    ['togo-ghana', false, 'Lomé', 'TG', 'Accra', 'GH'],
+    ['togo-ghana', true, 'Accra', 'GH', 'Lome', 'TG'],
+  ] as const
+
+  for (const [routeId, reverse, pickupCity, pickupCountryCode, destinationCity, destinationCountryCode] of routeCases) {
+    const sourceRoute = routes.find((candidate) => candidate.id === routeId)!
+    const route = reverse
+      ? {
+          ...sourceRoute,
+          from: sourceRoute.to,
+          fromCountry: sourceRoute.toCountry,
+          to: sourceRoute.from,
+          toCountry: sourceRoute.fromCountry,
+        }
+      : sourceRoute
+    const result = validateRouteLocationBoundaries({
+      route,
+      pickup: { city: pickupCity, countryCode: pickupCountryCode },
+      destination: { city: destinationCity, countryCode: destinationCountryCode },
+    })
+    assert.equal(result.ok, true, `${pickupCity} -> ${destinationCity} should fit ${routeId}`)
+  }
+})
+
+test('lagos pickup fare zone is resolved by backend and only when Lagos is route origin', () => {
+  const lagosCotonou = routes.find((route) => route.id === 'lagos-cotonou')!
+
+  const ikeja = validateRouteLocationBoundaries({
+    route: lagosCotonou,
+    pickup: { city: 'Ikeja', countryCode: 'NG' },
+    destination: { city: 'Cotonou', countryCode: 'BJ' },
+  })
+  assert.equal(ikeja.ok, true)
+  if (ikeja.ok) {
+    assert.equal(ikeja.metadata.pickupFareZone?.code, 'lagos_mainland')
+    assert.equal(resolvePickupFareZoneForRoute({ route: lagosCotonou, pickup: ikeja.metadata.pickupServiceArea })?.pricingScope, 'mainland')
+  }
+
+  const lekki = validateRouteLocationBoundaries({
+    route: lagosCotonou,
+    pickup: { city: 'Lekki', countryCode: 'NG' },
+    destination: { city: 'Cotonou', countryCode: 'BJ' },
+  })
+  assert.equal(lekki.ok, true)
+  if (lekki.ok) assert.equal(lekki.metadata.pickupFareZone?.code, 'lagos_island')
+
+  const badagry = validateRouteLocationBoundaries({
+    route: lagosCotonou,
+    pickup: { city: 'Badagry', countryCode: 'NG' },
+    destination: { city: 'Cotonou', countryCode: 'BJ' },
+  })
+  assert.equal(badagry.ok, true)
+  if (badagry.ok) assert.equal(badagry.metadata.pickupFareZone, null)
+
+  const reverse = {
+    ...lagosCotonou,
+    from: 'Cotonou',
+    fromCountry: 'Benin Republic',
+    to: 'Lagos',
+    toCountry: 'Nigeria',
+  }
+  const lagosDestination = validateRouteLocationBoundaries({
+    route: reverse,
+    pickup: { city: 'Cotonou', countryCode: 'BJ' },
+    destination: { city: 'Lekki', countryCode: 'NG' },
+  })
+  assert.equal(lagosDestination.ok, true)
+  if (lagosDestination.ok) assert.equal(lagosDestination.metadata.pickupFareZone, null)
+})
+
+test('client-supplied Lagos pickup area does not control mobile quote pricing', async () => {
+  const lagosCotonou = routes.find((route) => route.id === 'lagos-cotonou')!
+  const saloon = vehicles.find((vehicle) => vehicle.id === 'saloon')!
+  const client = {
+    route: {
+      findFirst: async () => ({
+        ...lagosCotonou,
+        available: true,
+        borderFeeIds: ['nigeria-benin'],
+      }),
+    },
+    vehicle: {
+      findUnique: async () => null,
+    },
+    fleetVehicle: {
+      count: async () => 1,
+      findMany: async () => [
+        {
+          id: 'saloon-unit-1',
+          vehicleId: saloon.id,
+          label: 'Toyota Camry',
+          color: 'Black',
+          currentCity: 'Lagos',
+          status: 'available',
+          vehicle: {
+            id: saloon.id,
+            name: saloon.name,
+            capacity: saloon.capacity,
+            luggageCapacity: saloon.luggageCapacity,
+            image: saloon.image,
+          },
+        },
+      ],
+      findUnique: async () => null,
+    },
+    bookingLeg: {
+      count: async () => 0,
+    },
+    routePrice: {
+      findMany: async () => [
+        { vehicleId: saloon.id, pricingScope: 'mainland', amountNGN: 160000 },
+        { vehicleId: saloon.id, pricingScope: 'island', amountNGN: 180000 },
+        { vehicleId: saloon.id, pricingScope: 'default', amountNGN: 170000 },
+      ],
+    },
+    borderFee: {
+      findMany: async () => [
+        {
+          id: 'nigeria-benin',
+          country: 'Benin',
+          countryFr: 'Benin',
+          border: 'Seme',
+          borderFr: 'Seme',
+          countries: ['Nigeria', 'Benin Republic'],
+          feePerPersonNGN: 5000,
+          feeRoundTripNGN: 10000,
+          popular: true,
+          icon: 'local_taxi',
+          services: [],
+          servicesFr: [],
+          documents: [],
+          documentsFr: [],
+          tips: [],
+          tipsFr: [],
+        },
+      ],
+    },
+  }
+
+  const result = await calculateMobileQuote(
+    {
+      from: 'Lagos',
+      to: 'Cotonou',
+      vehicleId: saloon.id,
+      tripType: 'one-way',
+      departureDate: '2026-08-20T09:00:00.000Z',
+      passengers: 1,
+      pickupCity: 'Ikeja',
+      pickupCountryCode: 'NG',
+      destinationCity: 'Cotonou',
+      destinationCountryCode: 'BJ',
+      pickupArea: 'island',
+    },
+    client as never
   )
+
+  assert.equal(result.ok, true)
+  if (result.ok) {
+    assert.equal(result.data.quote.pickupArea, 'mainland')
+    assert.equal(result.data.quote.pickupFareZone?.code, 'lagos_mainland')
+    assert.equal(result.data.quote.pricing.oneWayDropoffFare.value, 160000)
+  }
 })
 
 test('route location normalization supports known Beninfy aliases only', () => {

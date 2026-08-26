@@ -46,7 +46,7 @@ Before creating a booking, Flutter should:
 
 1. Load `GET /api/mobile/v1/routes`.
 2. Load `GET /api/mobile/v1/vehicles`.
-3. Let the customer choose a route, trip dates, passenger count, vehicle category, pickup fare zone where required, and optionally a fleet unit.
+3. Let the customer choose a route, trip dates, passenger count, vehicle category, pickup/dropoff places, and optionally a fleet unit.
 4. Call `POST /api/mobile/v1/availability` for the selected date/category/fleet unit.
 5. Call `POST /api/mobile/v1/pricing/quote`.
 6. Create the booking with `POST /api/mobile/v1/customer/bookings` using the same selection fields.
@@ -55,7 +55,7 @@ The booking creation endpoint remains authoritative and can reject a stale quote
 
 Route matching is bidirectional for supported Beninfy corridors. Flutter may send the selected `routeId` from discovery or compatible `from`/`to` city fields, but the backend still resolves the authoritative corridor, price source, border fees, and availability. Flutter must not create local reverse routes.
 
-Booking creation repeats route city boundary validation. The final booking payload must include normalized place city/country fields matching the selected route:
+Booking creation repeats route service-area validation. The final booking payload must include normalized place locality/country fields for the selected route:
 
 ```json
 {
@@ -74,8 +74,15 @@ Booking creation repeats route city boundary validation. The final booking paylo
 
 Customer Flutter should localize:
 
-- `PICKUP_OUTSIDE_ROUTE_CITY`: "Your pickup location must be within {expectedCity}."
-- `DESTINATION_OUTSIDE_ROUTE_CITY`: "Your destination must be within {expectedCity}."
+- `PICKUP_OUTSIDE_ROUTE_CITY`: "Your pickup location must be within the {expectedCity} service area."
+- `DESTINATION_OUTSIDE_ROUTE_CITY`: "Your destination must be within the {expectedCity} service area."
 - `LOCATION_CITY_UNRESOLVED`: ask the customer to search/select another location.
+
+French copy:
+
+- `PICKUP_OUTSIDE_ROUTE_CITY`: "Votre lieu de prise en charge doit se trouver dans la zone desservie de {expectedCity}."
+- `DESTINATION_OUTSIDE_ROUTE_CITY`: "Votre destination doit se trouver dans la zone desservie de {expectedCity}."
+
+Lagos pickup fare zone is backend-resolved from the pickup place only when the selected route origin is Lagos. Flutter must not show an editable Mainland/Island dropdown. If the quote/availability response includes `pickupFareZone`, it may be displayed as read-only.
 
 Customer cancellation is whole-booking only in this phase. Partial return-leg cancellation after an outbound leg has completed is not supported.
