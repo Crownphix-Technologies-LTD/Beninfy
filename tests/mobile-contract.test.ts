@@ -65,6 +65,7 @@ import {
 } from '../src/lib/mobile/onboarding'
 import {
   calculateFareBreakdown,
+  calculateMobileAvailability,
   calculateMobileQuote,
   mobileRoutesCatalogue,
   mobileMoney,
@@ -130,6 +131,7 @@ import { mobileSupportConfig } from '../src/lib/mobile/supportConfig'
 import { getFcmConfig } from '../src/lib/mobile/fcm'
 import { mobileErrorFromCode } from '../src/lib/mobile/errors'
 import {
+  locationMatchesRouteServiceArea,
   normalizeSupportedRouteCity,
   resolvePickupFareZoneForRoute,
   validateRouteLocationBoundaries,
@@ -697,7 +699,10 @@ test('notification templates are audience-specific where product copy differs', 
   assert.equal(driverAssignedFr?.body, 'Un nouveau trajet vous a ete assigne.')
   assert.notEqual(driverAssigned?.body, customerAssigned?.body)
 
-  assert.equal(customerCompleted?.body, 'Your Beninfy trip is complete. Thank you for travelling with us.')
+  assert.equal(
+    customerCompleted?.body,
+    'Your Beninfy trip is complete. Thank you for travelling with us.'
+  )
   assert.equal(driverCompleted?.body, 'Trip completed successfully.')
   assert.equal(driverCompletedFr?.body, 'Trajet termine avec succes.')
   assert.notEqual(driverCompleted?.body, customerCompleted?.body)
@@ -1120,23 +1125,31 @@ test('mobile password reset lookup supports customer and provisioned driver prin
 })
 
 test('driver password reset remains recovery only and non-enumerating', () => {
-  const forgotRoute = readFileSync(
-    'src/app/api/mobile/v1/auth/forgot-password/route.ts',
-    'utf8'
-  )
+  const forgotRoute = readFileSync('src/app/api/mobile/v1/auth/forgot-password/route.ts', 'utf8')
   const onboardingSource = readFileSync('src/lib/mobile/onboarding.ts', 'utf8')
   const notificationSource = readFileSync('src/lib/notifications.ts', 'utf8')
 
-  assert.equal(forgotRoute.includes("principalType: z.enum(['CUSTOMER', 'DRIVER']).optional()"), true)
+  assert.equal(
+    forgotRoute.includes("principalType: z.enum(['CUSTOMER', 'DRIVER']).optional()"),
+    true
+  )
   assert.equal(
     forgotRoute.includes('If the account exists, a password reset email has been sent.'),
     true
   )
-  assert.equal(onboardingSource.includes("role: principalType === 'DRIVER' ? 'driver' : 'user'"), true)
-  assert.equal(onboardingSource.includes("driver: { isNot: null }"), true)
+  assert.equal(
+    onboardingSource.includes("role: principalType === 'DRIVER' ? 'driver' : 'user'"),
+    true
+  )
+  assert.equal(onboardingSource.includes('driver: { isNot: null }'), true)
   assert.equal(onboardingSource.includes('prisma.user.create'), false)
   assert.equal(onboardingSource.includes('prisma.driver.create'), false)
-  assert.equal(onboardingSource.includes("const appScheme = principalType === 'DRIVER' ? 'beninfy-driver' : 'beninfy'"), true)
+  assert.equal(
+    onboardingSource.includes(
+      "const appScheme = principalType === 'DRIVER' ? 'beninfy-driver' : 'beninfy'"
+    ),
+    true
+  )
   assert.equal(notificationSource.includes('Beninfy driver account'), true)
   assert.equal(notificationSource.includes('compte chauffeur Beninfy'), true)
 })
@@ -1190,8 +1203,14 @@ test('admin driver DTO exposes login state but never password hash', () => {
 
 test('admin driver provisioning only links safe unassigned non-admin users', () => {
   assert.equal(canLinkExistingUserToDriver({ role: 'user', disabledAt: null, driver: null }), true)
-  assert.equal(canLinkExistingUserToDriver({ role: 'driver', disabledAt: null, driver: null }), true)
-  assert.equal(canLinkExistingUserToDriver({ role: 'admin', disabledAt: null, driver: null }), false)
+  assert.equal(
+    canLinkExistingUserToDriver({ role: 'driver', disabledAt: null, driver: null }),
+    true
+  )
+  assert.equal(
+    canLinkExistingUserToDriver({ role: 'admin', disabledAt: null, driver: null }),
+    false
+  )
   assert.equal(
     canLinkExistingUserToDriver({ role: 'user', disabledAt: null, driver: { id: 'driver2' } }),
     false
@@ -1623,6 +1642,33 @@ test('route service areas accept configured operational localities without rewri
     assert.equal(wrongCountryLocality.code, 'DESTINATION_OUTSIDE_ROUTE_CITY')
 })
 
+test('lagos service-area resolver accepts operational Lagos localities and rejects unrelated cities', () => {
+  for (const city of ['Ikeja', 'Lekki', 'Badagry']) {
+    const result = locationMatchesRouteServiceArea({
+      field: 'destination',
+      expectedCity: 'Lagos',
+      expectedCountry: 'Nigeria',
+      location: { city, countryCode: 'NG' },
+    })
+
+    assert.equal(result.ok, true, `${city} should resolve inside Lagos`)
+    if (result.ok) {
+      assert.equal(result.match.serviceArea.city, 'Lagos')
+      assert.equal(result.match.resolvedLocality, city)
+    }
+  }
+
+  const unrelated = locationMatchesRouteServiceArea({
+    field: 'destination',
+    expectedCity: 'Lagos',
+    expectedCountry: 'Nigeria',
+    location: { city: 'Abuja', countryCode: 'NG' },
+  })
+
+  assert.equal(unrelated.ok, false)
+  if (!unrelated.ok) assert.equal(unrelated.code, 'DESTINATION_OUTSIDE_ROUTE_CITY')
+})
+
 test('route service areas support current Beninfy endpoint corridors in both directions', () => {
   const routeCases = [
     ['lagos-cotonou', false, 'Ikeja', 'NG', 'Cotonou', 'BJ'],
@@ -1641,7 +1687,14 @@ test('route service areas support current Beninfy endpoint corridors in both dir
     ['togo-ghana', true, 'Accra', 'GH', 'Lome', 'TG'],
   ] as const
 
-  for (const [routeId, reverse, pickupCity, pickupCountryCode, destinationCity, destinationCountryCode] of routeCases) {
+  for (const [
+    routeId,
+    reverse,
+    pickupCity,
+    pickupCountryCode,
+    destinationCity,
+    destinationCountryCode,
+  ] of routeCases) {
     const sourceRoute = routes.find((candidate) => candidate.id === routeId)!
     const route = reverse
       ? {
@@ -1661,6 +1714,90 @@ test('route service areas support current Beninfy endpoint corridors in both dir
   }
 })
 
+test('mobile availability reconciles canonical route id with reverse city pair before service-area validation', async () => {
+  const rows = routes.map((route) => ({
+    ...route,
+    available: true,
+    borderFeeIds: [],
+  }))
+  const client = {
+    route: {
+      findFirst: async (args: {
+        where: {
+          id?: string
+          available?: boolean
+          from?: { equals: string }
+          to?: { equals: string }
+        }
+      }) => {
+        if (args.where.id) return rows.find((route) => route.id === args.where.id) ?? null
+        return (
+          rows.find(
+            (route) =>
+              route.from.toLowerCase() === args.where.from?.equals.toLowerCase() &&
+              route.to.toLowerCase() === args.where.to?.equals.toLowerCase()
+          ) ?? null
+        )
+      },
+    },
+    vehicle: {
+      findUnique: async () => null,
+    },
+    fleetVehicle: {
+      count: async () => 1,
+      findMany: async () => [
+        {
+          id: 'saloon-unit-1',
+          vehicleId: 'saloon',
+          label: 'Toyota Camry',
+          color: 'Black',
+          currentCity: 'Cotonou',
+          status: 'available',
+          vehicle: {
+            id: 'saloon',
+            name: 'Saloon Car',
+            capacity: 3,
+            luggageCapacity: 2,
+            image: '/images/fleet/saloon.jpg',
+          },
+        },
+      ],
+      findUnique: async () => null,
+    },
+    bookingLeg: {
+      count: async () => 0,
+    },
+  }
+
+  const result = await calculateMobileAvailability(
+    {
+      routeId: 'lagos-cotonou',
+      from: 'Cotonou',
+      to: 'Lagos',
+      vehicleId: 'saloon',
+      tripType: 'one-way',
+      departureDate: '2026-08-20T09:00:00.000Z',
+      passengers: 1,
+      pickupCity: 'Cotonou',
+      pickupCountryCode: 'BJ',
+      destinationCity: 'Ikeja',
+      destinationCountryCode: 'NG',
+    },
+    client as never
+  )
+
+  assert.equal(result.ok, true)
+  if (result.ok) {
+    assert.equal(result.data.route.id, reverseProjectionRouteId('lagos-cotonou'))
+    assert.equal(result.data.route.origin.city, 'Cotonou')
+    assert.equal(result.data.route.destination.city, 'Lagos')
+    assert.equal(result.data.destinationServiceArea.serviceArea.city, 'Lagos')
+    assert.equal(result.data.destinationServiceArea.resolvedLocality, 'Ikeja')
+    assert.equal(result.data.pickupFareZone, null)
+    assert.equal(result.data.availability.available, true)
+  }
+})
+
 test('lagos pickup fare zone is resolved by backend and only when Lagos is route origin', () => {
   const lagosCotonou = routes.find((route) => route.id === 'lagos-cotonou')!
 
@@ -1672,7 +1809,13 @@ test('lagos pickup fare zone is resolved by backend and only when Lagos is route
   assert.equal(ikeja.ok, true)
   if (ikeja.ok) {
     assert.equal(ikeja.metadata.pickupFareZone?.code, 'lagos_mainland')
-    assert.equal(resolvePickupFareZoneForRoute({ route: lagosCotonou, pickup: ikeja.metadata.pickupServiceArea })?.pricingScope, 'mainland')
+    assert.equal(
+      resolvePickupFareZoneForRoute({
+        route: lagosCotonou,
+        pickup: ikeja.metadata.pickupServiceArea,
+      })?.pricingScope,
+      'mainland'
+    )
   }
 
   const lekki = validateRouteLocationBoundaries({
@@ -1787,8 +1930,8 @@ test('client-supplied Lagos pickup area does not control mobile quote pricing', 
         vehicleId: saloon.id,
         tripType: 'one-way',
         departureDate: '2026-08-20T09:00:00.000Z',
-      passengers: 2,
-      pickupCity,
+        passengers: 2,
+        pickupCity,
         pickupCountryCode: 'NG',
         destinationCity: 'Cotonou',
         destinationCountryCode: 'BJ',
@@ -2226,7 +2369,9 @@ test('off-duty assignment ownership remains visible in driver trip views', () =>
   })
   assert.deepEqual(driverTripWhereForView('driver1', 'active'), {
     driverId: 'driver1',
-    status: { in: ['dispatched', 'driver_en_route', 'driver_arrived', 'passenger_onboard', 'in_progress'] },
+    status: {
+      in: ['dispatched', 'driver_en_route', 'driver_arrived', 'passenger_onboard', 'in_progress'],
+    },
   })
 })
 
@@ -2306,8 +2451,14 @@ test('driver assignment history endpoint ordering uses effective outcome time wi
     cursor: first.nextCursor,
   })
 
-  assert.deepEqual(first.page.map((record) => record.id), ['history-c', 'history-b'])
-  assert.deepEqual(second.page.map((record) => record.id), ['history-a', 'history-d'])
+  assert.deepEqual(
+    first.page.map((record) => record.id),
+    ['history-c', 'history-b']
+  )
+  assert.deepEqual(
+    second.page.map((record) => record.id),
+    ['history-a', 'history-d']
+  )
   assert.equal(first.hasMore, true)
   assert.equal(second.hasMore, false)
   assert.equal(second.nextCursor, null)
