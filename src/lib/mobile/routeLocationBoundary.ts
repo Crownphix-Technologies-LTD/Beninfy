@@ -124,7 +124,7 @@ const SERVICE_AREAS: Record<string, RouteServiceArea> = {
 }
 
 const LAGOS_MAINLAND_LOCALITIES = new Set(
-  ['Lagos', 'Ikeja', 'Yaba', 'Surulere', 'Gbagada', 'Maryland', 'Ikorodu'].map(
+  ['Lagos', 'Ikeja', 'Badagry', 'Yaba', 'Surulere', 'Gbagada', 'Maryland', 'Ikorodu'].map(
     normalizeSupportedRouteCity
   )
 )

@@ -1628,7 +1628,10 @@ test('lagos pickup fare zone is resolved by backend and only when Lagos is route
     destination: { city: 'Cotonou', countryCode: 'BJ' },
   })
   assert.equal(badagry.ok, true)
-  if (badagry.ok) assert.equal(badagry.metadata.pickupFareZone, null)
+  if (badagry.ok) {
+    assert.equal(badagry.metadata.pickupFareZone?.code, 'lagos_mainland')
+    assert.equal(badagry.metadata.pickupFareZone?.pricingScope, 'mainland')
+  }
 
   const reverse = {
     ...lagosCotonou,
@@ -1715,28 +1718,31 @@ test('client-supplied Lagos pickup area does not control mobile quote pricing', 
     },
   }
 
-  const result = await calculateMobileQuote(
-    {
-      from: 'Lagos',
-      to: 'Cotonou',
-      vehicleId: saloon.id,
-      tripType: 'one-way',
-      departureDate: '2026-08-20T09:00:00.000Z',
-      passengers: 1,
-      pickupCity: 'Ikeja',
-      pickupCountryCode: 'NG',
-      destinationCity: 'Cotonou',
-      destinationCountryCode: 'BJ',
-      pickupArea: 'island',
-    },
-    client as never
-  )
+  for (const pickupCity of ['Ikeja', 'Badagry']) {
+    const result = await calculateMobileQuote(
+      {
+        from: 'Lagos',
+        to: 'Cotonou',
+        vehicleId: saloon.id,
+        tripType: 'one-way',
+        departureDate: '2026-08-20T09:00:00.000Z',
+        passengers: 1,
+        pickupCity,
+        pickupCountryCode: 'NG',
+        destinationCity: 'Cotonou',
+        destinationCountryCode: 'BJ',
+        pickupArea: 'island',
+      },
+      client as never
+    )
 
-  assert.equal(result.ok, true)
-  if (result.ok) {
-    assert.equal(result.data.quote.pickupArea, 'mainland')
-    assert.equal(result.data.quote.pickupFareZone?.code, 'lagos_mainland')
-    assert.equal(result.data.quote.pricing.oneWayDropoffFare.value, 160000)
+    assert.equal(result.ok, true)
+    if (result.ok) {
+      assert.equal(result.data.quote.pickupResolvedLocality, pickupCity)
+      assert.equal(result.data.quote.pickupArea, 'mainland')
+      assert.equal(result.data.quote.pickupFareZone?.code, 'lagos_mainland')
+      assert.equal(result.data.quote.pricing.oneWayDropoffFare.value, 160000)
+    }
   }
 })
 
