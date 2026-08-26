@@ -159,6 +159,7 @@ Response:
       "departureDate": "2026-08-18T09:00:00.000Z",
       "outcome": "reassigned",
       "outcomeLabelKey": "driverAssignmentHistory.reassigned",
+      "effectiveOutcomeAt": "2026-08-18T08:20:00.000Z",
       "currentLegStatus": "assigned",
       "assignedAt": "2026-08-18T08:00:00.000Z",
       "acceptedAt": null,
@@ -185,7 +186,17 @@ Supported outcomes:
 - `released`
 - `reassigned`
 
-Flutter should render these as assignment outcomes. A `released` or `reassigned` record means this driver's assignment ended; it does not necessarily mean the customer trip was cancelled.
+Ordering is server-authoritative: `effectiveOutcomeAt DESC`, then `assignmentHistoryId DESC` for ties. `effectiveOutcomeAt` is the timestamp Flutter should use for the history row date and cursor-driven ordering. `assignedAt` remains assignment metadata.
+
+Timestamp precedence is:
+
+- `completed`: `completedAt`
+- `declined`: `declinedAt`
+- `reassigned`: `supersededAt`
+- `released`: `releasedAt`
+- `current`: `assignedAt`
+
+Flutter should render these as assignment outcomes. A `released` or `reassigned` record means this driver's assignment ended; it does not necessarily mean the customer trip was cancelled. Flutter must pass `pageInfo.nextCursor` back unchanged and must not infer outcomes or ordering from raw timestamp fields.
 
 ## Navigation To Pickup
 

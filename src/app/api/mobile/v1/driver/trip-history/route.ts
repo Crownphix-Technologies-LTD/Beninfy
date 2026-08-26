@@ -3,8 +3,8 @@ import { requireMobilePrincipal } from '@/lib/mobile/auth'
 import { toDriverAssignmentHistoryDto } from '@/lib/mobile/dtos'
 import { mobileErrorFromCode } from '@/lib/mobile/errors'
 import {
-  driverAssignmentHistoryOrderBy,
   driverAssignmentHistoryWhereForDriver,
+  pageDriverAssignmentHistoryRecords,
 } from '@/lib/mobile/driverAssignmentHistory'
 
 export const runtime = 'nodejs'
@@ -27,9 +27,6 @@ export async function GET(req: Request) {
 
   const records = await prisma.driverTripAssignmentHistory.findMany({
     where: driverAssignmentHistoryWhereForDriver(guard.principal.driverId),
-    orderBy: driverAssignmentHistoryOrderBy(),
-    take: limit + 1,
-    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
     include: {
       bookingLeg: {
         select: {
@@ -45,14 +42,17 @@ export async function GET(req: Request) {
     },
   })
 
-  const hasMore = records.length > limit
-  const page = hasMore ? records.slice(0, limit) : records
+  const { page, hasMore, nextCursor } = pageDriverAssignmentHistoryRecords({
+    records,
+    limit,
+    cursor,
+  })
 
   return Response.json({
     history: page.map(toDriverAssignmentHistoryDto),
     pageInfo: {
       hasMore,
-      nextCursor: hasMore ? (page[page.length - 1]?.id ?? null) : null,
+      nextCursor,
       limit,
     },
   })

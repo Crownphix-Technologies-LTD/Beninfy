@@ -160,6 +160,7 @@ Response:
       "departureDate": "2026-08-18T09:00:00.000Z",
       "outcome": "declined",
       "outcomeLabelKey": "driverAssignmentHistory.declined",
+      "effectiveOutcomeAt": "2026-08-18T08:05:00.000Z",
       "currentLegStatus": "unassigned",
       "assignedAt": "2026-08-18T08:00:00.000Z",
       "acceptedAt": null,
@@ -185,6 +186,16 @@ Outcomes:
 - `declined`: the driver declined the assignment.
 - `released`: the driver or operations released the assignment without assigning a replacement in the same operation.
 - `reassigned`: operations moved the leg away from this driver to another driver.
+
+Ordering is server-authoritative: `effectiveOutcomeAt DESC`, with `assignmentHistoryId DESC` as the stable tie-breaker. Cursor values are opaque; Flutter should only send back the latest `pageInfo.nextCursor`.
+
+`effectiveOutcomeAt` is the display/order timestamp for the assignment outcome:
+
+- `completed` uses `completedAt`
+- `declined` uses `declinedAt`
+- `reassigned` uses `supersededAt`
+- `released` uses `releasedAt`
+- `current` uses `assignedAt`
 
 Driver decline/release may clear current `BookingLeg.driverId` and return the leg to operations as `unassigned`. That does not necessarily mean the customer booking or `BookingLeg` was globally cancelled. Flutter should display the assignment outcome, not infer trip cancellation.
 

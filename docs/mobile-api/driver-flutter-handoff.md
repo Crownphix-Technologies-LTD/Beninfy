@@ -344,7 +344,7 @@ Ownership: returns only legs assigned to the authenticated driver.
 
 ## Assignment History
 
-### `GET /api/mobile/v1/driver/trip-history?limit=20&cursor=<historyId>`
+### `GET /api/mobile/v1/driver/trip-history?limit=20&cursor=<opaqueCursor>`
 
 Auth: Driver bearer token.
 
@@ -367,6 +367,7 @@ Success:
       "departureDate": "ISO date",
       "outcome": "current|completed|declined|released|reassigned",
       "outcomeLabelKey": "driverAssignmentHistory.completed",
+      "effectiveOutcomeAt": "ISO date",
       "currentLegStatus": "assigned|unassigned|completed|cancelled|...",
       "assignedAt": "ISO date",
       "acceptedAt": "ISO date or null",
@@ -386,6 +387,18 @@ Success:
 ```
 
 Flutter must show these as assignment outcomes. A `released` or `reassigned` record does not necessarily mean the passenger trip was cancelled.
+
+Use `effectiveOutcomeAt` as the row date and timeline ordering timestamp. The backend sorts by `effectiveOutcomeAt DESC`, then `assignmentHistoryId DESC`; Flutter must not re-sort by `assignedAt`.
+
+`pageInfo.nextCursor` is opaque. Send it back unchanged for the next page.
+
+Outcome timestamp precedence is server-authoritative:
+
+- `completed`: `completedAt`
+- `declined`: `declinedAt`
+- `reassigned`: `supersededAt`
+- `released`: `releasedAt`
+- `current`: `assignedAt`
 
 ## Trip Detail
 

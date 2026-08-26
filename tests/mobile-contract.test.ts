@@ -132,10 +132,11 @@ import {
 } from '../src/lib/mobile/routeLocationBoundary'
 import {
   driverAssignmentHistoryOpenWhere,
-  driverAssignmentHistoryOrderBy,
+  driverAssignmentEffectiveOutcomeAt,
   driverAssignmentHistoryWhereForDriver,
   driverAssignmentOutcome,
   driverAssignmentOutcomeLabelKey,
+  pageDriverAssignmentHistoryRecords,
 } from '../src/lib/mobile/driverAssignmentHistory'
 
 test('driver transition blocks terminal trips', () => {
@@ -247,6 +248,53 @@ test('driver assignment history outcomes are truthful driver-facing states', () 
   assert.equal(driverAssignmentOutcome({ supersededAt: '2026-08-18T10:00:00.000Z' }), 'reassigned')
   assert.equal(driverAssignmentOutcome({ releasedAt: '2026-08-18T10:00:00.000Z' }), 'released')
   assert.equal(driverAssignmentOutcomeLabelKey('declined'), 'driverAssignmentHistory.declined')
+})
+
+test('driver assignment history effective outcome timestamp follows outcome precedence', () => {
+  const assignedAt = '2026-07-18T08:00:00.000Z'
+
+  assert.equal(
+    new Date(
+      driverAssignmentEffectiveOutcomeAt({
+        assignedAt,
+        completedAt: '2026-08-18T10:00:00.000Z',
+      })
+    ).toISOString(),
+    '2026-08-18T10:00:00.000Z'
+  )
+  assert.equal(
+    new Date(
+      driverAssignmentEffectiveOutcomeAt({
+        assignedAt,
+        declinedAt: '2026-08-17T10:00:00.000Z',
+        releasedAt: '2026-08-17T10:00:00.000Z',
+      })
+    ).toISOString(),
+    '2026-08-17T10:00:00.000Z'
+  )
+  assert.equal(
+    new Date(
+      driverAssignmentEffectiveOutcomeAt({
+        assignedAt,
+        releasedAt: '2026-08-16T10:00:00.000Z',
+      })
+    ).toISOString(),
+    '2026-08-16T10:00:00.000Z'
+  )
+  assert.equal(
+    new Date(
+      driverAssignmentEffectiveOutcomeAt({
+        assignedAt,
+        releasedAt: '2026-08-15T10:00:00.000Z',
+        supersededAt: '2026-08-16T12:00:00.000Z',
+      })
+    ).toISOString(),
+    '2026-08-16T12:00:00.000Z'
+  )
+  assert.equal(
+    new Date(driverAssignmentEffectiveOutcomeAt({ assignedAt })).toISOString(),
+    assignedAt
+  )
 })
 
 test('driver assignment history writes target the open assignment only', () => {
@@ -1775,7 +1823,48 @@ test('driver assignment history query scopes by authenticated driver', () => {
   assert.deepEqual(driverAssignmentHistoryWhereForDriver('driver1'), {
     driverId: 'driver1',
   })
-  assert.deepEqual(driverAssignmentHistoryOrderBy(), [{ assignedAt: 'desc' }, { id: 'desc' }])
+})
+
+test('driver assignment history endpoint ordering uses effective outcome time with stable cursor', () => {
+  const records = [
+    {
+      id: 'history-a',
+      assignedAt: new Date('2026-07-18T08:00:00.000Z'),
+      completedAt: new Date('2026-08-20T08:00:00.000Z'),
+    },
+    {
+      id: 'history-c',
+      assignedAt: new Date('2026-08-18T08:00:00.000Z'),
+      releasedAt: new Date('2026-08-21T08:00:00.000Z'),
+      supersededAt: new Date('2026-08-21T08:00:00.000Z'),
+    },
+    {
+      id: 'history-b',
+      assignedAt: new Date('2026-08-01T08:00:00.000Z'),
+      declinedAt: new Date('2026-08-20T08:00:00.000Z'),
+    },
+    {
+      id: 'history-d',
+      assignedAt: new Date('2026-08-19T08:00:00.000Z'),
+    },
+  ]
+
+  const first = pageDriverAssignmentHistoryRecords({ records, limit: 2 })
+  const second = pageDriverAssignmentHistoryRecords({
+    records,
+    limit: 2,
+    cursor: first.nextCursor,
+  })
+
+  assert.deepEqual(first.page.map((record) => record.id), ['history-c', 'history-b'])
+  assert.deepEqual(second.page.map((record) => record.id), ['history-a', 'history-d'])
+  assert.equal(first.hasMore, true)
+  assert.equal(second.hasMore, false)
+  assert.equal(second.nextCursor, null)
+  assert.deepEqual(
+    [...first.page, ...second.page].map((record) => record.id).sort(),
+    records.map((record) => record.id).sort()
+  )
 })
 
 test('driver assignment history DTO preserves released driver association', () => {
@@ -1806,6 +1895,7 @@ test('driver assignment history DTO preserves released driver association', () =
   assert.equal(dto.bookingLegId, 'leg1')
   assert.equal(dto.outcome, 'released')
   assert.equal(dto.outcomeLabelKey, 'driverAssignmentHistory.released')
+  assert.equal(dto.effectiveOutcomeAt, '2026-08-18T08:30:00.000Z')
   assert.equal(dto.currentLegStatus, 'unassigned')
   assert.equal(dto.releaseReason, 'driver_cancelled')
   assert.equal(dto.releaseSource, 'driver')
@@ -1837,6 +1927,7 @@ test('driver assignment history DTO distinguishes reassigned-away outcome', () =
 
   assert.equal(dto.outcome, 'reassigned')
   assert.equal(dto.outcomeLabelKey, 'driverAssignmentHistory.reassigned')
+  assert.equal(dto.effectiveOutcomeAt, '2026-08-18T08:30:00.000Z')
   assert.equal(dto.currentLegStatus, 'assigned')
 })
 

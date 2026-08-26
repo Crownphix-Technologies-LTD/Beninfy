@@ -11,10 +11,16 @@ export const DRIVER_ASSIGNMENT_HISTORY_OUTCOMES = [
 export type DriverAssignmentHistoryOutcome = (typeof DRIVER_ASSIGNMENT_HISTORY_OUTCOMES)[number]
 
 type AssignmentHistoryRecord = {
+  id?: string
+  assignedAt?: Date | string
   declinedAt?: Date | string | null
   releasedAt?: Date | string | null
   completedAt?: Date | string | null
   supersededAt?: Date | string | null
+}
+
+type AssignmentHistoryRecordWithAssignedAt = AssignmentHistoryRecord & {
+  assignedAt: Date | string
 }
 
 type AssignmentHistoryClient = Prisma.TransactionClient
@@ -30,10 +36,6 @@ export function driverAssignmentHistoryWhereForDriver(
   driverId: string
 ): Prisma.DriverTripAssignmentHistoryWhereInput {
   return { driverId }
-}
-
-export function driverAssignmentHistoryOrderBy(): Prisma.DriverTripAssignmentHistoryOrderByWithRelationInput[] {
-  return [{ assignedAt: 'desc' }, { id: 'desc' }]
 }
 
 export function driverAssignmentHistoryOpenWhere({
@@ -58,6 +60,112 @@ export function driverAssignmentOutcome(
   if (record.supersededAt) return 'reassigned'
   if (record.releasedAt) return 'released'
   return 'current'
+}
+
+export function driverAssignmentEffectiveOutcomeAt(record: AssignmentHistoryRecordWithAssignedAt) {
+  const outcome = driverAssignmentOutcome(record)
+  switch (outcome) {
+    case 'completed':
+      return record.completedAt ?? record.assignedAt
+    case 'declined':
+      return record.declinedAt ?? record.assignedAt
+    case 'reassigned':
+      return record.supersededAt ?? record.assignedAt
+    case 'released':
+      return record.releasedAt ?? record.assignedAt
+    case 'current':
+    default:
+      return record.assignedAt
+  }
+}
+
+function toTime(value: Date | string) {
+  return value instanceof Date ? value.getTime() : new Date(value).getTime()
+}
+
+function toIso(value: Date | string) {
+  return value instanceof Date ? value.toISOString() : new Date(value).toISOString()
+}
+
+export function compareDriverAssignmentHistoryByEffectiveOutcomeDesc(
+  left: AssignmentHistoryRecordWithAssignedAt,
+  right: AssignmentHistoryRecordWithAssignedAt
+) {
+  const leftTime = toTime(driverAssignmentEffectiveOutcomeAt(left))
+  const rightTime = toTime(driverAssignmentEffectiveOutcomeAt(right))
+  if (leftTime !== rightTime) return rightTime - leftTime
+  return (right.id ?? '').localeCompare(left.id ?? '')
+}
+
+export type DriverAssignmentHistoryCursor = {
+  effectiveOutcomeAt: string
+  id: string
+}
+
+export function encodeDriverAssignmentHistoryCursor(
+  record: AssignmentHistoryRecordWithAssignedAt & { id: string }
+) {
+  return Buffer.from(
+    JSON.stringify({
+      effectiveOutcomeAt: toIso(driverAssignmentEffectiveOutcomeAt(record)),
+      id: record.id,
+    } satisfies DriverAssignmentHistoryCursor)
+  ).toString('base64url')
+}
+
+export function decodeDriverAssignmentHistoryCursor(
+  cursor: string | null | undefined
+): DriverAssignmentHistoryCursor | null {
+  if (!cursor) return null
+  try {
+    const parsed = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as Partial<
+      DriverAssignmentHistoryCursor
+    >
+    if (typeof parsed.effectiveOutcomeAt !== 'string' || typeof parsed.id !== 'string') return null
+    if (Number.isNaN(new Date(parsed.effectiveOutcomeAt).getTime())) return null
+    return { effectiveOutcomeAt: parsed.effectiveOutcomeAt, id: parsed.id }
+  } catch {
+    return null
+  }
+}
+
+function isAfterCursor(
+  record: AssignmentHistoryRecordWithAssignedAt & { id: string },
+  cursor: DriverAssignmentHistoryCursor
+) {
+  const recordTime = toTime(driverAssignmentEffectiveOutcomeAt(record))
+  const cursorTime = new Date(cursor.effectiveOutcomeAt).getTime()
+  if (recordTime !== cursorTime) return recordTime < cursorTime
+  return record.id < cursor.id
+}
+
+export function pageDriverAssignmentHistoryRecords<
+  T extends AssignmentHistoryRecordWithAssignedAt & { id: string },
+>({
+  records,
+  limit,
+  cursor,
+}: {
+  records: T[]
+  limit: number
+  cursor?: string | null
+}) {
+  const sorted = [...records].sort(compareDriverAssignmentHistoryByEffectiveOutcomeDesc)
+  const decoded = decodeDriverAssignmentHistoryCursor(cursor)
+  const startIndex = decoded
+    ? sorted.findIndex((record) => isAfterCursor(record, decoded))
+    : cursor
+      ? sorted.findIndex((record) => record.id === cursor) + 1
+      : 0
+  const pageStart = Math.max(0, startIndex)
+  const page = sorted.slice(pageStart, pageStart + limit)
+  const hasMore = pageStart + limit < sorted.length
+  return {
+    page,
+    hasMore,
+    nextCursor:
+      hasMore && page.length > 0 ? encodeDriverAssignmentHistoryCursor(page[page.length - 1]) : null,
+  }
 }
 
 export function driverAssignmentOutcomeLabelKey(outcome: DriverAssignmentHistoryOutcome) {
