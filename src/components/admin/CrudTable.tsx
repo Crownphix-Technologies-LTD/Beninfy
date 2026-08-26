@@ -10,7 +10,7 @@ import {
   adminSecondaryButtonClass,
 } from '@/components/admin/AdminUI'
 
-export type FieldType = 'text' | 'password' | 'number' | 'textarea' | 'boolean' | 'array' | 'select'
+export type FieldType = 'text' | 'password' | 'number' | 'textarea' | 'boolean' | 'array' | 'select' | 'section'
 
 export interface FieldDef {
   name: string
@@ -18,6 +18,7 @@ export interface FieldDef {
   type: FieldType
   required?: boolean
   placeholder?: string
+  description?: string
   options?: Array<{ label: string; value: string }>
   // shown only on create
   createOnly?: boolean
@@ -137,7 +138,8 @@ export function CrudTable<T extends { id: string } & Record<string, unknown>>({
     const initial: Record<string, unknown> = { ...defaultValues }
     for (const f of fields) {
       if (initial[f.name] === undefined) {
-        if (f.type === 'boolean') initial[f.name] = false
+        if (f.type === 'section') continue
+        else if (f.type === 'boolean') initial[f.name] = false
         else if (f.type === 'array') initial[f.name] = ''
         else if (f.type === 'number') initial[f.name] = ''
         else if (f.type === 'select') initial[f.name] = f.options?.[0]?.value ?? ''
@@ -155,6 +157,7 @@ export function CrudTable<T extends { id: string } & Record<string, unknown>>({
     for (const f of fields) {
       const v = item[f.name]
       if (f.type === 'array') initial[f.name] = Array.isArray(v) ? (v as string[]).join('\n') : ''
+      else if (f.type === 'section') continue
       else if (f.type === 'boolean') initial[f.name] = !!v
       else if (v === null || v === undefined) initial[f.name] = ''
       else initial[f.name] = v
@@ -174,6 +177,7 @@ export function CrudTable<T extends { id: string } & Record<string, unknown>>({
       const payload: Record<string, unknown> = {}
       for (const f of fields) {
         const raw = form[f.name]
+        if (f.type === 'section') continue
         if (open.mode === 'edit' && f.createOnly) continue
         if (f.type === 'number') {
           if (raw === '' || raw === null || raw === undefined) {
@@ -323,6 +327,19 @@ export function CrudTable<T extends { id: string } & Record<string, unknown>>({
           <form id={modalFormId} onSubmit={handleSave} className="space-y-4">
             {fields.map((f) => {
               if (open.mode === 'edit' && f.createOnly) return null
+              if (f.type === 'section') {
+                return (
+                  <div key={f.name} className="rounded-xl border border-purple-100 bg-[#fbf7fc] px-4 py-3">
+                    <div className="flex items-start gap-3">
+                      <span className="material-symbols-outlined mt-0.5 text-[19px] text-[#3e004c]">admin_panel_settings</span>
+                      <div>
+                        <p className="text-sm font-semibold text-gray-900">{f.label}</p>
+                        {f.description && <p className="mt-1 text-sm leading-6 text-gray-500">{f.description}</p>}
+                      </div>
+                    </div>
+                  </div>
+                )
+              }
               const value = form[f.name] ?? ''
               if (f.type === 'textarea') {
                 return (

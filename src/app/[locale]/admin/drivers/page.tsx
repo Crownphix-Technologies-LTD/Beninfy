@@ -42,7 +42,21 @@ function isDriverCredentials(value: unknown): value is DriverCredentials {
 
 export default function AdminDriversPage() {
   const [credentials, setCredentials] = useState<DriverCredentials | null>(null)
+  const [passwordVisible, setPasswordVisible] = useState(false)
+  const [copied, setCopied] = useState<string | null>(null)
   const [provisioningId, setProvisioningId] = useState<string | null>(null)
+
+  const dismissCredentials = () => {
+    setCredentials(null)
+    setPasswordVisible(false)
+    setCopied(null)
+  }
+
+  const copyText = async (label: string, value: string) => {
+    await navigator.clipboard.writeText(value)
+    setCopied(label)
+    window.setTimeout(() => setCopied(null), 2200)
+  }
 
   const createLoginAccount = async (
     driver: Driver,
@@ -94,26 +108,74 @@ export default function AdminDriversPage() {
         <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-950 shadow-[0_12px_30px_rgba(16,185,129,0.12)]">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <p className="font-semibold">Driver login credentials created</p>
+              <p className="font-semibold">Driver created successfully</p>
               <p className="mt-1 text-emerald-800">
-                Share these credentials securely with the driver. The password is shown once only.
+                Save these credentials now. The temporary password cannot be viewed again after this message is closed.
               </p>
               <div className="mt-3 grid gap-2 sm:grid-cols-2">
                 <div className="rounded-xl bg-white/80 px-3 py-2">
                   <p className="text-xs uppercase tracking-[0.14em] text-emerald-600">Email</p>
-                  <p className="font-mono text-sm text-gray-900">{credentials.email}</p>
+                  <div className="mt-1 flex items-center gap-2">
+                    <p className="font-mono text-sm text-gray-900">{credentials.email}</p>
+                    <button
+                      type="button"
+                      onClick={() => void copyText('email', credentials.email)}
+                      className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-emerald-100 text-emerald-700 hover:bg-emerald-50"
+                      title="Copy email"
+                    >
+                      <span className="material-symbols-outlined text-[15px]">content_copy</span>
+                    </button>
+                  </div>
                 </div>
                 <div className="rounded-xl bg-white/80 px-3 py-2">
                   <p className="text-xs uppercase tracking-[0.14em] text-emerald-600">
                     {credentials.generated ? 'Temporary password' : 'Initial password'}
                   </p>
-                  <p className="font-mono text-sm text-gray-900">{credentials.temporaryPassword}</p>
+                  <div className="mt-1 flex flex-wrap items-center gap-2">
+                    <p className="font-mono text-sm text-gray-900">
+                      {passwordVisible ? credentials.temporaryPassword : '••••••••••••'}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setPasswordVisible((visible) => !visible)}
+                      className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-emerald-100 text-emerald-700 hover:bg-emerald-50"
+                      title={passwordVisible ? 'Hide password' : 'Reveal password'}
+                    >
+                      <span className="material-symbols-outlined text-[15px]">
+                        {passwordVisible ? 'visibility_off' : 'visibility'}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void copyText('password', credentials.temporaryPassword)}
+                      className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-emerald-100 text-emerald-700 hover:bg-emerald-50"
+                      title="Copy password"
+                    >
+                      <span className="material-symbols-outlined text-[15px]">content_copy</span>
+                    </button>
+                  </div>
                 </div>
+              </div>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() =>
+                    void copyText(
+                      'credentials',
+                      `Beninfy Driver App Login\nEmail: ${credentials.email}\nTemporary password: ${credentials.temporaryPassword}`
+                    )
+                  }
+                  className="inline-flex items-center gap-2 rounded-lg border border-emerald-200 bg-white px-3 py-2 text-xs font-semibold text-emerald-800 hover:bg-emerald-50"
+                >
+                  <span className="material-symbols-outlined text-[15px]">content_copy</span>
+                  Copy credentials
+                </button>
+                {copied && <span className="text-xs font-semibold text-emerald-700">Copied {copied}</span>}
               </div>
             </div>
             <button
               type="button"
-              onClick={() => setCredentials(null)}
+              onClick={dismissCredentials}
               className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-emerald-200 bg-white text-emerald-800"
               title="Dismiss"
             >
@@ -174,6 +236,14 @@ export default function AdminDriversPage() {
           { name: 'name', label: 'Name', type: 'text', required: true },
           { name: 'phone', label: 'Phone', type: 'text', required: true },
           { name: 'email', label: 'Login email', type: 'text', required: true },
+          {
+            name: 'driverAppLoginSection',
+            label: 'Driver App Login',
+            type: 'section',
+            createOnly: true,
+            description:
+              'A login account will be created for this driver to access the Beninfy Driver app. Leave the password blank to generate a secure temporary password.',
+          },
           {
             name: 'initialPassword',
             label: 'Initial password',
