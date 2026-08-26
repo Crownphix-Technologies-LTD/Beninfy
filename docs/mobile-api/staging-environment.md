@@ -95,6 +95,26 @@ The mobile apps should only know:
 
 They must not know database URLs, Prisma config, payment secrets, SMTP credentials, Supabase service-role/secret keys, backend Google Places/Routes keys, or deployment credentials.
 
+## Driver Test Account Provisioning
+
+For Driver Flutter development, create a deliberate non-production driver from the staging/Preview backoffice.
+
+Procedure:
+
+1. Confirm the staging or Vercel Preview deployment for the backend branch under test.
+2. Sign in to the backoffice with an admin role that has `drivers` permission.
+3. Open Drivers and create a test driver with a real test email, phone, and the intended operational status.
+4. Leave the initial password blank unless an approved temporary password is being set manually.
+5. Copy the one-time temporary password from the success banner and share it out-of-band with the Flutter developer.
+6. The developer should configure the Driver app with:
+   - API base URL: `https://<staging-or-preview-domain>/api/mobile/v1`
+   - test driver email
+   - temporary password
+   - any Vercel Deployment Protection bypass instructions, if that deployment requires them
+7. After first successful login, the developer should verify password change through `POST /driver/change-password`.
+
+Never commit test credentials, Vercel bypass values, or temporary passwords.
+
 ## Vercel Hobby Worker Cadence
 
 Current staging/Hobby deployment uses once-daily Vercel Cron schedules:

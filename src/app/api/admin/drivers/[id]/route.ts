@@ -1,7 +1,11 @@
 import { NextResponse } from 'next/server'
-import { Prisma } from '@prisma/client'
 import { z } from 'zod'
 import { requireAdminPermission } from '@/lib/admin'
+import {
+  normalizeDriverLoginEmail,
+  sanitizeDriverForAdmin,
+  uniqueConstraintTarget,
+} from '@/lib/admin/driverProvisioning'
 import { writeAuditLog } from '@/lib/auditLog'
 import { notifyDriverChanged } from '@/lib/notifications'
 import { prisma } from '@/lib/prisma'
@@ -32,8 +36,37 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const parsed = patchSchema.safeParse(body)
   if (!parsed.success) return NextResponse.json({ error: 'Invalid input', issues: parsed.error.flatten() }, { status: 400 })
   try {
-    const current = await prisma.driver.findUnique({ where: { id } })
-    const driver = await prisma.driver.update({ where: { id }, data: parsed.data })
+    const current = await prisma.driver.findUnique({
+      where: { id },
+      include: { user: { select: { id: true, email: true, role: true, disabledAt: true } } },
+    })
+    if (!current) return NextResponse.json({ error: 'Driver not found' }, { status: 404 })
+    const nextEmail =
+      parsed.data.email === undefined ? current.email : normalizeDriverLoginEmail(parsed.data.email)
+    if (current.userId && !nextEmail) {
+      return NextResponse.json({ error: 'Linked driver login requires an email address' }, { status: 400 })
+    }
+
+    const driver = await prisma.$transaction(async (tx) => {
+      if (current.userId) {
+        await tx.user.update({
+          where: { id: current.userId },
+          data: {
+            ...(parsed.data.name !== undefined ? { name: parsed.data.name } : {}),
+            ...(parsed.data.phone !== undefined ? { phone: parsed.data.phone } : {}),
+            ...(nextEmail && nextEmail !== current.user?.email ? { email: nextEmail } : {}),
+          },
+        })
+      }
+      return tx.driver.update({
+        where: { id },
+        data: {
+          ...parsed.data,
+          ...(parsed.data.email !== undefined ? { email: nextEmail } : {}),
+        },
+        include: { user: { select: { id: true, email: true, role: true, disabledAt: true } } },
+      })
+    })
     await notifyDriverChanged('updated', [
       ['Name', driver.name],
       ['Phone', driver.phone],
@@ -50,10 +83,11 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       entityId: driver.id,
       metadata: { previous: current, next: driver },
     })
-    return NextResponse.json({ driver })
+    return NextResponse.json({ driver: sanitizeDriverForAdmin(driver) })
   } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-      return NextResponse.json({ error: 'A driver with this unique value already exists' }, { status: 409 })
+    const uniqueTarget = uniqueConstraintTarget(error)
+    if (uniqueTarget) {
+      return NextResponse.json({ error: `A driver with this ${uniqueTarget} already exists` }, { status: 409 })
     }
     throw error
   }
