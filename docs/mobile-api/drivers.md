@@ -47,7 +47,7 @@ This relationship is implemented by the mobile auth foundation. Driver requests 
 `Driver.status` is the persistent operations duty state:
 
 - `available`: driver is eligible for new assignments and can execute assigned trips.
-- `off_duty`: driver is active but not eligible for new assignments.
+- `off_duty`: driver is active, not eligible for new assignments, and can continue executing trips already assigned to them.
 - `inactive`: admin/operations disabled state. Driver cannot self-reactivate.
 
 The driver app may only set:
@@ -64,15 +64,7 @@ or:
 
 Drivers cannot set `inactive`.
 
-If a driver currently has an active operational trip, setting `off_duty` returns `ACTIVE_TRIP_PREVENTS_OFF_DUTY`.
-
-Active operational states for this rule are:
-
-- `dispatched`
-- `driver_en_route`
-- `driver_arrived`
-- `passenger_onboard`
-- `in_progress`
+Setting `off_duty` does not release current assignments, cancel trips, clear `driverId`, reset lifecycle state, or hide assigned trips. It only removes the driver from new-assignment eligibility.
 
 ## Presence Is Separate
 
@@ -168,6 +160,7 @@ Response:
       "departureDate": "2026-08-18T09:00:00.000Z",
       "outcome": "declined",
       "outcomeLabelKey": "driverAssignmentHistory.declined",
+      "effectiveOutcomeAt": "2026-08-18T08:05:00.000Z",
       "currentLegStatus": "unassigned",
       "assignedAt": "2026-08-18T08:00:00.000Z",
       "acceptedAt": null,
@@ -193,6 +186,16 @@ Outcomes:
 - `declined`: the driver declined the assignment.
 - `released`: the driver or operations released the assignment without assigning a replacement in the same operation.
 - `reassigned`: operations moved the leg away from this driver to another driver.
+
+Ordering is server-authoritative: `effectiveOutcomeAt DESC`, with `assignmentHistoryId DESC` as the stable tie-breaker. Cursor values are opaque; Flutter should only send back the latest `pageInfo.nextCursor`.
+
+`effectiveOutcomeAt` is the display/order timestamp for the assignment outcome:
+
+- `completed` uses `completedAt`
+- `declined` uses `declinedAt`
+- `reassigned` uses `supersededAt`
+- `released` uses `releasedAt`
+- `current` uses `assignedAt`
 
 Driver decline/release may clear current `BookingLeg.driverId` and return the leg to operations as `unassigned`. That does not necessarily mean the customer booking or `BookingLeg` was globally cancelled. Flutter should display the assignment outcome, not infer trip cancellation.
 

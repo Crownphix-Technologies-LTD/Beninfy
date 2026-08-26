@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { requireMobilePrincipal } from '@/lib/mobile/auth'
 import { toDriverProfileDto } from '@/lib/mobile/dtos'
-import { mobileError, mobileErrorFromCode, mobileValidationError } from '@/lib/mobile/errors'
+import { mobileErrorFromCode, mobileValidationError } from '@/lib/mobile/errors'
 import { isDriverDutyStatus, updateDriverDutyStatus } from '@/lib/mobile/driverOperations'
 
 export const runtime = 'nodejs'
@@ -27,9 +27,7 @@ export async function PATCH(req: Request) {
     status: parsed.data.status,
   })
   if (!result.ok) {
-    return result.code === 'ACTIVE_TRIP_PREVENTS_OFF_DUTY'
-      ? mobileError(result.code, 'An active trip prevents going off duty', 409, result.details)
-      : mobileErrorFromCode(result.code)
+    return mobileErrorFromCode(result.code)
   }
   if (!result.driver) return mobileErrorFromCode('DRIVER_NOT_LINKED')
 

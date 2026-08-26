@@ -16,6 +16,7 @@ import {
 import { type MobileOnboardingDto, toMobileOnboardingDto } from '@/lib/mobile/onboarding'
 import { classifyDriverTripView, type DriverTripView } from '@/lib/mobile/driverOperations'
 import {
+  driverAssignmentEffectiveOutcomeAt,
   driverAssignmentOutcome,
   driverAssignmentOutcomeLabelKey,
   type DriverAssignmentHistoryOutcome,
@@ -183,6 +184,7 @@ export type DriverAssignmentHistoryDto = {
   departureDate: string
   outcome: DriverAssignmentHistoryOutcome
   outcomeLabelKey: string
+  effectiveOutcomeAt: string
   currentLegStatus: MobileBookingLegStatus
   assignedAt: string
   acceptedAt: string | null
@@ -633,6 +635,7 @@ export function toDriverAssignmentHistoryDto(record: {
   }
 }): DriverAssignmentHistoryDto {
   const outcome = driverAssignmentOutcome(record)
+  const effectiveOutcomeAt = driverAssignmentEffectiveOutcomeAt(record)
   return {
     assignmentHistoryId: record.id,
     bookingLegId: record.bookingLegId,
@@ -645,6 +648,7 @@ export function toDriverAssignmentHistoryDto(record: {
     departureDate: toIso(record.bookingLeg.departureDate),
     outcome,
     outcomeLabelKey: driverAssignmentOutcomeLabelKey(outcome),
+    effectiveOutcomeAt: toIso(effectiveOutcomeAt),
     currentLegStatus: record.bookingLeg.status as MobileBookingLegStatus,
     assignedAt: toIso(record.assignedAt),
     acceptedAt: record.acceptedAt ? toIso(record.acceptedAt) : null,

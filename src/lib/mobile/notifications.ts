@@ -210,6 +210,37 @@ const templates: Record<
   },
 }
 
+const audienceTemplates: Partial<
+  Record<
+    PushAppType,
+    Partial<Record<NotificationType, Record<NotificationLanguage, { title: string; body: string }>>>
+  >
+> = {
+  driver: {
+    'trip.driver_assigned': {
+      en: { title: 'New trip assigned', body: 'A new trip has been assigned to you.' },
+      fr: {
+        title: 'Nouveau trajet assigne',
+        body: 'Un nouveau trajet vous a ete assigne.',
+      },
+    },
+    'trip.completed': {
+      en: { title: 'Trip completed', body: 'Trip completed successfully.' },
+      fr: { title: 'Trajet termine', body: 'Trajet termine avec succes.' },
+    },
+    'trip.cancelled': {
+      en: {
+        title: 'Trip cancelled',
+        body: 'This assigned trip has been cancelled. Check the driver app for current trips.',
+      },
+      fr: {
+        title: 'Trajet annule',
+        body: 'Ce trajet assigne a ete annule. Consultez l application chauffeur.',
+      },
+    },
+  },
+}
+
 export function tokenHash(token: string) {
   return createHash('sha256').update(token.trim()).digest('hex')
 }
@@ -242,8 +273,13 @@ export function validatePushToken(value: unknown) {
   return token.length >= 20 && token.length <= 4096
 }
 
-export function templateFor(type: NotificationType, language: NotificationLanguage) {
-  return templates[type]?.[language] ?? templates[type]?.en
+export function templateFor(
+  type: NotificationType,
+  language: NotificationLanguage,
+  appType: PushAppType
+) {
+  const audienceTemplate = audienceTemplates[appType]?.[type]
+  return audienceTemplate?.[language] ?? audienceTemplate?.en ?? templates[type]?.[language] ?? templates[type]?.en
 }
 
 export function pushPayloadToData(payload: PushPayload): Record<string, string> {
@@ -404,12 +440,36 @@ async function resolveLanguage(
   appType: PushAppType,
   fallback?: NotificationLanguage
 ) {
-  const device = await prisma.pushDevice.findFirst({
-    where: { userId, appType, revokedAt: null, invalidatedAt: null },
-    orderBy: { lastSeenAt: 'desc' },
-    select: { language: true },
+  const [user, device] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id: userId },
+      select: { locale: true },
+    }),
+    prisma.pushDevice.findFirst({
+      where: { userId, appType, revokedAt: null, invalidatedAt: null },
+      orderBy: { lastSeenAt: 'desc' },
+      select: { language: true },
+    }),
+  ])
+  return resolveNotificationLanguagePreference({
+    userLocale: user?.locale,
+    deviceLanguage: device?.language,
+    fallback,
   })
-  return normalizeNotificationLanguage(device?.language ?? fallback)
+}
+
+export function resolveNotificationLanguagePreference({
+  userLocale,
+  deviceLanguage,
+  fallback,
+}: {
+  userLocale?: string | null
+  deviceLanguage?: string | null
+  fallback?: NotificationLanguage
+}) {
+  if (userLocale) return normalizeNotificationLanguage(userLocale)
+  if (deviceLanguage) return normalizeNotificationLanguage(deviceLanguage)
+  return normalizeNotificationLanguage(fallback)
 }
 
 export async function createNotificationEvent({
@@ -429,7 +489,7 @@ export async function createNotificationEvent({
 }) {
   if (!userId) return null
   const resolvedLanguage = await resolveLanguage(userId, appType, language)
-  const template = templateFor(type, resolvedLanguage) ?? templateFor(type, 'en')
+  const template = templateFor(type, resolvedLanguage, appType) ?? templateFor(type, 'en', appType)
   if (!template) return null
 
   try {

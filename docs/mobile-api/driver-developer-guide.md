@@ -44,7 +44,7 @@ If a linked driver is `inactive`, driver APIs return `DRIVER_INACTIVE`. `off_dut
 Duty status is persistent operations availability:
 
 - `available`: driver is eligible for operations assignment and may execute assigned trip actions.
-- `off_duty`: driver can authenticate and use the app, but is not eligible for new assignment and cannot execute active trip lifecycle actions until returning to `available`.
+- `off_duty`: driver can authenticate and use the app, is not eligible for new assignment, and may continue executing valid lifecycle actions on trips already assigned to them.
 - `inactive`: operations/admin-disabled account. Driver cannot self-reactivate.
 
 Flutter can only request `available` or `off_duty`:
@@ -57,7 +57,7 @@ PATCH /api/mobile/v1/driver/availability
 { "status": "off_duty" }
 ```
 
-If the driver has an active trip, `off_duty` is rejected with `ACTIVE_TRIP_PREVENTS_OFF_DUTY`.
+Changing to `off_duty` does not release existing assignments, clear `driverId`, cancel trips, reset lifecycle state, or remove assigned trips from Driver Home/trip lists. Existing assigned trips remain executable through the normal authoritative `allowedActions` rules.
 
 Presence is separate. Continue using `/driver/presence` for online/offline heartbeat state.
 
@@ -159,6 +159,7 @@ Response:
       "departureDate": "2026-08-18T09:00:00.000Z",
       "outcome": "reassigned",
       "outcomeLabelKey": "driverAssignmentHistory.reassigned",
+      "effectiveOutcomeAt": "2026-08-18T08:20:00.000Z",
       "currentLegStatus": "assigned",
       "assignedAt": "2026-08-18T08:00:00.000Z",
       "acceptedAt": null,
@@ -185,7 +186,17 @@ Supported outcomes:
 - `released`
 - `reassigned`
 
-Flutter should render these as assignment outcomes. A `released` or `reassigned` record means this driver's assignment ended; it does not necessarily mean the customer trip was cancelled.
+Ordering is server-authoritative: `effectiveOutcomeAt DESC`, then `assignmentHistoryId DESC` for ties. `effectiveOutcomeAt` is the timestamp Flutter should use for the history row date and cursor-driven ordering. `assignedAt` remains assignment metadata.
+
+Timestamp precedence is:
+
+- `completed`: `completedAt`
+- `declined`: `declinedAt`
+- `reassigned`: `supersededAt`
+- `released`: `releasedAt`
+- `current`: `assignedAt`
+
+Flutter should render these as assignment outcomes. A `released` or `reassigned` record means this driver's assignment ended; it does not necessarily mean the customer trip was cancelled. Flutter must pass `pageInfo.nextCursor` back unchanged and must not infer outcomes or ordering from raw timestamp fields.
 
 ## Navigation To Pickup
 

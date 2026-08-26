@@ -85,6 +85,8 @@ This history endpoint returns driver-facing assignment outcomes:
 - `released`
 - `reassigned`
 
+The endpoint is ordered by the server-calculated `effectiveOutcomeAt DESC`, then assignment-history ID descending for stable pagination. `effectiveOutcomeAt` is derived from the outcome timestamp: `completedAt`, `declinedAt`, `supersededAt`, `releasedAt`, or `assignedAt` for current assignments.
+
 Driver cancellation/release can clear the current driver assignment without globally cancelling the trip. The history outcome describes the driver's assignment, not the commercial booking state.
 
 ## Booking Completion

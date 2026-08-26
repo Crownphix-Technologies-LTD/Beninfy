@@ -235,7 +235,8 @@ Rules:
 - Driver can self-set only `available` or `off_duty`.
 - `inactive` is an operations/admin-controlled state.
 - Inactive drivers cannot authenticate or update availability.
-- Driver cannot go `off_duty` while assigned to an active trip.
+- `off_duty` drivers are not eligible for new assignments.
+- `off_duty` does not release existing assignments or block valid lifecycle actions on trips already assigned to the driver.
 - Presence does not mutate duty status.
 
 Errors:
@@ -343,7 +344,7 @@ Ownership: returns only legs assigned to the authenticated driver.
 
 ## Assignment History
 
-### `GET /api/mobile/v1/driver/trip-history?limit=20&cursor=<historyId>`
+### `GET /api/mobile/v1/driver/trip-history?limit=20&cursor=<opaqueCursor>`
 
 Auth: Driver bearer token.
 
@@ -366,6 +367,7 @@ Success:
       "departureDate": "ISO date",
       "outcome": "current|completed|declined|released|reassigned",
       "outcomeLabelKey": "driverAssignmentHistory.completed",
+      "effectiveOutcomeAt": "ISO date",
       "currentLegStatus": "assigned|unassigned|completed|cancelled|...",
       "assignedAt": "ISO date",
       "acceptedAt": "ISO date or null",
@@ -385,6 +387,18 @@ Success:
 ```
 
 Flutter must show these as assignment outcomes. A `released` or `reassigned` record does not necessarily mean the passenger trip was cancelled.
+
+Use `effectiveOutcomeAt` as the row date and timeline ordering timestamp. The backend sorts by `effectiveOutcomeAt DESC`, then `assignmentHistoryId DESC`; Flutter must not re-sort by `assignedAt`.
+
+`pageInfo.nextCursor` is opaque. Send it back unchanged for the next page.
+
+Outcome timestamp precedence is server-authoritative:
+
+- `completed`: `completedAt`
+- `declined`: `declinedAt`
+- `reassigned`: `supersededAt`
+- `released`: `releasedAt`
+- `current`: `assignedAt`
 
 ## Trip Detail
 
@@ -738,8 +752,8 @@ Success:
     {
       "id": "notificationId",
       "type": "trip.driver_assigned",
-      "title": "Driver assigned",
-      "body": "A Beninfy driver has been assigned to your trip.",
+      "title": "New trip assigned",
+      "body": "A new trip has been assigned to you.",
       "payload": {
         "type": "trip.driver_assigned",
         "version": 1,
@@ -761,6 +775,8 @@ Success:
 ```
 
 Driver app should route using `payload.type`, `payload.bookingId`, and `payload.bookingLegId`. Do not depend on screen names from the backend.
+
+Notification title/body are server-rendered and persisted. Driver notifications use driver-facing templates; Flutter must not reuse customer copy locally. Language resolution prefers the persisted user locale, then the active push-device language, then English. `trip.assignment_removed` is informational and non-actionable.
 
 Driver-relevant event types currently include:
 

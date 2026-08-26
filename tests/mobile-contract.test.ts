@@ -30,6 +30,7 @@ import {
   normalizeNotificationLanguage,
   principalOwnsAppType,
   pushPayloadToData,
+  resolveNotificationLanguagePreference,
   templateFor,
   validatePushToken,
 } from '../src/lib/mobile/notifications'
@@ -80,6 +81,8 @@ import {
   routePricingId,
 } from '../src/lib/routeCatalog'
 import {
+  canDriverExecuteAssignedTrip,
+  canDriverReceiveNewAssignment,
   classifyDriverTripView,
   driverTripOrderByForView,
   driverTripWhereForView,
@@ -129,10 +132,11 @@ import {
 } from '../src/lib/mobile/routeLocationBoundary'
 import {
   driverAssignmentHistoryOpenWhere,
-  driverAssignmentHistoryOrderBy,
+  driverAssignmentEffectiveOutcomeAt,
   driverAssignmentHistoryWhereForDriver,
   driverAssignmentOutcome,
   driverAssignmentOutcomeLabelKey,
+  pageDriverAssignmentHistoryRecords,
 } from '../src/lib/mobile/driverAssignmentHistory'
 
 test('driver transition blocks terminal trips', () => {
@@ -244,6 +248,53 @@ test('driver assignment history outcomes are truthful driver-facing states', () 
   assert.equal(driverAssignmentOutcome({ supersededAt: '2026-08-18T10:00:00.000Z' }), 'reassigned')
   assert.equal(driverAssignmentOutcome({ releasedAt: '2026-08-18T10:00:00.000Z' }), 'released')
   assert.equal(driverAssignmentOutcomeLabelKey('declined'), 'driverAssignmentHistory.declined')
+})
+
+test('driver assignment history effective outcome timestamp follows outcome precedence', () => {
+  const assignedAt = '2026-07-18T08:00:00.000Z'
+
+  assert.equal(
+    new Date(
+      driverAssignmentEffectiveOutcomeAt({
+        assignedAt,
+        completedAt: '2026-08-18T10:00:00.000Z',
+      })
+    ).toISOString(),
+    '2026-08-18T10:00:00.000Z'
+  )
+  assert.equal(
+    new Date(
+      driverAssignmentEffectiveOutcomeAt({
+        assignedAt,
+        declinedAt: '2026-08-17T10:00:00.000Z',
+        releasedAt: '2026-08-17T10:00:00.000Z',
+      })
+    ).toISOString(),
+    '2026-08-17T10:00:00.000Z'
+  )
+  assert.equal(
+    new Date(
+      driverAssignmentEffectiveOutcomeAt({
+        assignedAt,
+        releasedAt: '2026-08-16T10:00:00.000Z',
+      })
+    ).toISOString(),
+    '2026-08-16T10:00:00.000Z'
+  )
+  assert.equal(
+    new Date(
+      driverAssignmentEffectiveOutcomeAt({
+        assignedAt,
+        releasedAt: '2026-08-15T10:00:00.000Z',
+        supersededAt: '2026-08-16T12:00:00.000Z',
+      })
+    ).toISOString(),
+    '2026-08-16T12:00:00.000Z'
+  )
+  assert.equal(
+    new Date(driverAssignmentEffectiveOutcomeAt({ assignedAt })).toISOString(),
+    assignedAt
+  )
 })
 
 test('driver assignment history writes target the open assignment only', () => {
@@ -588,8 +639,72 @@ test('push app ownership is derived from authenticated mobile principal', () => 
 test('notification localization resolves French and falls back to English', () => {
   assert.equal(normalizeNotificationLanguage('fr-BJ'), 'fr')
   assert.equal(normalizeNotificationLanguage('de'), 'en')
-  assert.equal(templateFor('trip.driver_arrived', 'fr')?.title, 'Chauffeur arrive')
-  assert.equal(templateFor('trip.driver_arrived', 'en')?.title, 'Driver arrived')
+  assert.equal(templateFor('trip.driver_arrived', 'fr', 'customer')?.title, 'Chauffeur arrive')
+  assert.equal(templateFor('trip.driver_arrived', 'en', 'customer')?.title, 'Driver arrived')
+})
+
+test('notification language prefers persisted user locale before push device language', () => {
+  assert.equal(
+    resolveNotificationLanguagePreference({
+      userLocale: 'fr',
+      deviceLanguage: null,
+    }),
+    'fr'
+  )
+  assert.equal(
+    resolveNotificationLanguagePreference({
+      userLocale: 'fr',
+      deviceLanguage: 'en',
+    }),
+    'fr'
+  )
+  assert.equal(
+    resolveNotificationLanguagePreference({
+      userLocale: null,
+      deviceLanguage: 'fr-BJ',
+    }),
+    'fr'
+  )
+  assert.equal(
+    resolveNotificationLanguagePreference({
+      userLocale: null,
+      deviceLanguage: null,
+    }),
+    'en'
+  )
+})
+
+test('notification templates are audience-specific where product copy differs', () => {
+  const customerAssigned = templateFor('trip.driver_assigned', 'en', 'customer')
+  const driverAssigned = templateFor('trip.driver_assigned', 'en', 'driver')
+  const driverAssignedFr = templateFor('trip.driver_assigned', 'fr', 'driver')
+  const customerCompleted = templateFor('trip.completed', 'en', 'customer')
+  const driverCompleted = templateFor('trip.completed', 'en', 'driver')
+  const driverCompletedFr = templateFor('trip.completed', 'fr', 'driver')
+
+  assert.equal(customerAssigned?.body, 'A Beninfy driver has been assigned to your trip.')
+  assert.equal(driverAssigned?.body, 'A new trip has been assigned to you.')
+  assert.equal(driverAssignedFr?.body, 'Un nouveau trajet vous a ete assigne.')
+  assert.notEqual(driverAssigned?.body, customerAssigned?.body)
+
+  assert.equal(customerCompleted?.body, 'Your Beninfy trip is complete. Thank you for travelling with us.')
+  assert.equal(driverCompleted?.body, 'Trip completed successfully.')
+  assert.equal(driverCompletedFr?.body, 'Trajet termine avec succes.')
+  assert.notEqual(driverCompleted?.body, customerCompleted?.body)
+})
+
+test('assignment removed notification remains non-actionable driver metadata', () => {
+  const template = templateFor('trip.assignment_removed', 'en', 'driver')
+  const data = pushPayloadToData({
+    type: 'trip.assignment_removed',
+    version: 1,
+    bookingId: 'booking1',
+    bookingLegId: 'leg1',
+  })
+
+  assert.equal(template?.body.includes('removed'), true)
+  assert.equal('action' in data, false)
+  assert.equal('allowedActions' in data, false)
 })
 
 test('push payload data remains stable and string-only', () => {
@@ -1611,6 +1726,60 @@ test('driver duty status allows only driver-controlled states', () => {
   assert.equal(isDriverDutyStatus('online'), false)
 })
 
+test('driver duty separates new assignment eligibility from owned trip action eligibility', () => {
+  assert.equal(canDriverReceiveNewAssignment('available'), true)
+  assert.equal(canDriverReceiveNewAssignment('off_duty'), false)
+  assert.equal(canDriverReceiveNewAssignment('inactive'), false)
+
+  assert.equal(canDriverExecuteAssignedTrip('available'), true)
+  assert.equal(canDriverExecuteAssignedTrip('off_duty'), true)
+  assert.equal(canDriverExecuteAssignedTrip('inactive'), false)
+})
+
+test('off-duty assigned drivers still use authoritative lifecycle actions', () => {
+  const assigned = evaluateDriverTripTransition({
+    status: 'assigned',
+    action: 'start_en_route',
+    hasDriver: true,
+    hasFleetVehicle: true,
+    bookingStatus: 'confirmed',
+  })
+  assert.equal(canDriverExecuteAssignedTrip('off_duty'), true)
+  assert.equal(assigned.ok, true)
+  if (assigned.ok) assert.equal(assigned.nextStatus, 'driver_en_route')
+
+  const activeSequence = [
+    ['driver_en_route', 'arrive', 'driver_arrived'],
+    ['driver_arrived', 'passenger_onboard', 'passenger_onboard'],
+    ['passenger_onboard', 'start_trip', 'in_progress'],
+    ['in_progress', 'complete', 'completed'],
+  ] as const
+
+  for (const [status, action, nextStatus] of activeSequence) {
+    const result = evaluateDriverTripTransition({
+      status,
+      action,
+      hasDriver: true,
+      hasFleetVehicle: true,
+      bookingStatus: 'confirmed',
+    })
+    assert.equal(canDriverExecuteAssignedTrip('off_duty'), true)
+    assert.equal(result.ok, true)
+    if (result.ok) assert.equal(result.nextStatus, nextStatus)
+  }
+})
+
+test('off-duty assignment ownership remains visible in driver trip views', () => {
+  assert.deepEqual(driverTripWhereForView('driver1', 'upcoming'), {
+    driverId: 'driver1',
+    status: { in: ['assigned'] },
+  })
+  assert.deepEqual(driverTripWhereForView('driver1', 'active'), {
+    driverId: 'driver1',
+    status: { in: ['dispatched', 'driver_en_route', 'driver_arrived', 'passenger_onboard', 'in_progress'] },
+  })
+})
+
 test('driver trip view normalization is stable', () => {
   assert.deepEqual(normalizeDriverTripView(null), { ok: true, view: 'all' })
   assert.deepEqual(normalizeDriverTripView('upcoming'), { ok: true, view: 'upcoming' })
@@ -1654,7 +1823,48 @@ test('driver assignment history query scopes by authenticated driver', () => {
   assert.deepEqual(driverAssignmentHistoryWhereForDriver('driver1'), {
     driverId: 'driver1',
   })
-  assert.deepEqual(driverAssignmentHistoryOrderBy(), [{ assignedAt: 'desc' }, { id: 'desc' }])
+})
+
+test('driver assignment history endpoint ordering uses effective outcome time with stable cursor', () => {
+  const records = [
+    {
+      id: 'history-a',
+      assignedAt: new Date('2026-07-18T08:00:00.000Z'),
+      completedAt: new Date('2026-08-20T08:00:00.000Z'),
+    },
+    {
+      id: 'history-c',
+      assignedAt: new Date('2026-08-18T08:00:00.000Z'),
+      releasedAt: new Date('2026-08-21T08:00:00.000Z'),
+      supersededAt: new Date('2026-08-21T08:00:00.000Z'),
+    },
+    {
+      id: 'history-b',
+      assignedAt: new Date('2026-08-01T08:00:00.000Z'),
+      declinedAt: new Date('2026-08-20T08:00:00.000Z'),
+    },
+    {
+      id: 'history-d',
+      assignedAt: new Date('2026-08-19T08:00:00.000Z'),
+    },
+  ]
+
+  const first = pageDriverAssignmentHistoryRecords({ records, limit: 2 })
+  const second = pageDriverAssignmentHistoryRecords({
+    records,
+    limit: 2,
+    cursor: first.nextCursor,
+  })
+
+  assert.deepEqual(first.page.map((record) => record.id), ['history-c', 'history-b'])
+  assert.deepEqual(second.page.map((record) => record.id), ['history-a', 'history-d'])
+  assert.equal(first.hasMore, true)
+  assert.equal(second.hasMore, false)
+  assert.equal(second.nextCursor, null)
+  assert.deepEqual(
+    [...first.page, ...second.page].map((record) => record.id).sort(),
+    records.map((record) => record.id).sort()
+  )
 })
 
 test('driver assignment history DTO preserves released driver association', () => {
@@ -1685,6 +1895,7 @@ test('driver assignment history DTO preserves released driver association', () =
   assert.equal(dto.bookingLegId, 'leg1')
   assert.equal(dto.outcome, 'released')
   assert.equal(dto.outcomeLabelKey, 'driverAssignmentHistory.released')
+  assert.equal(dto.effectiveOutcomeAt, '2026-08-18T08:30:00.000Z')
   assert.equal(dto.currentLegStatus, 'unassigned')
   assert.equal(dto.releaseReason, 'driver_cancelled')
   assert.equal(dto.releaseSource, 'driver')
@@ -1716,6 +1927,7 @@ test('driver assignment history DTO distinguishes reassigned-away outcome', () =
 
   assert.equal(dto.outcome, 'reassigned')
   assert.equal(dto.outcomeLabelKey, 'driverAssignmentHistory.reassigned')
+  assert.equal(dto.effectiveOutcomeAt, '2026-08-18T08:30:00.000Z')
   assert.equal(dto.currentLegStatus, 'assigned')
 })
 

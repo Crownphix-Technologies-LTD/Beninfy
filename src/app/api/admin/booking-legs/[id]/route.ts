@@ -6,6 +6,7 @@ import {
   markDriverAssignmentReleased,
   recordDriverAssignmentChange,
 } from '@/lib/mobile/driverAssignmentHistory'
+import { canDriverReceiveNewAssignment } from '@/lib/mobile/driverOperations'
 import { notifyTripLifecyclePush } from '@/lib/mobile/notifications'
 import { notifyBookingAssignmentChanged } from '@/lib/notifications'
 import { prisma } from '@/lib/prisma'
@@ -74,7 +75,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
   if (data.driverId) {
     const driver = await prisma.driver.findUnique({ where: { id: data.driverId } })
-    if (!driver || driver.status !== 'available') {
+    if (!driver || !canDriverReceiveNewAssignment(driver.status)) {
       return NextResponse.json({ error: 'Driver is not available' }, { status: 409 })
     }
     const conflict = await prisma.bookingLeg.findFirst({

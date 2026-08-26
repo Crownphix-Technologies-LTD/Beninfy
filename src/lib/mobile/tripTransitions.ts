@@ -3,6 +3,7 @@ import { writeAuditLog } from '@/lib/auditLog'
 import type { MobileErrorCode } from '@/lib/mobile/errors'
 import type { MobilePrincipal } from '@/lib/mobile/auth'
 import { notifyTripLifecyclePush } from '@/lib/mobile/notifications'
+import { canDriverExecuteAssignedTrip } from '@/lib/mobile/driverOperations'
 import {
   markDriverAssignmentAccepted,
   markDriverAssignmentCompleted,
@@ -102,7 +103,7 @@ export async function applyDriverTripAction({
   if (!principal.driverId || leg.driverId !== principal.driverId) {
     return { ok: false, code: 'TRIP_NOT_ASSIGNED', message: 'Trip is not assigned to this driver' }
   }
-  if (!leg.driver || leg.driver.status !== 'available') {
+  if (!leg.driver || !canDriverExecuteAssignedTrip(leg.driver.status)) {
     return { ok: false, code: 'DRIVER_INACTIVE', message: 'Driver is not active' }
   }
 
