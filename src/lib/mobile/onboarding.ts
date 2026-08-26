@@ -1,7 +1,7 @@
 import { createHmac, randomBytes, randomInt, timingSafeEqual } from 'crypto'
 import bcrypt from 'bcryptjs'
 import { prisma } from '@/lib/prisma'
-import type { MobilePrincipal } from '@/lib/mobile/auth'
+import type { MobilePrincipal, MobilePrincipalType } from '@/lib/mobile/auth'
 import type { MobileErrorCode } from '@/lib/mobile/errors'
 import { notifyMobileEmailOtp, notifyMobilePasswordReset } from '@/lib/notifications'
 
@@ -332,19 +332,40 @@ export function validateMobilePassword(password: string) {
   return password.length >= 8 && password.length <= 100
 }
 
+export type PasswordResetPrincipalType = Extract<MobilePrincipalType, 'CUSTOMER' | 'DRIVER'>
+
+export function normalizePasswordResetPrincipalType(
+  value: string | null | undefined
+): PasswordResetPrincipalType {
+  return value === 'DRIVER' ? 'DRIVER' : 'CUSTOMER'
+}
+
+export function passwordResetUserWhere(input: {
+  email: string
+  principalType?: PasswordResetPrincipalType | null
+}) {
+  const principalType = normalizePasswordResetPrincipalType(input.principalType)
+  return {
+    email: input.email.trim().toLowerCase(),
+    role: principalType === 'DRIVER' ? 'driver' : 'user',
+    disabledAt: null,
+    hashedPassword: { not: null },
+    ...(principalType === 'DRIVER' ? { driver: { isNot: null } } : {}),
+  }
+}
+
 export async function requestMobilePasswordReset(input: {
   email: string
+  principalType?: PasswordResetPrincipalType | null
   locale?: string | null
   origin: string
 }) {
-  const email = input.email.trim().toLowerCase()
   const user = await prisma.user.findFirst({
-    where: {
-      email,
-      role: 'user',
-      disabledAt: null,
-      hashedPassword: { not: null },
-    },
+    where: passwordResetUserWhere({
+      email: input.email,
+      principalType: input.principalType,
+    }),
+    select: { id: true, email: true, locale: true },
   })
 
   if (user?.email) {
@@ -364,13 +385,16 @@ export async function requestMobilePasswordReset(input: {
 
     const webUrl = new URL('/en/reset-password', input.origin)
     webUrl.searchParams.set('token', token)
-    const appDeepLink = `beninfy://reset-password?token=${encodeURIComponent(token)}`
+    const principalType = normalizePasswordResetPrincipalType(input.principalType)
+    const appScheme = principalType === 'DRIVER' ? 'beninfy-driver' : 'beninfy'
+    const appDeepLink = `${appScheme}://reset-password?token=${encodeURIComponent(token)}`
     await notifyMobilePasswordReset({
       email: user.email,
       webUrl: webUrl.toString(),
       appDeepLink,
       expiresAt: new Date(now.getTime() + RESET_TOKEN_TTL_MS),
-      locale: normalizeMobileLocale(input.locale ?? user.locale),
+      locale: normalizeMobileLocale(user.locale ?? input.locale),
+      principalType,
     })
   }
 

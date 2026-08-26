@@ -7,6 +7,7 @@ export const runtime = 'nodejs'
 
 const schema = z.object({
   email: z.string().trim().email(),
+  principalType: z.enum(['CUSTOMER', 'DRIVER']).optional(),
   locale: z.enum(['en', 'fr']).optional(),
 })
 
@@ -30,6 +31,7 @@ export async function POST(req: Request) {
 
   await requestMobilePasswordReset({
     email: parsed.data.email,
+    principalType: parsed.data.principalType,
     locale: parsed.data.locale,
     origin: new URL(req.url).origin,
   })

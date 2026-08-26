@@ -428,12 +428,25 @@ export async function notifyMobilePasswordReset(input: {
   appDeepLink: string
   expiresAt: Date
   locale?: 'en' | 'fr'
+  principalType?: 'CUSTOMER' | 'DRIVER'
 }) {
-  const title = input.locale === 'fr' ? 'Réinitialisation du mot de passe' : 'Password Reset'
+  const isDriver = input.principalType === 'DRIVER'
+  const title =
+    input.locale === 'fr'
+      ? isDriver
+        ? 'Réinitialisation du mot de passe chauffeur'
+        : 'Réinitialisation du mot de passe'
+      : isDriver
+        ? 'Driver Password Reset'
+        : 'Password Reset'
   const intro =
     input.locale === 'fr'
-      ? 'Nous avons reçu une demande de réinitialisation du mot de passe de votre compte Beninfy.'
-      : 'We received a request to reset the password for your Beninfy account.'
+      ? isDriver
+        ? 'Nous avons reçu une demande de réinitialisation du mot de passe de votre compte chauffeur Beninfy.'
+        : 'Nous avons reçu une demande de réinitialisation du mot de passe de votre compte Beninfy.'
+      : isDriver
+        ? 'We received a request to reset the password for your Beninfy driver account.'
+        : 'We received a request to reset the password for your Beninfy account.'
   const items: Array<[string, unknown]> = [
     ['Reset link', input.webUrl],
     ['Mobile app link', input.appDeepLink],
@@ -444,8 +457,12 @@ export async function notifyMobilePasswordReset(input: {
     to: input.email,
     subject:
       input.locale === 'fr'
-        ? 'Réinitialisez votre mot de passe Beninfy'
-        : 'Reset your Beninfy password',
+        ? isDriver
+          ? 'Réinitialisez votre mot de passe chauffeur Beninfy'
+          : 'Réinitialisez votre mot de passe Beninfy'
+        : isDriver
+          ? 'Reset your Beninfy driver password'
+          : 'Reset your Beninfy password',
     html: emailShell(
       title,
       intro,

@@ -41,6 +41,7 @@ Admin flow:
 5. The success banner shows the email and temporary password once. Share it securely out-of-band.
 6. The driver signs in through `POST /api/mobile/v1/auth/login` with `principalType: "DRIVER"`.
 7. The driver may change the password in the Driver app through `POST /api/mobile/v1/driver/change-password`.
+8. If the driver forgets the password, the Driver app may request self-service recovery through `POST /api/mobile/v1/auth/forgot-password` with `principalType: "DRIVER"`.
 
 Existing Driver rows without a linked account show `No login` in the backoffice. Use the row action `Create Driver app login` to provision/link a login account. If a safe unlinked non-admin user already exists for the same email, the backend requires explicit admin confirmation before linking and can reset a one-time temporary password for handoff.
 
@@ -52,6 +53,26 @@ Driver account auth state is separate from operational duty status:
 - `Driver.status`: controls transport operations availability.
 
 Forced first-login password change is not currently represented in schema. The Driver Security screen supports manual password change after first login.
+
+## Driver Password Recovery
+
+Driver recovery is self-service account recovery, not registration. It applies only to an existing provisioned `User(role="driver")` linked to a `Driver` record. The public forgot-password response is generic and does not reveal whether the email exists, is a customer, is a driver, or is unlinked.
+
+```json
+{
+  "email": "driver@example.com",
+  "principalType": "DRIVER",
+  "locale": "en"
+}
+```
+
+The recovery email uses Driver-facing copy and includes a Driver app deep link:
+
+```text
+beninfy-driver://reset-password?token=<token>
+```
+
+The Driver app submits the token and new password to `POST /api/mobile/v1/auth/reset-password`, then returns to sign-in. Successful reset consumes the token, updates the password hash, increments `User.sessionVersion`, and revokes existing mobile sessions.
 
 ## Implemented Endpoints
 

@@ -88,6 +88,18 @@ OTP codes are single-use, hashed server-side, expire, and have attempt limits.
 
 `POST /api/mobile/v1/auth/forgot-password` always returns a generic success response.
 
+For driver recovery, Flutter must send:
+
+```json
+{
+  "email": "driver@example.com",
+  "principalType": "DRIVER",
+  "locale": "en"
+}
+```
+
+Driver accounts cannot self-register. Password recovery is available only for existing provisioned driver users and never creates or links accounts.
+
 `POST /api/mobile/v1/auth/reset-password` accepts:
 
 ```json
