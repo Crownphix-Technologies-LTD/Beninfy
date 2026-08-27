@@ -32,17 +32,29 @@ export async function ensureDefaultRoutePrices() {
       const routeId = route.id as RouteId
       const vehicleId = vehicle.id as VehicleId
 
+      const defaultAmountNGN = fixedRouteAmount(routeId, vehicleId, vehicle.name)
+      const defaultSeed: RoutePriceSeed[] =
+        defaultAmountNGN && !existingKeys.has(priceKey(route.id, vehicle.id, 'default'))
+          ? [
+              {
+                routeId: route.id,
+                vehicleId: vehicle.id,
+                pricingScope: 'default',
+                amountNGN: defaultAmountNGN,
+              },
+            ]
+          : []
+
       if (requiresLagosPickupArea(routeId, vehicleId, vehicle.name)) {
-        return (['mainland', 'island'] as const).flatMap((scope) => {
+        const scopedSeeds = (['mainland', 'island'] as const).flatMap((scope) => {
           const amountNGN = getRouteDropoffPrice(routeId, vehicleId, vehicle.name, scope)
           if (!amountNGN || existingKeys.has(priceKey(route.id, vehicle.id, scope))) return []
           return [{ routeId: route.id, vehicleId: vehicle.id, pricingScope: scope, amountNGN }]
         })
+        return [...defaultSeed, ...scopedSeeds]
       }
 
-      const amountNGN = fixedRouteAmount(routeId, vehicleId, vehicle.name)
-      if (!amountNGN || existingKeys.has(priceKey(route.id, vehicle.id, 'default'))) return []
-      return [{ routeId: route.id, vehicleId: vehicle.id, pricingScope: 'default' as const, amountNGN }]
+      return defaultSeed
     })
   })
 

@@ -76,6 +76,7 @@ import {
 } from '../src/lib/mobile/bookingDiscovery'
 import { calculateBookingPricing } from '../src/lib/bookingPricing'
 import { calculateRouteBorderFeeNGN } from '../src/lib/borderFeeCatalog'
+import { validateCouponCode } from '../src/lib/coupons'
 import {
   findPublicRouteByCities,
   getPublicRouteById,
@@ -1934,14 +1935,18 @@ test('reverse Lagos destination coordinates validate without pickup fare zone', 
       findFirst: async (args: {
         where: { id?: string; from?: { equals: string }; to?: { equals: string } }
       }) => {
-        if (args.where.id) return routes.find((route) => route.id === args.where.id) ?? null
-        return (
-          routes.find(
-            (route) =>
-              route.from.toLowerCase() === args.where.from?.equals.toLowerCase() &&
-              route.to.toLowerCase() === args.where.to?.equals.toLowerCase()
-          ) ?? null
-        )
+        const route = args.where.id
+          ? routes.find((candidate) => candidate.id === args.where.id)
+          : routes.find(
+              (candidate) =>
+                candidate.from.toLowerCase() === args.where.from?.equals.toLowerCase() &&
+                candidate.to.toLowerCase() === args.where.to?.equals.toLowerCase()
+            )
+        if (!route) return null
+        return {
+          ...route,
+          borderFeeIds: route.id === 'lagos-cotonou' ? ['nigeria-benin'] : [],
+        }
       },
     },
   }
@@ -1997,6 +2002,480 @@ test('reverse Lagos destination coordinates validate without pickup fare zone', 
     assert.equal(lagosToCotonou.data.route.id, 'lagos-cotonou')
     assert.equal(lagosToCotonou.data.locationMetadata.pickupServiceArea.serviceArea.city, 'Lagos')
     assert.equal(lagosToCotonou.data.locationMetadata.pickupFareZone?.code, 'lagos_mainland')
+  }
+})
+
+test('mobile quote uses Lagos pickup scopes only when Lagos is the route origin', async () => {
+  const routePriceLookups: Array<{ routeId: string; scopes: string[] }> = []
+  const saloon = vehicles.find((vehicle) => vehicle.id === 'saloon')!
+  const prices = [
+    { vehicleId: saloon.id, pricingScope: 'default', amountNGN: 160000 },
+    { vehicleId: saloon.id, pricingScope: 'mainland', amountNGN: 160000 },
+    { vehicleId: saloon.id, pricingScope: 'island', amountNGN: 180000 },
+  ]
+  const client = {
+    route: {
+      findFirst: async (args: {
+        where: { id?: string; from?: { equals: string }; to?: { equals: string } }
+      }) => {
+        const route = args.where.id
+          ? routes.find((candidate) => candidate.id === args.where.id)
+          : routes.find(
+              (candidate) =>
+                candidate.from.toLowerCase() === args.where.from?.equals.toLowerCase() &&
+                candidate.to.toLowerCase() === args.where.to?.equals.toLowerCase()
+            )
+        if (!route) return null
+        return {
+          ...route,
+          borderFeeIds: route.id === 'lagos-cotonou' ? ['nigeria-benin'] : [],
+        }
+      },
+    },
+    vehicle: {
+      findUnique: async () => null,
+    },
+    fleetVehicle: {
+      count: async () => 1,
+      findMany: async () => [
+        {
+          id: 'saloon-unit-1',
+          vehicleId: saloon.id,
+          label: 'Toyota Camry',
+          color: 'Black',
+          currentCity: 'Lagos',
+          status: 'available',
+          vehicle: {
+            id: saloon.id,
+            name: saloon.name,
+            capacity: saloon.capacity,
+            luggageCapacity: saloon.luggageCapacity,
+            image: saloon.image,
+          },
+        },
+      ],
+      findUnique: async () => null,
+    },
+    bookingLeg: {
+      count: async () => 0,
+    },
+    routePrice: {
+      findMany: async (args: {
+        where: {
+          routeId: string
+          vehicleId?: { in: string[] }
+          pricingScope: { in: string[] }
+        }
+      }) => {
+        routePriceLookups.push({
+          routeId: args.where.routeId,
+          scopes: args.where.pricingScope.in,
+        })
+        return prices.filter(
+          (price) =>
+            price.vehicleId === saloon.id &&
+            args.where.routeId === 'lagos-cotonou' &&
+            args.where.pricingScope.in.includes(price.pricingScope)
+        )
+      },
+    },
+    borderFee: {
+      findMany: async () => [
+        {
+          id: 'nigeria-benin',
+          country: 'Benin',
+          countryFr: 'Benin',
+          border: 'Seme',
+          borderFr: 'Seme',
+          countries: ['Nigeria', 'Benin Republic'],
+          feePerPersonNGN: 5000,
+          feeRoundTripNGN: 10000,
+          popular: true,
+          icon: 'local_taxi',
+          services: [],
+          servicesFr: [],
+          documents: [],
+          documentsFr: [],
+          tips: [],
+          tipsFr: [],
+        },
+      ],
+    },
+  }
+
+  const cases = [
+    {
+      name: 'Lagos to Cotonou from Mainland',
+      input: {
+        routeId: 'lagos-cotonou',
+        from: 'Lagos',
+        to: 'Cotonou',
+        pickupCity: 'Ojodu',
+        pickupCountryCode: 'NG',
+        pickupLatitude: 6.645,
+        pickupLongitude: 3.354,
+        destinationCity: 'Cotonou',
+        destinationCountryCode: 'BJ',
+      },
+      routeId: 'lagos-cotonou',
+      pickupFareZone: 'lagos_mainland',
+      pickupArea: 'mainland',
+      fare: 160000,
+      scopes: ['mainland', 'default'],
+    },
+    {
+      name: 'Lagos to Cotonou from Island',
+      input: {
+        routeId: 'lagos-cotonou',
+        from: 'Lagos',
+        to: 'Cotonou',
+        pickupCity: 'Lekki Phase 1',
+        pickupCountryCode: 'NG',
+        pickupLatitude: 6.4474,
+        pickupLongitude: 3.4723,
+        destinationCity: 'Cotonou',
+        destinationCountryCode: 'BJ',
+      },
+      routeId: 'lagos-cotonou',
+      pickupFareZone: 'lagos_island',
+      pickupArea: 'island',
+      fare: 180000,
+      scopes: ['island', 'default'],
+    },
+    {
+      name: 'Cotonou to Lagos with Mainland destination',
+      input: {
+        routeId: 'lagos-cotonou',
+        from: 'Cotonou',
+        to: 'Lagos',
+        pickupCity: 'Cotonou',
+        pickupCountryCode: 'BJ',
+        destinationCity: 'Ojodu',
+        destinationCountryCode: 'NG',
+        destinationLatitude: 6.645,
+        destinationLongitude: 3.354,
+      },
+      routeId: reverseProjectionRouteId('lagos-cotonou'),
+      pickupFareZone: null,
+      pickupArea: null,
+      fare: 160000,
+      scopes: ['default'],
+    },
+    {
+      name: 'Cotonou to Lagos with Island destination',
+      input: {
+        routeId: 'lagos-cotonou',
+        from: 'Cotonou',
+        to: 'Lagos',
+        pickupCity: 'Cotonou',
+        pickupCountryCode: 'BJ',
+        destinationCity: 'Lekki Phase 1',
+        destinationCountryCode: 'NG',
+        destinationLatitude: 6.4474,
+        destinationLongitude: 3.4723,
+      },
+      routeId: reverseProjectionRouteId('lagos-cotonou'),
+      pickupFareZone: null,
+      pickupArea: null,
+      fare: 160000,
+      scopes: ['default'],
+    },
+  ] as const
+
+  for (const quoteCase of cases) {
+    const availability = await calculateMobileAvailability(
+      {
+        ...quoteCase.input,
+        vehicleId: saloon.id,
+        tripType: 'one-way',
+        departureDate: '2026-08-20T09:00:00.000Z',
+        passengers: 2,
+      },
+      client as never
+    )
+    assert.equal(availability.ok, true, quoteCase.name)
+    if (availability.ok) {
+      assert.equal(availability.data.route.id, quoteCase.routeId)
+      assert.equal(availability.data.route.pricingRouteId, 'lagos-cotonou')
+    }
+
+    const quote = await calculateMobileQuote(
+      {
+        ...quoteCase.input,
+        vehicleId: saloon.id,
+        tripType: 'one-way',
+        departureDate: '2026-08-20T09:00:00.000Z',
+        passengers: 2,
+      },
+      client as never
+    )
+    assert.equal(quote.ok, true, quoteCase.name)
+    if (quote.ok) {
+      assert.equal(quote.data.quote.route.id, quoteCase.routeId)
+      assert.equal(quote.data.quote.route.pricingRouteId, 'lagos-cotonou')
+      assert.equal(quote.data.quote.pickupArea, quoteCase.pickupArea)
+      assert.equal(quote.data.quote.pickupFareZone?.code ?? null, quoteCase.pickupFareZone)
+      assert.equal(quote.data.quote.pricing.oneWayDropoffFare.value, quoteCase.fare)
+      assert.equal(quote.data.quote.pricing.borderFee.perPassenger.value, 5000)
+      assert.equal(quote.data.quote.pricing.borderFee.passengerCount, 2)
+      assert.equal(quote.data.quote.pricing.borderFee.total.value, 10000)
+      assert.equal(quote.data.quote.pricing.subtotal.value, quoteCase.fare + 10000)
+    }
+  }
+
+  assert.deepEqual(
+    routePriceLookups.map((lookup) => lookup.routeId),
+    ['lagos-cotonou', 'lagos-cotonou', 'lagos-cotonou', 'lagos-cotonou']
+  )
+  assert.deepEqual(
+    routePriceLookups.map((lookup) => lookup.scopes),
+    cases.map((quoteCase) => [...quoteCase.scopes])
+  )
+})
+
+test('mobile coupon quote keeps Cotonou Lagos pricing authoritative', async () => {
+  const saloon = vehicles.find((vehicle) => vehicle.id === 'saloon')!
+  const activeFixedCoupon = {
+    id: 'fixed-coupon',
+    code: 'FIXED',
+    description: 'Fixed discount',
+    discountType: 'fixed',
+    amountNGN: 365000,
+    percent: null,
+    active: true,
+    startsAt: null,
+    expiresAt: null,
+    minSpendNGN: null,
+    maxRedemptions: null,
+    redeemedCount: 0,
+  }
+  const activePercentCoupon = {
+    ...activeFixedCoupon,
+    id: 'percent-coupon',
+    code: 'PERCENT',
+    description: 'Percent discount',
+    discountType: 'percent',
+    amountNGN: null,
+    percent: 95,
+    redeemedCount: 1,
+  }
+  const expiredCoupon = {
+    ...activeFixedCoupon,
+    id: 'expired-coupon',
+    code: 'EXPIRED',
+    expiresAt: new Date('2025-01-01T00:00:00.000Z'),
+  }
+  const minimumCoupon = {
+    ...activeFixedCoupon,
+    id: 'minimum-coupon',
+    code: 'MINIMUM',
+    amountNGN: 1000,
+    minSpendNGN: 200000,
+  }
+  const zeroCoupon = {
+    ...activeFixedCoupon,
+    id: 'zero-coupon',
+    code: 'ZERO',
+    amountNGN: 0,
+  }
+  const coupons = new Map(
+    [activeFixedCoupon, activePercentCoupon, expiredCoupon, minimumCoupon, zeroCoupon].map(
+      (coupon) => [coupon.code, coupon]
+    )
+  )
+  const client = {
+    route: {
+      findFirst: async (args: {
+        where: { id?: string; from?: { equals: string }; to?: { equals: string } }
+      }) => {
+        const route = args.where.id
+          ? routes.find((candidate) => candidate.id === args.where.id)
+          : routes.find(
+              (candidate) =>
+                candidate.from.toLowerCase() === args.where.from?.equals.toLowerCase() &&
+                candidate.to.toLowerCase() === args.where.to?.equals.toLowerCase()
+            )
+        if (!route) return null
+        return {
+          ...route,
+          borderFeeIds: route.id === 'lagos-cotonou' ? ['nigeria-benin'] : [],
+        }
+      },
+    },
+    vehicle: {
+      findUnique: async () => null,
+    },
+    fleetVehicle: {
+      count: async () => 1,
+      findMany: async () => [
+        {
+          id: 'saloon-unit-1',
+          vehicleId: saloon.id,
+          label: 'Toyota Camry',
+          color: 'Black',
+          currentCity: 'Cotonou',
+          status: 'available',
+          vehicle: {
+            id: saloon.id,
+            name: saloon.name,
+            capacity: saloon.capacity,
+            luggageCapacity: saloon.luggageCapacity,
+            image: saloon.image,
+          },
+        },
+      ],
+      findUnique: async () => null,
+    },
+    bookingLeg: {
+      count: async () => 0,
+    },
+    routePrice: {
+      findMany: async (args: { where: { routeId: string; pricingScope: { in: string[] } } }) => {
+        const prices = [
+          { vehicleId: saloon.id, pricingScope: 'default', amountNGN: 160000 },
+          { vehicleId: saloon.id, pricingScope: 'mainland', amountNGN: 160000 },
+          { vehicleId: saloon.id, pricingScope: 'island', amountNGN: 170000 },
+        ]
+        return prices.filter(
+          (price) =>
+            args.where.routeId === 'lagos-cotonou' &&
+            args.where.pricingScope.in.includes(price.pricingScope)
+        )
+      },
+    },
+    borderFee: {
+      findMany: async () => [
+        {
+          id: 'nigeria-benin',
+          country: 'Benin',
+          countryFr: 'Benin',
+          border: 'Seme',
+          borderFr: 'Seme',
+          countries: ['Nigeria', 'Benin Republic'],
+          feePerPersonNGN: 5000,
+          feeRoundTripNGN: 10000,
+          popular: true,
+          icon: 'local_taxi',
+          services: [],
+          servicesFr: [],
+          documents: [],
+          documentsFr: [],
+          tips: [],
+          tipsFr: [],
+        },
+      ],
+    },
+    coupon: {
+      findUnique: async (args: { where: { code: string } }) => coupons.get(args.where.code) ?? null,
+    },
+  }
+  const baseInput = {
+    routeId: 'lagos-cotonou',
+    from: 'Cotonou',
+    to: 'Lagos',
+    vehicleId: saloon.id,
+    tripType: 'one-way',
+    departureDate: '2026-08-20T09:00:00.000Z',
+    passengers: 1,
+    pickupCity: 'Cotonou',
+    pickupCountryCode: 'BJ',
+    destinationCity: 'Ikeja',
+    destinationCountryCode: 'NG',
+    destinationLatitude: 6.6018,
+    destinationLongitude: 3.3515,
+  } as const
+
+  const availability = await calculateMobileAvailability(baseInput, client as never)
+  assert.equal(availability.ok, true)
+
+  const quoteWithoutCoupon = await calculateMobileQuote(baseInput, client as never)
+  assert.equal(quoteWithoutCoupon.ok, true)
+  if (quoteWithoutCoupon.ok) {
+    assert.equal(quoteWithoutCoupon.data.quote.route.id, reverseProjectionRouteId('lagos-cotonou'))
+    assert.equal(quoteWithoutCoupon.data.quote.route.pricingRouteId, 'lagos-cotonou')
+    assert.equal(quoteWithoutCoupon.data.quote.pickupFareZone, null)
+    assert.equal(quoteWithoutCoupon.data.quote.pricing.rideFare.value, 160000)
+    assert.equal(quoteWithoutCoupon.data.quote.pricing.borderFee.total.value, 5000)
+    assert.equal(quoteWithoutCoupon.data.quote.pricing.subtotal.value, 165000)
+    assert.equal(quoteWithoutCoupon.data.quote.pricing.total.value, 165000)
+  }
+
+  const fixedCouponQuote = await calculateMobileQuote(
+    { ...baseInput, couponCode: activeFixedCoupon.code },
+    client as never
+  )
+  assert.equal(fixedCouponQuote.ok, true)
+  if (fixedCouponQuote.ok) {
+    assert.equal(fixedCouponQuote.data.quote.pricing.discount.value, 165000)
+    assert.equal(fixedCouponQuote.data.quote.pricing.total.value, 0)
+    assert.doesNotThrow(() => JSON.stringify(fixedCouponQuote.data))
+  }
+
+  const percentCouponQuote = await calculateMobileQuote(
+    { ...baseInput, couponCode: activePercentCoupon.code },
+    client as never
+  )
+  assert.equal(percentCouponQuote.ok, true)
+  if (percentCouponQuote.ok) {
+    assert.equal(percentCouponQuote.data.quote.pricing.discount.value, 156750)
+    assert.equal(percentCouponQuote.data.quote.pricing.total.value, 8250)
+    assert.equal(percentCouponQuote.data.quote.pricing.borderFee.total.value, 5000)
+  }
+
+  const invalidCouponQuote = await calculateMobileQuote(
+    { ...baseInput, couponCode: 'MISSING' },
+    client as never
+  )
+  assert.equal(invalidCouponQuote.ok, false)
+  if (!invalidCouponQuote.ok) assert.equal(invalidCouponQuote.code, 'COUPON_INVALID')
+
+  const expiredCouponQuote = await calculateMobileQuote(
+    { ...baseInput, couponCode: expiredCoupon.code },
+    client as never
+  )
+  assert.equal(expiredCouponQuote.ok, false)
+  if (!expiredCouponQuote.ok) assert.equal(expiredCouponQuote.code, 'COUPON_EXPIRED')
+
+  const minimumCouponQuote = await calculateMobileQuote(
+    { ...baseInput, couponCode: minimumCoupon.code },
+    client as never
+  )
+  assert.equal(minimumCouponQuote.ok, false)
+  if (!minimumCouponQuote.ok) assert.equal(minimumCouponQuote.code, 'COUPON_INVALID')
+
+  const zeroCouponQuote = await calculateMobileQuote(
+    { ...baseInput, couponCode: zeroCoupon.code },
+    client as never
+  )
+  assert.equal(zeroCouponQuote.ok, false)
+  if (!zeroCouponQuote.ok) assert.equal(zeroCouponQuote.code, 'COUPON_INVALID')
+})
+
+test('coupon validation normalizes integer-like money values before discount arithmetic', async () => {
+  const client = {
+    coupon: {
+      findUnique: async () => ({
+        id: 'coupon',
+        code: 'SAFE',
+        description: null,
+        discountType: 'fixed',
+        amountNGN: '365000',
+        percent: null,
+        active: true,
+        startsAt: null,
+        expiresAt: null,
+        minSpendNGN: '100000',
+        maxRedemptions: BigInt(10),
+        redeemedCount: BigInt(1),
+      }),
+    },
+  }
+
+  const result = await validateCouponCode('SAFE', 165000, client as never)
+  assert.equal(result.ok, true)
+  if (result.ok) {
+    assert.equal(result.discountNGN, 165000)
+    assert.equal(result.finalAmountNGN, 0)
   }
 })
 

@@ -1,7 +1,8 @@
 import { z } from 'zod'
 import { vehicles as catalogVehicles } from '@/data/vehicles'
-import { requiresLagosPickupArea } from '@/data/pricing'
+import { requiresLagosPickupArea, type RoutePriceScope } from '@/data/pricing'
 import { calculateBookingPricing, calculateFareBreakdown } from '@/lib/bookingPricing'
+import { calculateRouteBorderFeeNGN } from '@/lib/borderFeeCatalog'
 import { prisma } from '@/lib/prisma'
 import {
   findPublicRouteByCities,
@@ -421,6 +422,17 @@ export async function calculateMobileQuote(
   })
 
   if (!fare.ok) {
+    await logMobileQuoteUnavailableDiagnostics({
+      selection: normalized.data.selection,
+      route: normalized.data.route,
+      vehicle,
+      fleetVehicle: fleetVehicle ? toFleetVehicleSafe(fleetVehicle) : null,
+      pickupFareZone: normalized.data.locationMetadata.pickupFareZone,
+      pickupServiceArea: normalized.data.locationMetadata.pickupServiceArea,
+      fareCode: fare.code,
+      client,
+    })
+
     return {
       ok: false as const,
       code:
@@ -434,8 +446,45 @@ export async function calculateMobileQuote(
   const couponCode = normalized.data.selection.couponCode
     ? normalizeCouponCode(normalized.data.selection.couponCode)
     : null
-  const coupon = couponCode ? await validateCouponCode(couponCode, fare.subtotalNGN, client) : null
-  if (coupon && !coupon.ok) {
+  let coupon: Awaited<ReturnType<typeof validateCouponCode>> | null = null
+  if (couponCode) {
+    try {
+      coupon = await validateCouponCode(couponCode, fare.subtotalNGN, client)
+    } catch (error) {
+      await logMobileCouponQuoteDiagnostics({
+        couponCode,
+        selection: normalized.data.selection,
+        route: normalized.data.route,
+        vehicle,
+        fleetVehicle: fleetVehicle ? toFleetVehicleSafe(fleetVehicle) : null,
+        pricingScope: fare.pricingScope,
+        fare,
+        coupon: null,
+        discountNGN: null,
+        totalNGN: null,
+        failureStage: 'coupon_lookup_or_calculation',
+        exception: error,
+        client,
+      })
+      throw error
+    }
+  }
+  if (couponCode && coupon && !coupon.ok) {
+    await logMobileCouponQuoteDiagnostics({
+      couponCode,
+      selection: normalized.data.selection,
+      route: normalized.data.route,
+      vehicle,
+      fleetVehicle: fleetVehicle ? toFleetVehicleSafe(fleetVehicle) : null,
+      pricingScope: fare.pricingScope,
+      fare,
+      coupon,
+      discountNGN: null,
+      totalNGN: null,
+      failureStage: 'coupon_ineligible',
+      client,
+    })
+
     return {
       ok: false as const,
       code: couponErrorCode(coupon.error),
@@ -445,6 +494,22 @@ export async function calculateMobileQuote(
 
   const discountNGN = coupon?.ok ? coupon.discountNGN : 0
   const totalNGN = Math.max(0, fare.subtotalNGN - discountNGN)
+  if (couponCode) {
+    await logMobileCouponQuoteDiagnostics({
+      couponCode,
+      selection: normalized.data.selection,
+      route: normalized.data.route,
+      vehicle,
+      fleetVehicle: fleetVehicle ? toFleetVehicleSafe(fleetVehicle) : null,
+      pricingScope: fare.pricingScope,
+      fare,
+      coupon,
+      discountNGN,
+      totalNGN,
+      failureStage: null,
+      client,
+    })
+  }
 
   return {
     ok: true as const,
@@ -519,6 +584,199 @@ function routeMatchesSelection(route: Route, selection: MobileDiscoverySelection
 
 function serviceAreaDiagnosticsEnabled() {
   return process.env.NODE_ENV !== 'production' || process.env.VERCEL_ENV === 'preview'
+}
+
+type MobileQuotePricingDiagnosticsInput = {
+  selection: MobileDiscoverySelection
+  route: Route
+  vehicle: Vehicle
+  fleetVehicle: FleetVehicleSafe | null
+  pickupFareZone: RouteServiceAreaValidationMetadata['pickupFareZone']
+  pickupServiceArea: RouteServiceAreaValidationMetadata['pickupServiceArea']
+  fareCode: string
+  client: PrismaClientLike
+}
+
+async function logMobileQuoteUnavailableDiagnostics(input: MobileQuotePricingDiagnosticsInput) {
+  if (!serviceAreaDiagnosticsEnabled()) return
+
+  const pricingRouteId = routePricingId(input.route)
+  const requestedPricingScope = input.selection.pickupArea ?? 'default'
+  const resolvedPricingScope = input.pickupFareZone?.pricingScope ?? 'default'
+  const pricingScopes =
+    resolvedPricingScope === 'default'
+      ? ['default']
+      : ([resolvedPricingScope, 'default'] satisfies RoutePriceScope[])
+  const targetIds = input.fleetVehicle
+    ? [input.fleetVehicle.id, input.vehicle.id]
+    : [input.vehicle.id]
+
+  try {
+    const [routeRows, routeRecord, borderFee] = await Promise.all([
+      input.client.routePrice.findMany({
+        where: {
+          routeId: pricingRouteId,
+          pricingScope: { in: pricingScopes },
+        },
+        select: { vehicleId: true, pricingScope: true, amountNGN: true },
+      }),
+      input.client.route.findFirst({
+        where: { id: pricingRouteId, available: true },
+        select: { id: true, borderFeeIds: true },
+      }),
+      calculateRouteBorderFeeNGN({
+        routeId: pricingRouteId,
+        tripType: input.selection.tripType,
+        passengerCount: input.selection.passengers,
+        client: input.client,
+      }),
+    ])
+    const vehicleRows = routeRows.filter((row) => targetIds.includes(row.vehicleId))
+
+    console.warn('[mobile-pricing-quote]', {
+      requestRouteId: input.selection.routeId ?? null,
+      resolvedRouteId: input.route.id,
+      resolvedRouteDirection: input.route.direction ?? 'explicit',
+      canonicalRouteId: input.route.canonicalRouteId ?? input.route.id,
+      pricingRouteId,
+      routeOriginCity: input.route.from,
+      routeDestinationCity: input.route.to,
+      vehicleId: input.vehicle.id,
+      vehicleCategory: input.vehicle.name,
+      passengerCount: input.selection.passengers,
+      pickupServiceArea: {
+        city: input.pickupServiceArea.serviceArea.city,
+        countryCode: input.pickupServiceArea.serviceArea.countryCode,
+        resolvedLocality: input.pickupServiceArea.resolvedLocality,
+      },
+      pickupFareZone: input.pickupFareZone
+        ? {
+            code: input.pickupFareZone.code,
+            label: input.pickupFareZone.label,
+            pricingScope: input.pickupFareZone.pricingScope,
+          }
+        : null,
+      requestedPricingScope,
+      resolvedPricingScope,
+      matchingRoutePriceFound: routeRows.length > 0,
+      matchingVehiclePriceFound: vehicleRows.length > 0,
+      basePricePresent: vehicleRows.length > 0,
+      borderFeeIdsCount: routeRecord?.borderFeeIds.length ?? 0,
+      borderFeePerPassenger: borderFee.ok ? borderFee.perPassengerNGN : null,
+      borderFeeTotal: borderFee.ok ? borderFee.amountNGN : null,
+      quoteUnavailableReason: input.fareCode,
+    })
+  } catch {
+    console.warn('[mobile-pricing-quote]', {
+      requestRouteId: input.selection.routeId ?? null,
+      resolvedRouteId: input.route.id,
+      resolvedRouteDirection: input.route.direction ?? 'explicit',
+      canonicalRouteId: input.route.canonicalRouteId ?? input.route.id,
+      pricingRouteId,
+      routeOriginCity: input.route.from,
+      routeDestinationCity: input.route.to,
+      vehicleId: input.vehicle.id,
+      vehicleCategory: input.vehicle.name,
+      passengerCount: input.selection.passengers,
+      pickupServiceArea: {
+        city: input.pickupServiceArea.serviceArea.city,
+        countryCode: input.pickupServiceArea.serviceArea.countryCode,
+        resolvedLocality: input.pickupServiceArea.resolvedLocality,
+      },
+      pickupFareZone: input.pickupFareZone
+        ? {
+            code: input.pickupFareZone.code,
+            label: input.pickupFareZone.label,
+            pricingScope: input.pickupFareZone.pricingScope,
+          }
+        : null,
+      requestedPricingScope,
+      resolvedPricingScope,
+      matchingRoutePriceFound: null,
+      matchingVehiclePriceFound: null,
+      basePricePresent: null,
+      borderFeeIdsCount: null,
+      borderFeePerPassenger: null,
+      borderFeeTotal: null,
+      quoteUnavailableReason: input.fareCode,
+    })
+  }
+}
+
+type MobileCouponQuoteDiagnosticsInput = {
+  couponCode: string
+  selection: MobileDiscoverySelection
+  route: Route
+  vehicle: Vehicle
+  fleetVehicle: FleetVehicleSafe | null
+  pricingScope: RoutePriceScope
+  fare: Extract<Awaited<ReturnType<typeof calculateBookingPricing>>, { ok: true }>
+  coupon: Awaited<ReturnType<typeof validateCouponCode>> | null
+  discountNGN: number | null
+  totalNGN: number | null
+  failureStage: string | null
+  exception?: unknown
+  client: PrismaClientLike
+}
+
+async function logMobileCouponQuoteDiagnostics(input: MobileCouponQuoteDiagnosticsInput) {
+  if (!serviceAreaDiagnosticsEnabled()) return
+
+  const metadata = await loadSafeCouponDiagnosticMetadata(input.couponCode, input.client)
+  const sanitizedException = sanitizeDiagnosticException(input.exception)
+
+  console.warn('[mobile-coupon-quote]', {
+    resolvedRouteId: input.route.id,
+    pricingRouteId: routePricingId(input.route),
+    pricingScope: input.pricingScope,
+    vehiclePricingIdentifier: input.fleetVehicle?.id ?? input.vehicle.id,
+    passengerCount: input.selection.passengers,
+    tripType: input.selection.tripType,
+    rideFare: input.fare.rideFareNGN,
+    borderFeePerPassenger: input.fare.borderFeePerPassengerNGN,
+    borderFeeTotal: input.fare.borderFeeNGN,
+    subtotalBeforeDiscount: input.fare.subtotalNGN,
+    couponFound: metadata?.found ?? null,
+    couponType: metadata?.discountType ?? (input.coupon?.ok ? input.coupon.coupon.discountType : null),
+    couponEligible: input.coupon?.ok ?? false,
+    minimumAmountPresent: metadata?.minimumAmountPresent ?? null,
+    maximumDiscountPresent: false,
+    eligibleDiscountSubtotal: input.fare.subtotalNGN,
+    calculatedDiscount: input.discountNGN,
+    totalAfterDiscount: input.totalNGN,
+    failureStage: input.failureStage,
+    sanitizedExceptionName: sanitizedException?.name ?? null,
+    sanitizedExceptionMessage: sanitizedException?.message ?? null,
+  })
+}
+
+async function loadSafeCouponDiagnosticMetadata(couponCode: string, client: PrismaClientLike) {
+  try {
+    const coupon = await client.coupon.findUnique({
+      where: { code: couponCode },
+      select: {
+        discountType: true,
+        minSpendNGN: true,
+      },
+    })
+    if (!coupon) return { found: false, discountType: null, minimumAmountPresent: false }
+    return {
+      found: true,
+      discountType: coupon.discountType,
+      minimumAmountPresent: coupon.minSpendNGN !== null,
+    }
+  } catch {
+    return null
+  }
+}
+
+function sanitizeDiagnosticException(error: unknown) {
+  if (!error) return null
+  const exception = error as { constructor?: { name?: string }; message?: string }
+  return {
+    name: exception.constructor?.name ?? typeof error,
+    message: String(exception.message ?? error).slice(0, 180),
+  }
 }
 
 function logServiceAreaValidationDiagnostics(
