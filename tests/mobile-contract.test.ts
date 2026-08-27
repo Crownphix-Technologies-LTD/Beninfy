@@ -1934,14 +1934,18 @@ test('reverse Lagos destination coordinates validate without pickup fare zone', 
       findFirst: async (args: {
         where: { id?: string; from?: { equals: string }; to?: { equals: string } }
       }) => {
-        if (args.where.id) return routes.find((route) => route.id === args.where.id) ?? null
-        return (
-          routes.find(
-            (route) =>
-              route.from.toLowerCase() === args.where.from?.equals.toLowerCase() &&
-              route.to.toLowerCase() === args.where.to?.equals.toLowerCase()
-          ) ?? null
-        )
+        const route = args.where.id
+          ? routes.find((candidate) => candidate.id === args.where.id)
+          : routes.find(
+              (candidate) =>
+                candidate.from.toLowerCase() === args.where.from?.equals.toLowerCase() &&
+                candidate.to.toLowerCase() === args.where.to?.equals.toLowerCase()
+            )
+        if (!route) return null
+        return {
+          ...route,
+          borderFeeIds: route.id === 'lagos-cotonou' ? ['nigeria-benin'] : [],
+        }
       },
     },
   }
@@ -1998,6 +2002,234 @@ test('reverse Lagos destination coordinates validate without pickup fare zone', 
     assert.equal(lagosToCotonou.data.locationMetadata.pickupServiceArea.serviceArea.city, 'Lagos')
     assert.equal(lagosToCotonou.data.locationMetadata.pickupFareZone?.code, 'lagos_mainland')
   }
+})
+
+test('mobile quote uses Lagos pickup scopes only when Lagos is the route origin', async () => {
+  const routePriceLookups: Array<{ routeId: string; scopes: string[] }> = []
+  const saloon = vehicles.find((vehicle) => vehicle.id === 'saloon')!
+  const prices = [
+    { vehicleId: saloon.id, pricingScope: 'default', amountNGN: 160000 },
+    { vehicleId: saloon.id, pricingScope: 'mainland', amountNGN: 160000 },
+    { vehicleId: saloon.id, pricingScope: 'island', amountNGN: 180000 },
+  ]
+  const client = {
+    route: {
+      findFirst: async (args: {
+        where: { id?: string; from?: { equals: string }; to?: { equals: string } }
+      }) => {
+        const route = args.where.id
+          ? routes.find((candidate) => candidate.id === args.where.id)
+          : routes.find(
+              (candidate) =>
+                candidate.from.toLowerCase() === args.where.from?.equals.toLowerCase() &&
+                candidate.to.toLowerCase() === args.where.to?.equals.toLowerCase()
+            )
+        if (!route) return null
+        return {
+          ...route,
+          borderFeeIds: route.id === 'lagos-cotonou' ? ['nigeria-benin'] : [],
+        }
+      },
+    },
+    vehicle: {
+      findUnique: async () => null,
+    },
+    fleetVehicle: {
+      count: async () => 1,
+      findMany: async () => [
+        {
+          id: 'saloon-unit-1',
+          vehicleId: saloon.id,
+          label: 'Toyota Camry',
+          color: 'Black',
+          currentCity: 'Lagos',
+          status: 'available',
+          vehicle: {
+            id: saloon.id,
+            name: saloon.name,
+            capacity: saloon.capacity,
+            luggageCapacity: saloon.luggageCapacity,
+            image: saloon.image,
+          },
+        },
+      ],
+      findUnique: async () => null,
+    },
+    bookingLeg: {
+      count: async () => 0,
+    },
+    routePrice: {
+      findMany: async (args: {
+        where: {
+          routeId: string
+          vehicleId?: { in: string[] }
+          pricingScope: { in: string[] }
+        }
+      }) => {
+        routePriceLookups.push({
+          routeId: args.where.routeId,
+          scopes: args.where.pricingScope.in,
+        })
+        return prices.filter(
+          (price) =>
+            price.vehicleId === saloon.id &&
+            args.where.routeId === 'lagos-cotonou' &&
+            args.where.pricingScope.in.includes(price.pricingScope)
+        )
+      },
+    },
+    borderFee: {
+      findMany: async () => [
+        {
+          id: 'nigeria-benin',
+          country: 'Benin',
+          countryFr: 'Benin',
+          border: 'Seme',
+          borderFr: 'Seme',
+          countries: ['Nigeria', 'Benin Republic'],
+          feePerPersonNGN: 5000,
+          feeRoundTripNGN: 10000,
+          popular: true,
+          icon: 'local_taxi',
+          services: [],
+          servicesFr: [],
+          documents: [],
+          documentsFr: [],
+          tips: [],
+          tipsFr: [],
+        },
+      ],
+    },
+  }
+
+  const cases = [
+    {
+      name: 'Lagos to Cotonou from Mainland',
+      input: {
+        routeId: 'lagos-cotonou',
+        from: 'Lagos',
+        to: 'Cotonou',
+        pickupCity: 'Ojodu',
+        pickupCountryCode: 'NG',
+        pickupLatitude: 6.645,
+        pickupLongitude: 3.354,
+        destinationCity: 'Cotonou',
+        destinationCountryCode: 'BJ',
+      },
+      routeId: 'lagos-cotonou',
+      pickupFareZone: 'lagos_mainland',
+      pickupArea: 'mainland',
+      fare: 160000,
+      scopes: ['mainland', 'default'],
+    },
+    {
+      name: 'Lagos to Cotonou from Island',
+      input: {
+        routeId: 'lagos-cotonou',
+        from: 'Lagos',
+        to: 'Cotonou',
+        pickupCity: 'Lekki Phase 1',
+        pickupCountryCode: 'NG',
+        pickupLatitude: 6.4474,
+        pickupLongitude: 3.4723,
+        destinationCity: 'Cotonou',
+        destinationCountryCode: 'BJ',
+      },
+      routeId: 'lagos-cotonou',
+      pickupFareZone: 'lagos_island',
+      pickupArea: 'island',
+      fare: 180000,
+      scopes: ['island', 'default'],
+    },
+    {
+      name: 'Cotonou to Lagos with Mainland destination',
+      input: {
+        routeId: 'lagos-cotonou',
+        from: 'Cotonou',
+        to: 'Lagos',
+        pickupCity: 'Cotonou',
+        pickupCountryCode: 'BJ',
+        destinationCity: 'Ojodu',
+        destinationCountryCode: 'NG',
+        destinationLatitude: 6.645,
+        destinationLongitude: 3.354,
+      },
+      routeId: reverseProjectionRouteId('lagos-cotonou'),
+      pickupFareZone: null,
+      pickupArea: null,
+      fare: 160000,
+      scopes: ['default'],
+    },
+    {
+      name: 'Cotonou to Lagos with Island destination',
+      input: {
+        routeId: 'lagos-cotonou',
+        from: 'Cotonou',
+        to: 'Lagos',
+        pickupCity: 'Cotonou',
+        pickupCountryCode: 'BJ',
+        destinationCity: 'Lekki Phase 1',
+        destinationCountryCode: 'NG',
+        destinationLatitude: 6.4474,
+        destinationLongitude: 3.4723,
+      },
+      routeId: reverseProjectionRouteId('lagos-cotonou'),
+      pickupFareZone: null,
+      pickupArea: null,
+      fare: 160000,
+      scopes: ['default'],
+    },
+  ] as const
+
+  for (const quoteCase of cases) {
+    const availability = await calculateMobileAvailability(
+      {
+        ...quoteCase.input,
+        vehicleId: saloon.id,
+        tripType: 'one-way',
+        departureDate: '2026-08-20T09:00:00.000Z',
+        passengers: 2,
+      },
+      client as never
+    )
+    assert.equal(availability.ok, true, quoteCase.name)
+    if (availability.ok) {
+      assert.equal(availability.data.route.id, quoteCase.routeId)
+      assert.equal(availability.data.route.pricingRouteId, 'lagos-cotonou')
+    }
+
+    const quote = await calculateMobileQuote(
+      {
+        ...quoteCase.input,
+        vehicleId: saloon.id,
+        tripType: 'one-way',
+        departureDate: '2026-08-20T09:00:00.000Z',
+        passengers: 2,
+      },
+      client as never
+    )
+    assert.equal(quote.ok, true, quoteCase.name)
+    if (quote.ok) {
+      assert.equal(quote.data.quote.route.id, quoteCase.routeId)
+      assert.equal(quote.data.quote.route.pricingRouteId, 'lagos-cotonou')
+      assert.equal(quote.data.quote.pickupArea, quoteCase.pickupArea)
+      assert.equal(quote.data.quote.pickupFareZone?.code ?? null, quoteCase.pickupFareZone)
+      assert.equal(quote.data.quote.pricing.oneWayDropoffFare.value, quoteCase.fare)
+      assert.equal(quote.data.quote.pricing.borderFee.perPassenger.value, 5000)
+      assert.equal(quote.data.quote.pricing.borderFee.passengerCount, 2)
+      assert.equal(quote.data.quote.pricing.borderFee.total.value, 10000)
+      assert.equal(quote.data.quote.pricing.subtotal.value, quoteCase.fare + 10000)
+    }
+  }
+
+  assert.deepEqual(
+    routePriceLookups.map((lookup) => lookup.routeId),
+    ['lagos-cotonou', 'lagos-cotonou', 'lagos-cotonou', 'lagos-cotonou']
+  )
+  assert.deepEqual(
+    routePriceLookups.map((lookup) => lookup.scopes),
+    cases.map((quoteCase) => [...quoteCase.scopes])
+  )
 })
 
 test('lagos pickup fare zone is resolved by backend and only when Lagos is route origin', () => {

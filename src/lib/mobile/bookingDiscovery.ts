@@ -1,7 +1,8 @@
 import { z } from 'zod'
 import { vehicles as catalogVehicles } from '@/data/vehicles'
-import { requiresLagosPickupArea } from '@/data/pricing'
+import { requiresLagosPickupArea, type RoutePriceScope } from '@/data/pricing'
 import { calculateBookingPricing, calculateFareBreakdown } from '@/lib/bookingPricing'
+import { calculateRouteBorderFeeNGN } from '@/lib/borderFeeCatalog'
 import { prisma } from '@/lib/prisma'
 import {
   findPublicRouteByCities,
@@ -421,6 +422,17 @@ export async function calculateMobileQuote(
   })
 
   if (!fare.ok) {
+    await logMobileQuoteUnavailableDiagnostics({
+      selection: normalized.data.selection,
+      route: normalized.data.route,
+      vehicle,
+      fleetVehicle: fleetVehicle ? toFleetVehicleSafe(fleetVehicle) : null,
+      pickupFareZone: normalized.data.locationMetadata.pickupFareZone,
+      pickupServiceArea: normalized.data.locationMetadata.pickupServiceArea,
+      fareCode: fare.code,
+      client,
+    })
+
     return {
       ok: false as const,
       code:
@@ -519,6 +531,123 @@ function routeMatchesSelection(route: Route, selection: MobileDiscoverySelection
 
 function serviceAreaDiagnosticsEnabled() {
   return process.env.NODE_ENV !== 'production' || process.env.VERCEL_ENV === 'preview'
+}
+
+type MobileQuotePricingDiagnosticsInput = {
+  selection: MobileDiscoverySelection
+  route: Route
+  vehicle: Vehicle
+  fleetVehicle: FleetVehicleSafe | null
+  pickupFareZone: RouteServiceAreaValidationMetadata['pickupFareZone']
+  pickupServiceArea: RouteServiceAreaValidationMetadata['pickupServiceArea']
+  fareCode: string
+  client: PrismaClientLike
+}
+
+async function logMobileQuoteUnavailableDiagnostics(input: MobileQuotePricingDiagnosticsInput) {
+  if (!serviceAreaDiagnosticsEnabled()) return
+
+  const pricingRouteId = routePricingId(input.route)
+  const requestedPricingScope = input.selection.pickupArea ?? 'default'
+  const resolvedPricingScope = input.pickupFareZone?.pricingScope ?? 'default'
+  const pricingScopes =
+    resolvedPricingScope === 'default'
+      ? ['default']
+      : ([resolvedPricingScope, 'default'] satisfies RoutePriceScope[])
+  const targetIds = input.fleetVehicle
+    ? [input.fleetVehicle.id, input.vehicle.id]
+    : [input.vehicle.id]
+
+  try {
+    const [routeRows, routeRecord, borderFee] = await Promise.all([
+      input.client.routePrice.findMany({
+        where: {
+          routeId: pricingRouteId,
+          pricingScope: { in: pricingScopes },
+        },
+        select: { vehicleId: true, pricingScope: true, amountNGN: true },
+      }),
+      input.client.route.findFirst({
+        where: { id: pricingRouteId, available: true },
+        select: { id: true, borderFeeIds: true },
+      }),
+      calculateRouteBorderFeeNGN({
+        routeId: pricingRouteId,
+        tripType: input.selection.tripType,
+        passengerCount: input.selection.passengers,
+        client: input.client,
+      }),
+    ])
+    const vehicleRows = routeRows.filter((row) => targetIds.includes(row.vehicleId))
+
+    console.warn('[mobile-pricing-quote]', {
+      requestRouteId: input.selection.routeId ?? null,
+      resolvedRouteId: input.route.id,
+      resolvedRouteDirection: input.route.direction ?? 'explicit',
+      canonicalRouteId: input.route.canonicalRouteId ?? input.route.id,
+      pricingRouteId,
+      routeOriginCity: input.route.from,
+      routeDestinationCity: input.route.to,
+      vehicleId: input.vehicle.id,
+      vehicleCategory: input.vehicle.name,
+      passengerCount: input.selection.passengers,
+      pickupServiceArea: {
+        city: input.pickupServiceArea.serviceArea.city,
+        countryCode: input.pickupServiceArea.serviceArea.countryCode,
+        resolvedLocality: input.pickupServiceArea.resolvedLocality,
+      },
+      pickupFareZone: input.pickupFareZone
+        ? {
+            code: input.pickupFareZone.code,
+            label: input.pickupFareZone.label,
+            pricingScope: input.pickupFareZone.pricingScope,
+          }
+        : null,
+      requestedPricingScope,
+      resolvedPricingScope,
+      matchingRoutePriceFound: routeRows.length > 0,
+      matchingVehiclePriceFound: vehicleRows.length > 0,
+      basePricePresent: vehicleRows.length > 0,
+      borderFeeIdsCount: routeRecord?.borderFeeIds.length ?? 0,
+      borderFeePerPassenger: borderFee.ok ? borderFee.perPassengerNGN : null,
+      borderFeeTotal: borderFee.ok ? borderFee.amountNGN : null,
+      quoteUnavailableReason: input.fareCode,
+    })
+  } catch {
+    console.warn('[mobile-pricing-quote]', {
+      requestRouteId: input.selection.routeId ?? null,
+      resolvedRouteId: input.route.id,
+      resolvedRouteDirection: input.route.direction ?? 'explicit',
+      canonicalRouteId: input.route.canonicalRouteId ?? input.route.id,
+      pricingRouteId,
+      routeOriginCity: input.route.from,
+      routeDestinationCity: input.route.to,
+      vehicleId: input.vehicle.id,
+      vehicleCategory: input.vehicle.name,
+      passengerCount: input.selection.passengers,
+      pickupServiceArea: {
+        city: input.pickupServiceArea.serviceArea.city,
+        countryCode: input.pickupServiceArea.serviceArea.countryCode,
+        resolvedLocality: input.pickupServiceArea.resolvedLocality,
+      },
+      pickupFareZone: input.pickupFareZone
+        ? {
+            code: input.pickupFareZone.code,
+            label: input.pickupFareZone.label,
+            pricingScope: input.pickupFareZone.pricingScope,
+          }
+        : null,
+      requestedPricingScope,
+      resolvedPricingScope,
+      matchingRoutePriceFound: null,
+      matchingVehiclePriceFound: null,
+      basePricePresent: null,
+      borderFeeIdsCount: null,
+      borderFeePerPassenger: null,
+      borderFeeTotal: null,
+      quoteUnavailableReason: input.fareCode,
+    })
+  }
 }
 
 function logServiceAreaValidationDiagnostics(
