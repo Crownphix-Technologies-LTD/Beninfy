@@ -57,12 +57,18 @@ export const mobileDiscoverySelectionSchema = z.object({
   pickupCity: z.string().trim().max(80).optional().nullable(),
   pickupCountry: z.string().trim().max(80).optional().nullable(),
   pickupCountryCode: z.string().trim().max(3).optional().nullable(),
+  pickupLatitude: z.number().min(-90).max(90).optional().nullable(),
+  pickupLongitude: z.number().min(-180).max(180).optional().nullable(),
   destinationCity: z.string().trim().max(80).optional().nullable(),
   destinationCountry: z.string().trim().max(80).optional().nullable(),
   destinationCountryCode: z.string().trim().max(3).optional().nullable(),
+  destinationLatitude: z.number().min(-90).max(90).optional().nullable(),
+  destinationLongitude: z.number().min(-180).max(180).optional().nullable(),
   dropoffCity: z.string().trim().max(80).optional().nullable(),
   dropoffCountry: z.string().trim().max(80).optional().nullable(),
   dropoffCountryCode: z.string().trim().max(3).optional().nullable(),
+  dropoffLatitude: z.number().min(-90).max(90).optional().nullable(),
+  dropoffLongitude: z.number().min(-180).max(180).optional().nullable(),
   couponCode: z.string().trim().optional().nullable(),
 })
 
@@ -363,6 +369,7 @@ export async function calculateMobileAvailability(
       destinationServiceArea: normalized.data.locationMetadata.destinationServiceArea,
       pickupResolvedLocality: normalized.data.locationMetadata.pickupServiceArea.resolvedLocality,
       pickupFareZone: normalized.data.locationMetadata.pickupFareZone,
+      fareZone: normalized.data.locationMetadata.pickupFareZone,
       availability,
       informationalOnly: true,
     },
@@ -455,6 +462,7 @@ export async function calculateMobileQuote(
         destinationServiceArea: normalized.data.locationMetadata.destinationServiceArea,
         pickupResolvedLocality: normalized.data.locationMetadata.pickupServiceArea.resolvedLocality,
         pickupFareZone: normalized.data.locationMetadata.pickupFareZone,
+        fareZone: normalized.data.locationMetadata.pickupFareZone,
         currency: 'NGN' as const,
         pricing: {
           oneWayDropoffFare: mobileMoney(fare.oneWayDropoffFare),
@@ -558,29 +566,72 @@ function logServiceAreaValidationDiagnostics(
     }),
     pickupServiceAreaKey: normalizeSupportedRouteCity(route.from),
     destinationServiceAreaKey: normalizeSupportedRouteCity(route.to),
-    pickupLocalityAccepted: serviceAreaAcceptsLocality(
+    pickupLocalityAccepted: serviceAreaAcceptsLocation(
       pickupServiceArea,
       route.from,
-      normalizedPickupCity
+      normalizedPickupCity,
+      pickupLocation
     ),
-    destinationLocalityAccepted: serviceAreaAcceptsLocality(
+    destinationLocalityAccepted: serviceAreaAcceptsLocation(
       destinationServiceArea,
       route.to,
-      normalizedDestinationCity
+      normalizedDestinationCity,
+      destinationLocation
     ),
     failureCode: boundary.ok ? null : boundary.code,
   })
 }
 
-function serviceAreaAcceptsLocality(
+function serviceAreaAcceptsLocation(
   serviceArea: ReturnType<typeof getRouteServiceArea>,
   fallbackCity: string,
-  normalizedLocality: string
+  normalizedLocality: string,
+  location: RouteLocationBoundaryInput | null
 ) {
+  if (location) {
+    const result = locationMatchesDiagnosticServiceArea(serviceArea, fallbackCity, location)
+    if (result !== null) return result
+  }
   if (!normalizedLocality) return false
   return (serviceArea?.acceptedLocalities ?? [fallbackCity])
     .map(normalizeSupportedRouteCity)
     .includes(normalizedLocality)
+}
+
+function locationMatchesDiagnosticServiceArea(
+  serviceArea: ReturnType<typeof getRouteServiceArea>,
+  fallbackCity: string,
+  location: RouteLocationBoundaryInput
+) {
+  const latitude = location.latitude
+  const longitude = location.longitude
+  if (typeof latitude !== 'number' || typeof longitude !== 'number') return null
+  return (
+    serviceArea?.boundary?.some((polygon) =>
+      pointInDiagnosticPolygon({ latitude, longitude }, polygon)
+    ) ??
+    (normalizeSupportedRouteCity(location.city) === normalizeSupportedRouteCity(fallbackCity)
+      ? true
+      : null)
+  )
+}
+
+function pointInDiagnosticPolygon(
+  point: { latitude: number; longitude: number },
+  polygon: Array<{ latitude: number; longitude: number }>
+) {
+  let inside = false
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = polygon[i].longitude
+    const yi = polygon[i].latitude
+    const xj = polygon[j].longitude
+    const yj = polygon[j].latitude
+    const intersects =
+      yi > point.latitude !== yj > point.latitude &&
+      point.longitude < ((xj - xi) * (point.latitude - yi)) / (yj - yi) + xi
+    if (intersects) inside = !inside
+  }
+  return inside
 }
 
 function pickupLocationFromSelection(
@@ -590,6 +641,8 @@ function pickupLocationFromSelection(
     city: selection.pickupCity,
     country: selection.pickupCountry,
     countryCode: selection.pickupCountryCode,
+    latitude: selection.pickupLatitude,
+    longitude: selection.pickupLongitude,
   }
 }
 
@@ -600,6 +653,8 @@ function destinationLocationFromSelection(
     city: selection.destinationCity ?? selection.dropoffCity,
     country: selection.destinationCountry ?? selection.dropoffCountry,
     countryCode: selection.destinationCountryCode ?? selection.dropoffCountryCode,
+    latitude: selection.destinationLatitude ?? selection.dropoffLatitude,
+    longitude: selection.destinationLongitude ?? selection.dropoffLongitude,
   }
 }
 

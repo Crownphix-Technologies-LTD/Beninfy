@@ -193,11 +193,15 @@ export async function POST(req: Request) {
       city: data.pickupCity,
       country: data.pickupCountry,
       countryCode: data.pickupCountryCode,
+      latitude: data.pickupLatitude,
+      longitude: data.pickupLongitude,
     },
     destination: {
       city: data.destinationCity ?? data.dropoffCity,
       country: data.destinationCountry ?? data.dropoffCountry,
       countryCode: data.destinationCountryCode ?? data.dropoffCountryCode,
+      latitude: data.dropoffLatitude,
+      longitude: data.dropoffLongitude,
     },
   })
   if (!boundary.ok) {

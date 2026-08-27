@@ -1669,6 +1669,134 @@ test('lagos service-area resolver accepts operational Lagos localities and rejec
   if (!unrelated.ok) assert.equal(unrelated.code, 'DESTINATION_OUTSIDE_ROUTE_CITY')
 })
 
+test('lagos service-area resolver uses coordinates before Google locality wording', () => {
+  const ikejaLga = locationMatchesRouteServiceArea({
+    field: 'destination',
+    expectedCity: 'Lagos',
+    expectedCountry: 'Nigeria',
+    location: {
+      city: 'Ikeja LGA',
+      countryCode: 'NG',
+      latitude: 6.6018,
+      longitude: 3.3515,
+    },
+  })
+
+  assert.equal(ikejaLga.ok, true)
+  if (ikejaLga.ok) {
+    assert.equal(ikejaLga.match.serviceArea.city, 'Lagos')
+    assert.equal(ikejaLga.match.resolvedLocality, 'Ikeja LGA')
+    assert.equal(ikejaLga.match.latitude, 6.6018)
+    assert.equal(ikejaLga.match.longitude, 3.3515)
+  }
+
+  const outsideLagos = locationMatchesRouteServiceArea({
+    field: 'destination',
+    expectedCity: 'Lagos',
+    expectedCountry: 'Nigeria',
+    location: {
+      city: 'Ikeja',
+      countryCode: 'NG',
+      latitude: 7.3775,
+      longitude: 3.947,
+    },
+  })
+
+  assert.equal(outsideLagos.ok, false)
+  if (!outsideLagos.ok) assert.equal(outsideLagos.code, 'DESTINATION_OUTSIDE_ROUTE_CITY')
+})
+
+test('lagos coordinate resolver classifies representative mainland, island and external points', () => {
+  const lagosCotonou = routes.find((route) => route.id === 'lagos-cotonou')!
+  const mainland = [
+    ['Ikeja', 6.6018, 3.3515],
+    ['Ojodu', 6.645, 3.354],
+    ['Yaba', 6.5158, 3.3899],
+    ['Surulere', 6.501, 3.356],
+    ['Gbagada', 6.5573, 3.3841],
+    ['Maryland', 6.573, 3.367],
+    ['Ikorodu', 6.6194, 3.5105],
+    ['Badagry', 6.415, 2.8813],
+  ] as const
+  const island = [
+    ['Victoria Island', 6.4281, 3.4219],
+    ['Ikoyi', 6.4541, 3.4256],
+    ['Oniru', 6.431, 3.455],
+    ['Lekki Phase 1', 6.4474, 3.4723],
+    ['Lagos Island', 6.4549, 3.3947],
+    ['Banana Island', 6.4698, 3.4627],
+    ['Ajah', 6.4698, 3.5852],
+  ] as const
+  const outside = [
+    ['Cotonou', 6.3703, 2.3912],
+    ['Porto-Novo', 6.4969, 2.6289],
+    ['Abeokuta', 7.1475, 3.3619],
+    ['Ibadan', 7.3775, 3.947],
+    ['Abuja', 9.0765, 7.3986],
+  ] as const
+
+  for (const [city, latitude, longitude] of mainland) {
+    const result = validateRouteLocationBoundaries({
+      route: lagosCotonou,
+      pickup: { city, countryCode: 'NG', latitude, longitude },
+      destination: { city: 'Cotonou', countryCode: 'BJ' },
+    })
+    assert.equal(result.ok, true, `${city} should be in Lagos service area`)
+    if (result.ok) {
+      assert.equal(result.metadata.pickupServiceArea.serviceArea.city, 'Lagos')
+      assert.equal(result.metadata.pickupFareZone?.code, 'lagos_mainland', city)
+    }
+  }
+
+  for (const [city, latitude, longitude] of island) {
+    const result = validateRouteLocationBoundaries({
+      route: lagosCotonou,
+      pickup: { city, countryCode: 'NG', latitude, longitude },
+      destination: { city: 'Cotonou', countryCode: 'BJ' },
+    })
+    assert.equal(result.ok, true, `${city} should be in Lagos service area`)
+    if (result.ok) {
+      assert.equal(result.metadata.pickupServiceArea.serviceArea.city, 'Lagos')
+      assert.equal(result.metadata.pickupFareZone?.code, 'lagos_island', city)
+    }
+  }
+
+  for (const [city, latitude, longitude] of outside) {
+    const result = validateRouteLocationBoundaries({
+      route: lagosCotonou,
+      pickup: { city: 'Lagos', countryCode: 'NG', latitude, longitude },
+      destination: { city: 'Cotonou', countryCode: 'BJ' },
+    })
+    assert.equal(result.ok, false, `${city} coordinates must not become Mainland fallback`)
+    if (!result.ok) assert.equal(result.code, 'PICKUP_OUTSIDE_ROUTE_CITY')
+  }
+})
+
+test('lagos coordinate resolver handles island-mainland boundary adjacency without gaps', () => {
+  const lagosCotonou = routes.find((route) => route.id === 'lagos-cotonou')!
+  const justNorthOfIsland = validateRouteLocationBoundaries({
+    route: lagosCotonou,
+    pickup: { city: 'Lagos', countryCode: 'NG', latitude: 6.505, longitude: 3.4 },
+    destination: { city: 'Cotonou', countryCode: 'BJ' },
+  })
+  assert.equal(justNorthOfIsland.ok, true)
+  if (justNorthOfIsland.ok) {
+    assert.equal(justNorthOfIsland.metadata.pickupServiceArea.serviceArea.city, 'Lagos')
+    assert.equal(justNorthOfIsland.metadata.pickupFareZone?.code, 'lagos_mainland')
+  }
+
+  const justSouthOfIsland = validateRouteLocationBoundaries({
+    route: lagosCotonou,
+    pickup: { city: 'Lagos', countryCode: 'NG', latitude: 6.495, longitude: 3.4 },
+    destination: { city: 'Cotonou', countryCode: 'BJ' },
+  })
+  assert.equal(justSouthOfIsland.ok, true)
+  if (justSouthOfIsland.ok) {
+    assert.equal(justSouthOfIsland.metadata.pickupServiceArea.serviceArea.city, 'Lagos')
+    assert.equal(justSouthOfIsland.metadata.pickupFareZone?.code, 'lagos_island')
+  }
+})
+
 test('route service areas support current Beninfy endpoint corridors in both directions', () => {
   const routeCases = [
     ['lagos-cotonou', false, 'Ikeja', 'NG', 'Cotonou', 'BJ'],
@@ -1780,8 +1908,10 @@ test('mobile availability reconciles canonical route id with reverse city pair b
       passengers: 1,
       pickupCity: 'Cotonou',
       pickupCountryCode: 'BJ',
-      destinationCity: 'Ikeja',
+      destinationCity: 'Ikeja LGA',
       destinationCountryCode: 'NG',
+      destinationLatitude: 6.6018,
+      destinationLongitude: 3.3515,
     },
     client as never
   )
@@ -1792,9 +1922,81 @@ test('mobile availability reconciles canonical route id with reverse city pair b
     assert.equal(result.data.route.origin.city, 'Cotonou')
     assert.equal(result.data.route.destination.city, 'Lagos')
     assert.equal(result.data.destinationServiceArea.serviceArea.city, 'Lagos')
-    assert.equal(result.data.destinationServiceArea.resolvedLocality, 'Ikeja')
+    assert.equal(result.data.destinationServiceArea.resolvedLocality, 'Ikeja LGA')
     assert.equal(result.data.pickupFareZone, null)
     assert.equal(result.data.availability.available, true)
+  }
+})
+
+test('reverse Lagos destination coordinates validate without pickup fare zone', async () => {
+  const client = {
+    route: {
+      findFirst: async (args: {
+        where: { id?: string; from?: { equals: string }; to?: { equals: string } }
+      }) => {
+        if (args.where.id) return routes.find((route) => route.id === args.where.id) ?? null
+        return (
+          routes.find(
+            (route) =>
+              route.from.toLowerCase() === args.where.from?.equals.toLowerCase() &&
+              route.to.toLowerCase() === args.where.to?.equals.toLowerCase()
+          ) ?? null
+        )
+      },
+    },
+  }
+
+  const cotonouToLagos = await normalizeDiscoverySelection(
+    {
+      routeId: 'lagos-cotonou',
+      from: 'Cotonou',
+      to: 'Lagos',
+      vehicleId: 'saloon',
+      tripType: 'one-way',
+      departureDate: '2026-08-20T09:00:00.000Z',
+      passengers: 1,
+      pickupCity: 'Cotonou',
+      pickupCountryCode: 'BJ',
+      destinationCity: 'Ojodu',
+      destinationCountryCode: 'NG',
+      destinationLatitude: 6.645,
+      destinationLongitude: 3.354,
+    },
+    client as never
+  )
+  assert.equal(cotonouToLagos.ok, true)
+  if (cotonouToLagos.ok) {
+    assert.equal(cotonouToLagos.data.route.id, reverseProjectionRouteId('lagos-cotonou'))
+    assert.equal(
+      cotonouToLagos.data.locationMetadata.destinationServiceArea.serviceArea.city,
+      'Lagos'
+    )
+    assert.equal(cotonouToLagos.data.locationMetadata.pickupFareZone, null)
+  }
+
+  const lagosToCotonou = await normalizeDiscoverySelection(
+    {
+      routeId: 'lagos-cotonou',
+      from: 'Lagos',
+      to: 'Cotonou',
+      vehicleId: 'saloon',
+      tripType: 'one-way',
+      departureDate: '2026-08-20T09:00:00.000Z',
+      passengers: 1,
+      pickupCity: 'Ojodu',
+      pickupCountryCode: 'NG',
+      pickupLatitude: 6.645,
+      pickupLongitude: 3.354,
+      destinationCity: 'Cotonou',
+      destinationCountryCode: 'BJ',
+    },
+    client as never
+  )
+  assert.equal(lagosToCotonou.ok, true)
+  if (lagosToCotonou.ok) {
+    assert.equal(lagosToCotonou.data.route.id, 'lagos-cotonou')
+    assert.equal(lagosToCotonou.data.locationMetadata.pickupServiceArea.serviceArea.city, 'Lagos')
+    assert.equal(lagosToCotonou.data.locationMetadata.pickupFareZone?.code, 'lagos_mainland')
   }
 })
 
@@ -1835,6 +2037,38 @@ test('lagos pickup fare zone is resolved by backend and only when Lagos is route
   if (badagry.ok) {
     assert.equal(badagry.metadata.pickupFareZone?.code, 'lagos_mainland')
     assert.equal(badagry.metadata.pickupFareZone?.pricingScope, 'mainland')
+  }
+
+  const coordinateMainland = validateRouteLocationBoundaries({
+    route: lagosCotonou,
+    pickup: {
+      city: 'Lagos Mainland',
+      countryCode: 'NG',
+      latitude: 6.6018,
+      longitude: 3.3515,
+    },
+    destination: { city: 'Cotonou', countryCode: 'BJ' },
+  })
+  assert.equal(coordinateMainland.ok, true)
+  if (coordinateMainland.ok) {
+    assert.equal(coordinateMainland.metadata.pickupFareZone?.code, 'lagos_mainland')
+    assert.equal(coordinateMainland.metadata.pickupFareZone?.pricingScope, 'mainland')
+  }
+
+  const coordinateIsland = validateRouteLocationBoundaries({
+    route: lagosCotonou,
+    pickup: {
+      city: 'Lagos',
+      countryCode: 'NG',
+      latitude: 6.4281,
+      longitude: 3.4219,
+    },
+    destination: { city: 'Cotonou', countryCode: 'BJ' },
+  })
+  assert.equal(coordinateIsland.ok, true)
+  if (coordinateIsland.ok) {
+    assert.equal(coordinateIsland.metadata.pickupFareZone?.code, 'lagos_island')
+    assert.equal(coordinateIsland.metadata.pickupFareZone?.pricingScope, 'island')
   }
 
   const reverse = {
@@ -1997,6 +2231,71 @@ test('saved and current-location mismatches use the same route boundary contract
   assert.equal(currentLocationOuidah.ok, false)
   if (!currentLocationOuidah.ok)
     assert.equal(currentLocationOuidah.code, 'PICKUP_OUTSIDE_ROUTE_CITY')
+})
+
+test('saved places and reverse-geocoded current locations carry coordinates into route boundaries', () => {
+  const lagosCotonou = routes.find((route) => route.id === 'lagos-cotonou')!
+  const savedPlace = toSavedPlaceDto({
+    id: 'saved-1',
+    type: 'home',
+    label: 'Home',
+    address: 'Ojodu Berger, Lagos',
+    latitude: 6.645,
+    longitude: 3.354,
+    country: 'Nigeria',
+    city: 'Ojodu',
+    providerPlaceId: 'places/ojodu',
+    createdAt: new Date('2026-08-01T00:00:00.000Z'),
+    updatedAt: new Date('2026-08-01T00:00:00.000Z'),
+  })
+  const savedResult = validateRouteLocationBoundaries({
+    route: lagosCotonou,
+    pickup: {
+      city: savedPlace.city,
+      country: savedPlace.country,
+      countryCode: 'NG',
+      latitude: savedPlace.latitude,
+      longitude: savedPlace.longitude,
+    },
+    destination: { city: 'Cotonou', countryCode: 'BJ' },
+  })
+  assert.equal(savedResult.ok, true)
+  if (savedResult.ok) assert.equal(savedResult.metadata.pickupFareZone?.code, 'lagos_mainland')
+
+  const reversePlace = toMobileReverseGeocodeDto(
+    {
+      placeId: 'reverse-1',
+      formattedAddress: 'Ikeja LGA, Lagos, Nigeria',
+      location: { latitude: 6.6018, longitude: 3.3515 },
+      addressComponents: [
+        { longText: 'Ikeja LGA', shortText: 'Ikeja', types: ['locality'] },
+        { longText: 'Nigeria', shortText: 'NG', types: ['country'] },
+      ],
+    },
+    { latitude: 6.6018, longitude: 3.3515 }
+  )
+  const reverseResult = validateRouteLocationBoundaries({
+    route: lagosCotonou,
+    pickup: {
+      city: reversePlace.city,
+      country: reversePlace.country,
+      countryCode: reversePlace.countryCode,
+      latitude: reversePlace.latitude,
+      longitude: reversePlace.longitude,
+    },
+    destination: { city: 'Cotonou', countryCode: 'BJ' },
+  })
+  assert.equal(reverseResult.ok, true)
+  if (reverseResult.ok) assert.equal(reverseResult.metadata.pickupFareZone?.code, 'lagos_mainland')
+})
+
+test('booking creation passes selected coordinates into the common route boundary validator', () => {
+  const bookingRoute = readFileSync('src/app/api/bookings/route.ts', 'utf8')
+
+  assert.match(bookingRoute, /pickup:[\s\S]*latitude: data\.pickupLatitude/)
+  assert.match(bookingRoute, /pickup:[\s\S]*longitude: data\.pickupLongitude/)
+  assert.match(bookingRoute, /destination:[\s\S]*latitude: data\.dropoffLatitude/)
+  assert.match(bookingRoute, /destination:[\s\S]*longitude: data\.dropoffLongitude/)
 })
 
 test('reverse route detail uses stable projection id and reversed border crossing order', async () => {
