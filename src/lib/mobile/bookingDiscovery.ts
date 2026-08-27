@@ -446,8 +446,45 @@ export async function calculateMobileQuote(
   const couponCode = normalized.data.selection.couponCode
     ? normalizeCouponCode(normalized.data.selection.couponCode)
     : null
-  const coupon = couponCode ? await validateCouponCode(couponCode, fare.subtotalNGN, client) : null
-  if (coupon && !coupon.ok) {
+  let coupon: Awaited<ReturnType<typeof validateCouponCode>> | null = null
+  if (couponCode) {
+    try {
+      coupon = await validateCouponCode(couponCode, fare.subtotalNGN, client)
+    } catch (error) {
+      await logMobileCouponQuoteDiagnostics({
+        couponCode,
+        selection: normalized.data.selection,
+        route: normalized.data.route,
+        vehicle,
+        fleetVehicle: fleetVehicle ? toFleetVehicleSafe(fleetVehicle) : null,
+        pricingScope: fare.pricingScope,
+        fare,
+        coupon: null,
+        discountNGN: null,
+        totalNGN: null,
+        failureStage: 'coupon_lookup_or_calculation',
+        exception: error,
+        client,
+      })
+      throw error
+    }
+  }
+  if (couponCode && coupon && !coupon.ok) {
+    await logMobileCouponQuoteDiagnostics({
+      couponCode,
+      selection: normalized.data.selection,
+      route: normalized.data.route,
+      vehicle,
+      fleetVehicle: fleetVehicle ? toFleetVehicleSafe(fleetVehicle) : null,
+      pricingScope: fare.pricingScope,
+      fare,
+      coupon,
+      discountNGN: null,
+      totalNGN: null,
+      failureStage: 'coupon_ineligible',
+      client,
+    })
+
     return {
       ok: false as const,
       code: couponErrorCode(coupon.error),
@@ -457,6 +494,22 @@ export async function calculateMobileQuote(
 
   const discountNGN = coupon?.ok ? coupon.discountNGN : 0
   const totalNGN = Math.max(0, fare.subtotalNGN - discountNGN)
+  if (couponCode) {
+    await logMobileCouponQuoteDiagnostics({
+      couponCode,
+      selection: normalized.data.selection,
+      route: normalized.data.route,
+      vehicle,
+      fleetVehicle: fleetVehicle ? toFleetVehicleSafe(fleetVehicle) : null,
+      pricingScope: fare.pricingScope,
+      fare,
+      coupon,
+      discountNGN,
+      totalNGN,
+      failureStage: null,
+      client,
+    })
+  }
 
   return {
     ok: true as const,
@@ -647,6 +700,82 @@ async function logMobileQuoteUnavailableDiagnostics(input: MobileQuotePricingDia
       borderFeeTotal: null,
       quoteUnavailableReason: input.fareCode,
     })
+  }
+}
+
+type MobileCouponQuoteDiagnosticsInput = {
+  couponCode: string
+  selection: MobileDiscoverySelection
+  route: Route
+  vehicle: Vehicle
+  fleetVehicle: FleetVehicleSafe | null
+  pricingScope: RoutePriceScope
+  fare: Extract<Awaited<ReturnType<typeof calculateBookingPricing>>, { ok: true }>
+  coupon: Awaited<ReturnType<typeof validateCouponCode>> | null
+  discountNGN: number | null
+  totalNGN: number | null
+  failureStage: string | null
+  exception?: unknown
+  client: PrismaClientLike
+}
+
+async function logMobileCouponQuoteDiagnostics(input: MobileCouponQuoteDiagnosticsInput) {
+  if (!serviceAreaDiagnosticsEnabled()) return
+
+  const metadata = await loadSafeCouponDiagnosticMetadata(input.couponCode, input.client)
+  const sanitizedException = sanitizeDiagnosticException(input.exception)
+
+  console.warn('[mobile-coupon-quote]', {
+    resolvedRouteId: input.route.id,
+    pricingRouteId: routePricingId(input.route),
+    pricingScope: input.pricingScope,
+    vehiclePricingIdentifier: input.fleetVehicle?.id ?? input.vehicle.id,
+    passengerCount: input.selection.passengers,
+    tripType: input.selection.tripType,
+    rideFare: input.fare.rideFareNGN,
+    borderFeePerPassenger: input.fare.borderFeePerPassengerNGN,
+    borderFeeTotal: input.fare.borderFeeNGN,
+    subtotalBeforeDiscount: input.fare.subtotalNGN,
+    couponFound: metadata?.found ?? null,
+    couponType: metadata?.discountType ?? (input.coupon?.ok ? input.coupon.coupon.discountType : null),
+    couponEligible: input.coupon?.ok ?? false,
+    minimumAmountPresent: metadata?.minimumAmountPresent ?? null,
+    maximumDiscountPresent: false,
+    eligibleDiscountSubtotal: input.fare.subtotalNGN,
+    calculatedDiscount: input.discountNGN,
+    totalAfterDiscount: input.totalNGN,
+    failureStage: input.failureStage,
+    sanitizedExceptionName: sanitizedException?.name ?? null,
+    sanitizedExceptionMessage: sanitizedException?.message ?? null,
+  })
+}
+
+async function loadSafeCouponDiagnosticMetadata(couponCode: string, client: PrismaClientLike) {
+  try {
+    const coupon = await client.coupon.findUnique({
+      where: { code: couponCode },
+      select: {
+        discountType: true,
+        minSpendNGN: true,
+      },
+    })
+    if (!coupon) return { found: false, discountType: null, minimumAmountPresent: false }
+    return {
+      found: true,
+      discountType: coupon.discountType,
+      minimumAmountPresent: coupon.minSpendNGN !== null,
+    }
+  } catch {
+    return null
+  }
+}
+
+function sanitizeDiagnosticException(error: unknown) {
+  if (!error) return null
+  const exception = error as { constructor?: { name?: string }; message?: string }
+  return {
+    name: exception.constructor?.name ?? typeof error,
+    message: String(exception.message ?? error).slice(0, 180),
   }
 }
 
