@@ -6,6 +6,8 @@ export type RouteLocationBoundaryInput = {
   city?: string | null
   country?: string | null
   countryCode?: string | null
+  latitude?: number | null
+  longitude?: number | null
 }
 
 export type RouteLocationBoundaryResult =
@@ -32,6 +34,8 @@ export type RouteServiceArea = {
   city: string
   countryCode: string
   acceptedLocalities: string[]
+  boundary?: GeoPolygon[]
+  fareZones?: RouteFareZoneDefinition[]
 }
 
 export type RouteServiceAreaMatch = {
@@ -42,12 +46,25 @@ export type RouteServiceAreaMatch = {
   resolvedLocality: string
   resolvedCountry: string | null
   resolvedCountryCode: string | null
+  latitude?: number | null
+  longitude?: number | null
 }
 
 export type LagosPickupFareZone = {
   code: 'lagos_mainland' | 'lagos_island'
   label: 'Mainland' | 'Island'
   pricingScope: LagosPickupArea
+}
+
+type GeoPoint = {
+  latitude: number
+  longitude: number
+}
+
+type GeoPolygon = GeoPoint[]
+
+type RouteFareZoneDefinition = LagosPickupFareZone & {
+  boundary: GeoPolygon[]
 }
 
 export type RouteServiceAreaValidationMetadata = {
@@ -64,10 +81,33 @@ const CITY_ALIASES: Record<string, string> = {
   kpalime: 'kpalime',
 }
 
+const LAGOS_ISLAND_BOUNDARY: GeoPolygon = [
+  { latitude: 6.5, longitude: 3.33 },
+  { latitude: 6.5, longitude: 4.22 },
+  { latitude: 6.28, longitude: 4.22 },
+  { latitude: 6.28, longitude: 3.33 },
+]
+
+const LAGOS_SERVICE_BOUNDARY: GeoPolygon = [
+  { latitude: 6.8, longitude: 2.75 },
+  { latitude: 6.8, longitude: 4.25 },
+  { latitude: 6.25, longitude: 4.25 },
+  { latitude: 6.25, longitude: 2.75 },
+]
+
 const SERVICE_AREAS: Record<string, RouteServiceArea> = {
   lagos: {
     city: 'Lagos',
     countryCode: 'NG',
+    boundary: [LAGOS_SERVICE_BOUNDARY],
+    fareZones: [
+      {
+        code: 'lagos_island',
+        label: 'Island',
+        pricingScope: 'island',
+        boundary: [LAGOS_ISLAND_BOUNDARY],
+      },
+    ],
     acceptedLocalities: [
       'Lagos',
       'Ikeja',
@@ -194,13 +234,15 @@ export function locationMatchesRouteServiceArea({
   | { ok: true; match: RouteServiceAreaMatch }
   | Extract<RouteLocationBoundaryResult, { ok: false }> {
   const serviceArea = getRouteServiceArea(expectedCity)
-  const expectedCountryCode = serviceArea?.countryCode ?? expectedCountryCodeForRouteCountry(expectedCountry)
+  const expectedCountryCode =
+    serviceArea?.countryCode ?? expectedCountryCodeForRouteCountry(expectedCountry)
   const resolvedCity = location?.city?.trim() || null
   const resolvedCountry = location?.country?.trim() || null
   const resolvedCountryCode = normalizeSupportedCountryCode({
     country: location?.country,
     countryCode: location?.countryCode,
   })
+  const coordinates = coordinatesFromLocation(location)
   const details = {
     field,
     expectedCity,
@@ -211,18 +253,6 @@ export function locationMatchesRouteServiceArea({
     resolvedCountryCode,
   }
 
-  if (!resolvedCity) {
-    return {
-      ok: false,
-      code: 'LOCATION_CITY_UNRESOLVED',
-      message:
-        field === 'pickup'
-          ? 'Pickup city could not be resolved'
-          : 'Destination city could not be resolved',
-      details,
-    }
-  }
-
   if (expectedCountryCode && resolvedCountryCode && expectedCountryCode !== resolvedCountryCode) {
     return {
       ok: false,
@@ -231,6 +261,51 @@ export function locationMatchesRouteServiceArea({
         field === 'pickup'
           ? `Your pickup location must be within the ${expectedCity} service area`
           : `Your destination must be within the ${expectedCity} service area`,
+      details,
+    }
+  }
+
+  if (coordinates && serviceArea?.boundary) {
+    const belongsToGeographicServiceArea = serviceArea.boundary.some((polygon) =>
+      pointInPolygon(coordinates, polygon)
+    )
+
+    if (!belongsToGeographicServiceArea) {
+      return {
+        ok: false,
+        code: field === 'pickup' ? 'PICKUP_OUTSIDE_ROUTE_CITY' : 'DESTINATION_OUTSIDE_ROUTE_CITY',
+        message:
+          field === 'pickup'
+            ? `Your pickup location must be within the ${expectedCity} service area`
+            : `Your destination must be within the ${expectedCity} service area`,
+        details,
+      }
+    }
+
+    return {
+      ok: true,
+      match: {
+        serviceArea: {
+          city: serviceArea.city,
+          countryCode: expectedCountryCode ?? '',
+        },
+        resolvedLocality: resolvedCity ?? serviceArea.city,
+        resolvedCountry,
+        resolvedCountryCode,
+        latitude: coordinates.latitude,
+        longitude: coordinates.longitude,
+      },
+    }
+  }
+
+  if (!resolvedCity) {
+    return {
+      ok: false,
+      code: 'LOCATION_CITY_UNRESOLVED',
+      message:
+        field === 'pickup'
+          ? 'Pickup city could not be resolved'
+          : 'Destination city could not be resolved',
       details,
     }
   }
@@ -263,6 +338,8 @@ export function locationMatchesRouteServiceArea({
       resolvedLocality: resolvedCity,
       resolvedCountry,
       resolvedCountryCode,
+      latitude: coordinates?.latitude ?? null,
+      longitude: coordinates?.longitude ?? null,
     },
   }
 }
@@ -270,6 +347,24 @@ export function locationMatchesRouteServiceArea({
 export function resolveLagosPickupFareZone(
   location: RouteLocationBoundaryInput | RouteServiceAreaMatch | null | undefined
 ): LagosPickupFareZone | null {
+  const coordinates = coordinatesFromLocation(location)
+  if (coordinates) {
+    const lagos = getRouteServiceArea('Lagos')
+    const matchingZone = lagos?.fareZones?.find((zone) =>
+      zone.boundary.some((polygon) => pointInPolygon(coordinates, polygon))
+    )
+    if (matchingZone) {
+      return {
+        code: matchingZone.code,
+        label: matchingZone.label,
+        pricingScope: matchingZone.pricingScope,
+      }
+    }
+    if (lagos?.boundary?.some((polygon) => pointInPolygon(coordinates, polygon))) {
+      return { code: 'lagos_mainland', label: 'Mainland', pricingScope: 'mainland' }
+    }
+  }
+
   const locality = isServiceAreaMatch(location) ? location.resolvedLocality : location?.city
   const normalized = normalizeSupportedRouteCity(locality)
   if (LAGOS_MAINLAND_LOCALITIES.has(normalized)) {
@@ -285,6 +380,33 @@ function isServiceAreaMatch(
   location: RouteLocationBoundaryInput | RouteServiceAreaMatch | null | undefined
 ): location is RouteServiceAreaMatch {
   return Boolean(location && 'resolvedLocality' in location)
+}
+
+function coordinatesFromLocation(
+  location: RouteLocationBoundaryInput | RouteServiceAreaMatch | null | undefined
+) {
+  if (!location || !('latitude' in location) || !('longitude' in location)) return null
+  const latitude = location.latitude
+  const longitude = location.longitude
+  if (typeof latitude !== 'number' || typeof longitude !== 'number') return null
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null
+  if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) return null
+  return { latitude, longitude }
+}
+
+function pointInPolygon(point: GeoPoint, polygon: GeoPolygon) {
+  let inside = false
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = polygon[i].longitude
+    const yi = polygon[i].latitude
+    const xj = polygon[j].longitude
+    const yj = polygon[j].latitude
+    const intersects =
+      yi > point.latitude !== yj > point.latitude &&
+      point.longitude < ((xj - xi) * (point.latitude - yi)) / (yj - yi) + xi
+    if (intersects) inside = !inside
+  }
+  return inside
 }
 
 export function resolvePickupFareZoneForRoute({

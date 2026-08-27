@@ -57,12 +57,18 @@ export const mobileDiscoverySelectionSchema = z.object({
   pickupCity: z.string().trim().max(80).optional().nullable(),
   pickupCountry: z.string().trim().max(80).optional().nullable(),
   pickupCountryCode: z.string().trim().max(3).optional().nullable(),
+  pickupLatitude: z.number().min(-90).max(90).optional().nullable(),
+  pickupLongitude: z.number().min(-180).max(180).optional().nullable(),
   destinationCity: z.string().trim().max(80).optional().nullable(),
   destinationCountry: z.string().trim().max(80).optional().nullable(),
   destinationCountryCode: z.string().trim().max(3).optional().nullable(),
+  destinationLatitude: z.number().min(-90).max(90).optional().nullable(),
+  destinationLongitude: z.number().min(-180).max(180).optional().nullable(),
   dropoffCity: z.string().trim().max(80).optional().nullable(),
   dropoffCountry: z.string().trim().max(80).optional().nullable(),
   dropoffCountryCode: z.string().trim().max(3).optional().nullable(),
+  dropoffLatitude: z.number().min(-90).max(90).optional().nullable(),
+  dropoffLongitude: z.number().min(-180).max(180).optional().nullable(),
   couponCode: z.string().trim().optional().nullable(),
 })
 
@@ -188,7 +194,10 @@ export async function mobileVehiclesCatalogue() {
 
 export async function normalizeDiscoverySelection(
   input: MobileDiscoverySelectionInput,
-  client: PrismaClientLike = prisma
+  client: PrismaClientLike = prisma,
+  options?: {
+    serviceAreaDiagnosticsLabel?: string
+  }
 ): Promise<
   MobileDiscoveryResult<{
     selection: MobileDiscoverySelection
@@ -218,8 +227,15 @@ export async function normalizeDiscoverySelection(
     pickup: pickupLocationFromSelection(selection),
     destination: destinationLocationFromSelection(selection),
   })
+  if (options?.serviceAreaDiagnosticsLabel) {
+    logServiceAreaValidationDiagnostics(
+      options.serviceAreaDiagnosticsLabel,
+      selection,
+      route,
+      boundary
+    )
+  }
   if (!boundary.ok) {
-    logServiceAreaRejection(selection, route, boundary)
     return {
       ok: false,
       code: boundary.code,
@@ -299,7 +315,9 @@ export async function calculateMobileAvailability(
   input: MobileDiscoverySelectionInput,
   client: PrismaClientLike = prisma
 ) {
-  const normalized = await normalizeDiscoverySelection(input, client)
+  const normalized = await normalizeDiscoverySelection(input, client, {
+    serviceAreaDiagnosticsLabel: 'mobile-availability-service-area',
+  })
   if (!normalized.ok) return normalized
 
   const vehicle = await resolveVehicle(normalized.data.selection.vehicleId, client)
@@ -351,6 +369,7 @@ export async function calculateMobileAvailability(
       destinationServiceArea: normalized.data.locationMetadata.destinationServiceArea,
       pickupResolvedLocality: normalized.data.locationMetadata.pickupServiceArea.resolvedLocality,
       pickupFareZone: normalized.data.locationMetadata.pickupFareZone,
+      fareZone: normalized.data.locationMetadata.pickupFareZone,
       availability,
       informationalOnly: true,
     },
@@ -443,6 +462,7 @@ export async function calculateMobileQuote(
         destinationServiceArea: normalized.data.locationMetadata.destinationServiceArea,
         pickupResolvedLocality: normalized.data.locationMetadata.pickupServiceArea.resolvedLocality,
         pickupFareZone: normalized.data.locationMetadata.pickupFareZone,
+        fareZone: normalized.data.locationMetadata.pickupFareZone,
         currency: 'NGN' as const,
         pricing: {
           oneWayDropoffFare: mobileMoney(fare.oneWayDropoffFare),
@@ -497,65 +517,121 @@ function routeMatchesSelection(route: Route, selection: MobileDiscoverySelection
   )
 }
 
-function diagnosticsEnabled() {
+function serviceAreaDiagnosticsEnabled() {
   return process.env.NODE_ENV !== 'production' || process.env.VERCEL_ENV === 'preview'
 }
 
-function logServiceAreaRejection(
+function logServiceAreaValidationDiagnostics(
+  label: string,
   selection: MobileDiscoverySelection,
   route: Route,
-  boundary: Extract<RouteLocationBoundaryResult, { ok: false }>
+  boundary: RouteLocationBoundaryResult
 ) {
-  if (!diagnosticsEnabled()) return
+  if (!serviceAreaDiagnosticsEnabled()) return
 
-  const details = boundary.details
-  const serviceArea = getRouteServiceArea(details.expectedCity)
-  const normalizedResolvedCity = normalizeSupportedRouteCity(details.resolvedCity)
-  const acceptedLocalityMatch = Boolean(
-    details.resolvedCity &&
-    (serviceArea?.acceptedLocalities ?? [details.expectedCity])
-      .map(normalizeSupportedRouteCity)
-      .includes(normalizedResolvedCity)
-  )
-  const normalizedResolvedCountryCode = normalizeSupportedCountryCode({
-    country: details.resolvedCountry,
-    countryCode: details.resolvedCountryCode,
-  })
-  const failureReason = !details.resolvedCity
-    ? 'city_unresolved'
-    : details.expectedCountryCode &&
-        normalizedResolvedCountryCode &&
-        details.expectedCountryCode !== normalizedResolvedCountryCode
-      ? 'country_mismatch'
-      : !acceptedLocalityMatch
-        ? 'locality_outside_service_area'
-        : 'unknown'
+  const pickupLocation = pickupLocationFromSelection(selection)
+  const destinationLocation = destinationLocationFromSelection(selection)
+  const pickupServiceArea = getRouteServiceArea(route.from)
+  const destinationServiceArea = getRouteServiceArea(route.to)
+  const normalizedPickupCity = normalizeSupportedRouteCity(pickupLocation?.city)
+  const normalizedDestinationCity = normalizeSupportedRouteCity(destinationLocation?.city)
 
-  console.warn('Mobile route service-area validation rejected request', {
-    routeId: selection.routeId ?? route.id,
+  console.warn(`[${label}]`, {
+    requestRouteId: selection.routeId ?? null,
+    submittedFromCity: selection.from ?? null,
+    submittedToCity: selection.to ?? null,
     resolvedRouteId: route.id,
-    routeOriginCity: route.from,
-    routeDestinationCity: route.to,
-    routeDestinationCountryCode: normalizeSupportedCountryCode({
+    resolvedRouteDirection: route.direction ?? 'explicit',
+    resolvedRouteOriginCity: route.from,
+    resolvedRouteOriginCountryCode: normalizeSupportedCountryCode({
+      country: route.fromCountry,
+    }),
+    resolvedRouteDestinationCity: route.to,
+    resolvedRouteDestinationCountryCode: normalizeSupportedCountryCode({
       country: route.toCountry,
     }),
-    receivedDestinationCity: selection.destinationCity ?? selection.dropoffCity ?? null,
-    receivedDestinationCountryCode:
-      selection.destinationCountryCode ?? selection.dropoffCountryCode ?? null,
-    normalizedDestinationCity: normalizeSupportedRouteCity(
-      selection.destinationCity ?? selection.dropoffCity
-    ),
-    normalizedDestinationCountryCode: normalizeSupportedCountryCode({
-      country: selection.destinationCountry ?? selection.dropoffCountry,
-      countryCode: selection.destinationCountryCode ?? selection.dropoffCountryCode,
+    receivedPickupCity: pickupLocation?.city ?? null,
+    receivedPickupCountryCode: pickupLocation?.countryCode ?? null,
+    receivedDestinationCity: destinationLocation?.city ?? null,
+    receivedDestinationCountryCode: destinationLocation?.countryCode ?? null,
+    normalizedPickupCity,
+    normalizedPickupCountryCode: normalizeSupportedCountryCode({
+      country: pickupLocation?.country,
+      countryCode: pickupLocation?.countryCode,
     }),
-    rejectedField: details.field,
-    rejectedExpectedCity: details.expectedCity,
-    rejectedResolvedCity: details.resolvedCity,
-    resolvedServiceAreaKey: normalizeSupportedRouteCity(details.expectedCity),
-    acceptedLocalityMatch,
-    failureReason,
+    normalizedDestinationCity,
+    normalizedDestinationCountryCode: normalizeSupportedCountryCode({
+      country: destinationLocation?.country,
+      countryCode: destinationLocation?.countryCode,
+    }),
+    pickupServiceAreaKey: normalizeSupportedRouteCity(route.from),
+    destinationServiceAreaKey: normalizeSupportedRouteCity(route.to),
+    pickupLocalityAccepted: serviceAreaAcceptsLocation(
+      pickupServiceArea,
+      route.from,
+      normalizedPickupCity,
+      pickupLocation
+    ),
+    destinationLocalityAccepted: serviceAreaAcceptsLocation(
+      destinationServiceArea,
+      route.to,
+      normalizedDestinationCity,
+      destinationLocation
+    ),
+    failureCode: boundary.ok ? null : boundary.code,
   })
+}
+
+function serviceAreaAcceptsLocation(
+  serviceArea: ReturnType<typeof getRouteServiceArea>,
+  fallbackCity: string,
+  normalizedLocality: string,
+  location: RouteLocationBoundaryInput | null
+) {
+  if (location) {
+    const result = locationMatchesDiagnosticServiceArea(serviceArea, fallbackCity, location)
+    if (result !== null) return result
+  }
+  if (!normalizedLocality) return false
+  return (serviceArea?.acceptedLocalities ?? [fallbackCity])
+    .map(normalizeSupportedRouteCity)
+    .includes(normalizedLocality)
+}
+
+function locationMatchesDiagnosticServiceArea(
+  serviceArea: ReturnType<typeof getRouteServiceArea>,
+  fallbackCity: string,
+  location: RouteLocationBoundaryInput
+) {
+  const latitude = location.latitude
+  const longitude = location.longitude
+  if (typeof latitude !== 'number' || typeof longitude !== 'number') return null
+  return (
+    serviceArea?.boundary?.some((polygon) =>
+      pointInDiagnosticPolygon({ latitude, longitude }, polygon)
+    ) ??
+    (normalizeSupportedRouteCity(location.city) === normalizeSupportedRouteCity(fallbackCity)
+      ? true
+      : null)
+  )
+}
+
+function pointInDiagnosticPolygon(
+  point: { latitude: number; longitude: number },
+  polygon: Array<{ latitude: number; longitude: number }>
+) {
+  let inside = false
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = polygon[i].longitude
+    const yi = polygon[i].latitude
+    const xj = polygon[j].longitude
+    const yj = polygon[j].latitude
+    const intersects =
+      yi > point.latitude !== yj > point.latitude &&
+      point.longitude < ((xj - xi) * (point.latitude - yi)) / (yj - yi) + xi
+    if (intersects) inside = !inside
+  }
+  return inside
 }
 
 function pickupLocationFromSelection(
@@ -565,6 +641,8 @@ function pickupLocationFromSelection(
     city: selection.pickupCity,
     country: selection.pickupCountry,
     countryCode: selection.pickupCountryCode,
+    latitude: selection.pickupLatitude,
+    longitude: selection.pickupLongitude,
   }
 }
 
@@ -575,6 +653,8 @@ function destinationLocationFromSelection(
     city: selection.destinationCity ?? selection.dropoffCity,
     country: selection.destinationCountry ?? selection.dropoffCountry,
     countryCode: selection.destinationCountryCode ?? selection.dropoffCountryCode,
+    latitude: selection.destinationLatitude ?? selection.dropoffLatitude,
+    longitude: selection.destinationLongitude ?? selection.dropoffLongitude,
   }
 }
 

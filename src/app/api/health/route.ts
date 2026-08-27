@@ -8,6 +8,11 @@ export function GET() {
       ok: true,
       service: 'beninfy',
       status: 'healthy',
+      deployment: {
+        vercelEnv: process.env.VERCEL_ENV ?? null,
+        gitCommitSha: process.env.VERCEL_GIT_COMMIT_SHA ?? null,
+        gitCommitRef: process.env.VERCEL_GIT_COMMIT_REF ?? null,
+      },
       timestamp: new Date().toISOString(),
     },
     {
