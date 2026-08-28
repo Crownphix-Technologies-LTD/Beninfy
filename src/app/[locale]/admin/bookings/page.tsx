@@ -1,8 +1,13 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { formatNGN } from '@/lib/utils'
 import { AdminPageHeader, AdminStatusBadge } from '@/components/admin/AdminUI'
+import LiveTripMonitor from '@/components/admin/LiveTripMonitor'
+import {
+  ADMIN_LIVE_TRIP_POLL_INTERVAL_MS,
+  shouldPollAdminLiveTrip,
+} from '@/lib/admin/liveTripMonitoring'
 
 interface BookingRow {
   id: string
@@ -18,6 +23,12 @@ interface BookingRow {
   passengerName: string | null
   passengerEmail: string | null
   passengerPhone: string | null
+  pickupAddress: string | null
+  pickupLatitude: number | null
+  pickupLongitude: number | null
+  dropoffAddress: string | null
+  dropoffLatitude: number | null
+  dropoffLongitude: number | null
   travelers?: TravelerRow[] | null
   user: { id: string; name: string | null; email: string | null; phone: string | null } | null
   vehicle: { id: string; name: string } | null
@@ -43,10 +54,29 @@ interface BookingLegRow {
   departureDate: string
   vehicleId: string
   status: string
+  assignedAt: string | null
+  acceptedAt: string | null
+  declinedAt: string | null
+  enRouteAt: string | null
+  arrivedAt: string | null
+  passengerOnboardAt: string | null
+  startedAt: string | null
+  completedAt: string | null
+  cancelledAt: string | null
+  cancelledBy: string | null
+  cancellationReasonCode: string | null
   fleetVehicleId: string | null
   driverId: string | null
   fleetVehicle: { id: string; label: string; plateNumber: string; color: string | null } | null
-  driver: { id: string; name: string; phone: string } | null
+  driver: { id: string; name: string; phone: string; status: string } | null
+  latestLocation: {
+    latitude: number
+    longitude: number
+    accuracyMeters: number | null
+    capturedAt: string
+    receivedAt: string
+    expiresAt: string
+  } | null
 }
 
 interface FleetVehicleOption {
@@ -75,16 +105,23 @@ export default function AdminBookingsPage() {
   const [busy, setBusy] = useState<string | null>(null)
   const [fleetVehicles, setFleetVehicles] = useState<FleetVehicleOption[]>([])
   const [drivers, setDrivers] = useState<DriverOption[]>([])
+  const loadingRef = useRef(false)
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    const params = new URLSearchParams()
-    if (status) params.set('status', status)
-    if (q) params.set('q', q)
-    const res = await fetch(`/api/admin/bookings?${params.toString()}`)
-    const data = await res.json()
-    setBookings(data.bookings ?? [])
-    setLoading(false)
+  const load = useCallback(async (options?: { silent?: boolean }) => {
+    if (loadingRef.current) return
+    loadingRef.current = true
+    if (!options?.silent) setLoading(true)
+    try {
+      const params = new URLSearchParams()
+      if (status) params.set('status', status)
+      if (q) params.set('q', q)
+      const res = await fetch(`/api/admin/bookings?${params.toString()}`)
+      const data = await res.json()
+      setBookings(data.bookings ?? [])
+    } finally {
+      loadingRef.current = false
+      if (!options?.silent) setLoading(false)
+    }
   }, [status, q])
 
   useEffect(() => {
@@ -103,6 +140,18 @@ export default function AdminBookingsPage() {
       setDrivers(driverData.drivers ?? [])
     })
   }, [])
+
+  const hasActiveLiveTrips = bookings.some((booking) =>
+    booking.legs.some((leg) => shouldPollAdminLiveTrip(leg.status))
+  )
+
+  useEffect(() => {
+    if (!hasActiveLiveTrips) return
+    const interval = window.setInterval(() => {
+      void load({ silent: true })
+    }, ADMIN_LIVE_TRIP_POLL_INTERVAL_MS)
+    return () => window.clearInterval(interval)
+  }, [hasActiveLiveTrips, load])
 
   const updateStatus = async (id: string, newStatus: string) => {
     setBusy(id)
@@ -251,6 +300,26 @@ export default function AdminBookingsPage() {
                           <p className="text-xs font-semibold text-gray-900">{leg.direction}: {leg.from} → {leg.to}</p>
                           <span className="rounded-full bg-[#fbf7fc] px-2 py-1 text-[10px] font-semibold uppercase text-gray-500">{new Date(leg.departureDate).toLocaleDateString()}</span>
                         </div>
+                        <LiveTripMonitor
+                          bookingStatus={b.status}
+                          paymentStatus={b.payments[0]?.status ?? null}
+                          reference={displayReference(b.id)}
+                          leg={{
+                            ...leg,
+                            pickupAddress: b.pickupAddress,
+                            dropoffAddress: b.dropoffAddress,
+                            pickupCoordinates:
+                              typeof b.pickupLatitude === 'number' &&
+                              typeof b.pickupLongitude === 'number'
+                                ? { latitude: b.pickupLatitude, longitude: b.pickupLongitude }
+                                : null,
+                            dropoffCoordinates:
+                              typeof b.dropoffLatitude === 'number' &&
+                              typeof b.dropoffLongitude === 'number'
+                                ? { latitude: b.dropoffLatitude, longitude: b.dropoffLongitude }
+                                : null,
+                          }}
+                        />
                         <div className="grid grid-cols-1 gap-2">
                           <select
                             value={leg.fleetVehicleId ?? ''}
@@ -323,4 +392,8 @@ export default function AdminBookingsPage() {
       </div>
     </div>
   )
+}
+
+function displayReference(id: string) {
+  return `BFY-${id.slice(-8).toUpperCase()}`
 }
