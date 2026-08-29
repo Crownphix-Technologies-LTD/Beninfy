@@ -60,6 +60,10 @@ Tracking responses may include:
 ```json
 {
   "journeyIntelligence": {
+    "target": "pickup",
+    "distanceMeters": 12000,
+    "durationSeconds": 1800,
+    "encodedPolyline": "encoded",
     "routePolyline": "encoded",
     "distanceRemainingMeters": 12000,
     "estimatedArrivalAt": "2026-08-18T10:30:00.000Z",
@@ -71,6 +75,13 @@ Tracking responses may include:
 ```
 
 The object is optional and may be `null`. Flutter must not fabricate ETA, distance, traffic reason, route, or border state.
+
+For Customer live tracking, route intelligence is lifecycle-targeted:
+
+- before pickup: latest driver coordinate to pickup
+- `in_progress`: latest driver coordinate to destination
+
+The backend never exposes `GOOGLE_ROUTES_API_KEY` and never accepts arbitrary route origin/target coordinates from Flutter.
 
 ## Border Journey State
 

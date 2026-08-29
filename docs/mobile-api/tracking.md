@@ -77,9 +77,49 @@ Response includes:
 - public driver subset
 - public vehicle subset
 - last known location if still stored
+- target-aware road-route intelligence when an active driver location exists
 - scoped realtime subscription metadata
 
 Customers cannot query arbitrary driver locations.
+
+### Customer Journey Intelligence
+
+The backend may include `journeyIntelligence` in the tracking snapshot. This is computed server-side with the backend-only `GOOGLE_ROUTES_API_KEY`; Flutter must never call Google Routes directly with a server credential.
+
+Lifecycle target selection is authoritative:
+
+- `driver_en_route`, `driver_arrived`, `passenger_onboard` route from latest driver coordinate to pickup
+- `in_progress` routes from latest driver coordinate to destination
+- `payment_pending`, `reserved`, `unassigned`, `assigned`, `completed`, and `cancelled` do not compute a new active driver route
+
+If no `LatestTripLocation` exists, `journeyIntelligence` is `null`. The backend does not fall back to planned pickup-to-dropoff routing.
+
+Canonical response fields:
+
+```json
+{
+  "target": "pickup",
+  "distanceMeters": 12000,
+  "durationSeconds": 300,
+  "encodedPolyline": "encoded road polyline",
+  "calculatedAt": "2026-08-29T12:00:00.000Z",
+  "freshness": "fresh"
+}
+```
+
+Compatibility aliases remain during the Flutter transition:
+
+```json
+{
+  "routePolyline": "encoded road polyline",
+  "distanceRemainingMeters": 12000,
+  "estimatedDurationSeconds": 300
+}
+```
+
+The customer app may poll every 8 seconds, but the backend caches route calculations in `TripJourneySnapshot`. By default a route is recalculated only when there is no snapshot, the lifecycle target changes, the snapshot expires, the driver moves at least `JOURNEY_ROUTE_MOVEMENT_THRESHOLD_METERS` meters, or the latest driver position is newer than the snapshot and `JOURNEY_ROUTE_RECALCULATE_SECONDS` has elapsed. The default movement threshold is 150 meters.
+
+Google Routes failure does not fail tracking. If a valid same-target cached snapshot exists, it is returned as stale or fresh according to its expiry; otherwise `journeyIntelligence` is `null`.
 
 ## Freshness
 

@@ -375,6 +375,7 @@ model TripJourneySnapshot {
   id                       String     @id @default(cuid())
   bookingLegId             String     @unique
   bookingLeg               BookingLeg @relation(fields: [bookingLegId], references: [id], onDelete: Cascade)
+  target                   String     @default("pickup")
   originLatitude           Float
   originLongitude          Float
   destinationLatitude      Float
@@ -395,6 +396,7 @@ model TripJourneySnapshot {
 
   @@index([expiresAt])
   @@index([calculatedAt])
+  @@index([target, calculatedAt])
 }
 
 model TripReview {
