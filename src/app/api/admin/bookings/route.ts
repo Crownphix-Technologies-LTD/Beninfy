@@ -45,7 +45,17 @@ export async function GET(req: Request) {
           orderBy: { departureDate: 'asc' },
           include: {
             fleetVehicle: { select: { id: true, label: true, plateNumber: true, color: true } },
-            driver: { select: { id: true, name: true, phone: true } },
+            driver: { select: { id: true, name: true, phone: true, status: true } },
+            latestLocation: {
+              select: {
+                latitude: true,
+                longitude: true,
+                accuracyMeters: true,
+                capturedAt: true,
+                receivedAt: true,
+                expiresAt: true,
+              },
+            },
           },
         },
       },
@@ -66,7 +76,17 @@ export async function GET(req: Request) {
           orderBy: { departureDate: 'asc' },
           include: {
             fleetVehicle: { select: { id: true, label: true, plateNumber: true } },
-            driver: { select: { id: true, name: true, phone: true } },
+            driver: { select: { id: true, name: true, phone: true, status: true } },
+            latestLocation: {
+              select: {
+                latitude: true,
+                longitude: true,
+                accuracyMeters: true,
+                capturedAt: true,
+                receivedAt: true,
+                expiresAt: true,
+              },
+            },
           },
         },
       },

@@ -4,7 +4,13 @@ import { prisma } from '@/lib/prisma'
 
 type PrismaClientLike = typeof prisma | Prisma.TransactionClient
 
+export type JourneyTarget = 'pickup' | 'destination'
+
 export type JourneyIntelligenceDto = {
+  target: JourneyTarget
+  distanceMeters: number | null
+  durationSeconds: number | null
+  encodedPolyline: string | null
   routePolyline?: string | null
   distanceRemainingMeters?: number | null
   estimatedArrivalAt?: string | null
@@ -16,12 +22,15 @@ export type JourneyIntelligenceDto = {
 const DEFAULT_CACHE_TTL_MS = Number(process.env.JOURNEY_ROUTE_CACHE_TTL_SECONDS ?? 5 * 60) * 1000
 const RECALCULATE_AFTER_MS =
   Number(process.env.JOURNEY_ROUTE_RECALCULATE_SECONDS ?? 2 * 60) * 1000
+export const JOURNEY_ROUTE_MOVEMENT_THRESHOLD_METERS = Number(
+  process.env.JOURNEY_ROUTE_MOVEMENT_THRESHOLD_METERS ?? 150
+)
 
 function hasPoint(point: Partial<LatLng>): point is LatLng {
   return typeof point.latitude === 'number' && typeof point.longitude === 'number'
 }
 
-function pointFromBooking(booking: {
+function legEndpointsFromBooking(booking: {
   pickupLatitude?: number | null
   pickupLongitude?: number | null
   dropoffLatitude?: number | null
@@ -35,13 +44,75 @@ function pointFromBooking(booking: {
     latitude: booking.dropoffLatitude ?? undefined,
     longitude: booking.dropoffLongitude ?? undefined,
   }
-  if (direction === 'return') {
-    return hasPoint(pickup) && hasPoint(dropoff) ? { origin: dropoff, destination: pickup } : null
+  if (!hasPoint(pickup) || !hasPoint(dropoff)) return null
+  return direction === 'return'
+    ? { pickup: dropoff, destination: pickup }
+    : { pickup, destination: dropoff }
+}
+
+export function journeyTargetForLegStatus(status: string): JourneyTarget | null {
+  switch (status) {
+    case 'driver_en_route':
+    case 'driver_arrived':
+    case 'passenger_onboard':
+      return 'pickup'
+    case 'in_progress':
+      return 'destination'
+    default:
+      return null
   }
-  return hasPoint(pickup) && hasPoint(dropoff) ? { origin: pickup, destination: dropoff } : null
+}
+
+function distanceBetweenMeters(a: LatLng, b: LatLng) {
+  const earthRadiusMeters = 6371000
+  const toRadians = (degrees: number) => (degrees * Math.PI) / 180
+  const latitudeDelta = toRadians(b.latitude - a.latitude)
+  const longitudeDelta = toRadians(b.longitude - a.longitude)
+  const latitudeA = toRadians(a.latitude)
+  const latitudeB = toRadians(b.latitude)
+  const sinLat = Math.sin(latitudeDelta / 2)
+  const sinLng = Math.sin(longitudeDelta / 2)
+  const h =
+    sinLat * sinLat + Math.cos(latitudeA) * Math.cos(latitudeB) * sinLng * sinLng
+  return 2 * earthRadiusMeters * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h))
+}
+
+export function shouldRefreshJourneySnapshot({
+  snapshot,
+  target,
+  latestLocation,
+  now = new Date(),
+}: {
+  snapshot: {
+    target?: string | null
+    originLatitude: number
+    originLongitude: number
+    calculatedAt: Date | string
+    expiresAt: Date | string
+  } | null
+  target: JourneyTarget
+  latestLocation: LatLng & { receivedAt?: Date | string | null }
+  now?: Date
+}) {
+  if (!snapshot) return true
+  if (snapshot.target !== target) return true
+  if (new Date(snapshot.expiresAt).getTime() <= now.getTime()) return true
+
+  const movedMeters = distanceBetweenMeters(
+    { latitude: snapshot.originLatitude, longitude: snapshot.originLongitude },
+    latestLocation
+  )
+  if (movedMeters >= JOURNEY_ROUTE_MOVEMENT_THRESHOLD_METERS) return true
+
+  if (!latestLocation.receivedAt) return false
+  const receivedAt = new Date(latestLocation.receivedAt).getTime()
+  const calculatedAt = new Date(snapshot.calculatedAt).getTime()
+  return receivedAt > calculatedAt && calculatedAt + RECALCULATE_AFTER_MS <= now.getTime()
 }
 
 export function toJourneyIntelligenceDto(snapshot: {
+  target?: string | null
+  distanceMeters: number | null
   encodedPolyline: string | null
   distanceRemainingMeters: number | null
   estimatedArrivalAt: Date | string | null
@@ -51,13 +122,18 @@ export function toJourneyIntelligenceDto(snapshot: {
 } | null): JourneyIntelligenceDto {
   if (!snapshot) return null
   const expiresAt = new Date(snapshot.expiresAt)
+  const durationSeconds = snapshot.estimatedDurationSeconds
   return {
+    target: snapshot.target === 'destination' ? 'destination' : 'pickup',
+    distanceMeters: snapshot.distanceRemainingMeters ?? snapshot.distanceMeters,
+    durationSeconds,
+    encodedPolyline: snapshot.encodedPolyline,
     routePolyline: snapshot.encodedPolyline,
     distanceRemainingMeters: snapshot.distanceRemainingMeters,
     estimatedArrivalAt: snapshot.estimatedArrivalAt
       ? new Date(snapshot.estimatedArrivalAt).toISOString()
       : null,
-    estimatedDurationSeconds: snapshot.estimatedDurationSeconds,
+    estimatedDurationSeconds: durationSeconds,
     calculatedAt: new Date(snapshot.calculatedAt).toISOString(),
     freshness: expiresAt.getTime() > Date.now() ? 'fresh' : 'stale',
   }
@@ -89,30 +165,34 @@ export async function getOrRefreshJourneyIntelligence({
     },
   })
   if (!leg) return null
-  if (['completed', 'cancelled'].includes(leg.status)) {
-    return leg.journeySnapshot
-  }
+
+  const target = journeyTargetForLegStatus(leg.status)
+  if (!target || !leg.latestLocation) return null
 
   const now = Date.now()
   if (
     leg.journeySnapshot &&
-    new Date(leg.journeySnapshot.calculatedAt).getTime() + RECALCULATE_AFTER_MS > now
+    !shouldRefreshJourneySnapshot({
+      snapshot: leg.journeySnapshot,
+      target,
+      latestLocation: leg.latestLocation,
+      now: new Date(now),
+    })
   ) {
     return leg.journeySnapshot
   }
 
-  const endpoints = pointFromBooking(leg.booking, leg.direction)
-  if (!endpoints) return leg.journeySnapshot
+  const endpoints = legEndpointsFromBooking(leg.booking, leg.direction)
+  if (!endpoints) return null
 
-  const origin = leg.latestLocation
-    ? { latitude: leg.latestLocation.latitude, longitude: leg.latestLocation.longitude }
-    : endpoints.origin
+  const origin = { latitude: leg.latestLocation.latitude, longitude: leg.latestLocation.longitude }
+  const destination = endpoints[target]
   const route = await computeGoogleRoute({
     origin,
-    destination: endpoints.destination,
+    destination,
     trafficAware: true,
   })
-  if (!route.ok) return leg.journeySnapshot
+  if (!route.ok) return leg.journeySnapshot?.target === target ? leg.journeySnapshot : null
 
   const calculatedAt = route.route.calculatedAt
   const estimatedDurationSeconds =
@@ -127,10 +207,11 @@ export async function getOrRefreshJourneyIntelligence({
     where: { bookingLegId },
     create: {
       bookingLegId,
+      target,
       originLatitude: origin.latitude,
       originLongitude: origin.longitude,
-      destinationLatitude: endpoints.destination.latitude,
-      destinationLongitude: endpoints.destination.longitude,
+      destinationLatitude: destination.latitude,
+      destinationLongitude: destination.longitude,
       encodedPolyline: route.route.encodedPolyline,
       distanceMeters: route.route.distanceMeters,
       durationSeconds: route.route.durationSeconds,
@@ -145,8 +226,8 @@ export async function getOrRefreshJourneyIntelligence({
     update: {
       originLatitude: origin.latitude,
       originLongitude: origin.longitude,
-      destinationLatitude: endpoints.destination.latitude,
-      destinationLongitude: endpoints.destination.longitude,
+      destinationLatitude: destination.latitude,
+      destinationLongitude: destination.longitude,
       encodedPolyline: route.route.encodedPolyline,
       distanceMeters: route.route.distanceMeters,
       durationSeconds: route.route.durationSeconds,
@@ -156,9 +237,9 @@ export async function getOrRefreshJourneyIntelligence({
       estimatedArrivalAt,
       provider: route.route.provider,
       providerStatus: 'ok',
+      target,
       calculatedAt,
       expiresAt,
     },
   })
 }
-

@@ -127,7 +127,13 @@ import {
   toMobilePlaceDetailDto,
   toMobilePlacePredictionDto,
 } from '../src/lib/maps/googlePlaces'
-import { toJourneyIntelligenceDto } from '../src/lib/mobile/journeyIntelligence'
+import {
+  JOURNEY_ROUTE_MOVEMENT_THRESHOLD_METERS,
+  getOrRefreshJourneyIntelligence,
+  journeyTargetForLegStatus,
+  shouldRefreshJourneySnapshot,
+  toJourneyIntelligenceDto,
+} from '../src/lib/mobile/journeyIntelligence'
 import { mobileSupportConfig } from '../src/lib/mobile/supportConfig'
 import { getFcmConfig } from '../src/lib/mobile/fcm'
 import { mobileErrorFromCode } from '../src/lib/mobile/errors'
@@ -3786,6 +3792,8 @@ test('google places server key is backend-only and never falls back to public ma
 test('journey intelligence DTO remains optional and marks stale cache', () => {
   assert.equal(toJourneyIntelligenceDto(null), null)
   const dto = toJourneyIntelligenceDto({
+    target: 'pickup',
+    distanceMeters: 5000,
     encodedPolyline: 'poly',
     distanceRemainingMeters: 5000,
     estimatedArrivalAt: new Date('2026-08-18T10:30:00.000Z'),
@@ -3793,8 +3801,329 @@ test('journey intelligence DTO remains optional and marks stale cache', () => {
     calculatedAt: new Date('2026-08-18T10:00:00.000Z'),
     expiresAt: new Date('2026-08-18T10:01:00.000Z'),
   })
+  assert.equal(dto?.target, 'pickup')
+  assert.equal(dto?.distanceMeters, 5000)
+  assert.equal(dto?.durationSeconds, 1200)
+  assert.equal(dto?.encodedPolyline, 'poly')
   assert.equal(dto?.routePolyline, 'poly')
+  assert.equal(dto?.distanceRemainingMeters, 5000)
+  assert.equal(dto?.estimatedDurationSeconds, 1200)
   assert.equal(dto?.freshness, 'stale')
+  assert.equal(JSON.stringify(dto).includes('GOOGLE_ROUTES_API_KEY'), false)
+  assert.equal(JSON.stringify(dto).includes('test-key'), false)
+})
+
+test('customer journey target follows trip lifecycle exactly', () => {
+  assert.equal(journeyTargetForLegStatus('driver_en_route'), 'pickup')
+  assert.equal(journeyTargetForLegStatus('driver_arrived'), 'pickup')
+  assert.equal(journeyTargetForLegStatus('passenger_onboard'), 'pickup')
+  assert.equal(journeyTargetForLegStatus('in_progress'), 'destination')
+  for (const status of ['payment_pending', 'reserved', 'unassigned', 'assigned', 'completed', 'cancelled']) {
+    assert.equal(journeyTargetForLegStatus(status), null, status)
+  }
+})
+
+test('journey cache is target-aware and avoids recalculating on every poll', () => {
+  const now = new Date('2026-08-29T10:00:00.000Z')
+  const freshSnapshot = {
+    target: 'pickup',
+    originLatitude: 6.5244,
+    originLongitude: 3.3792,
+    calculatedAt: new Date(now.getTime() - 10_000),
+    expiresAt: new Date(now.getTime() + 60_000),
+  }
+  const latestLocation = {
+    latitude: 6.52441,
+    longitude: 3.37921,
+    receivedAt: new Date(now.getTime() - 5_000),
+  }
+  assert.equal(
+    shouldRefreshJourneySnapshot({
+      snapshot: freshSnapshot,
+      target: 'pickup',
+      latestLocation,
+      now,
+    }),
+    false
+  )
+  assert.equal(
+    shouldRefreshJourneySnapshot({
+      snapshot: freshSnapshot,
+      target: 'destination',
+      latestLocation,
+      now,
+    }),
+    true
+  )
+  assert.equal(
+    shouldRefreshJourneySnapshot({
+      snapshot: {
+        ...freshSnapshot,
+        expiresAt: new Date(now.getTime() - 1),
+      },
+      target: 'pickup',
+      latestLocation,
+      now,
+    }),
+    true
+  )
+  assert.equal(
+    shouldRefreshJourneySnapshot({
+      snapshot: freshSnapshot,
+      target: 'pickup',
+      latestLocation: {
+        latitude: 6.5244 + JOURNEY_ROUTE_MOVEMENT_THRESHOLD_METERS / 111_000 + 0.001,
+        longitude: 3.3792,
+        receivedAt: new Date(now.getTime() - 5_000),
+      },
+      now,
+    }),
+    true
+  )
+  assert.equal(
+    shouldRefreshJourneySnapshot({
+      snapshot: {
+        ...freshSnapshot,
+        calculatedAt: new Date(now.getTime() - 3 * 60_000),
+      },
+      target: 'pickup',
+      latestLocation,
+      now,
+    }),
+    true
+  )
+})
+
+test('customer journey intelligence routes latest driver location to lifecycle target', async () => {
+  const originalKey = process.env.GOOGLE_ROUTES_API_KEY
+  process.env.GOOGLE_ROUTES_API_KEY = 'test-key'
+  const originalFetch = globalThis.fetch
+  const calls: Array<{ origin: unknown; destination: unknown }> = []
+  globalThis.fetch = (async (_url, init) => {
+    const body = JSON.parse(String(init?.body ?? '{}')) as { origin: unknown; destination: unknown }
+    calls.push({ origin: body.origin, destination: body.destination })
+    return new Response(
+      JSON.stringify({
+        routes: [
+          {
+            distanceMeters: 4321,
+            duration: '300s',
+            staticDuration: '330s',
+            polyline: { encodedPolyline: 'encoded-road' },
+          },
+        ],
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    )
+  }) as typeof fetch
+
+  const baseLeg = {
+    id: 'leg1',
+    direction: 'outbound',
+    latestLocation: {
+      latitude: 6.52,
+      longitude: 3.38,
+      receivedAt: new Date('2026-08-29T10:00:00.000Z'),
+    },
+    journeySnapshot: null,
+    booking: {
+      pickupLatitude: 6.5244,
+      pickupLongitude: 3.3792,
+      dropoffLatitude: 6.3703,
+      dropoffLongitude: 2.3912,
+    },
+  }
+  const upserts: unknown[] = []
+  const client = (leg: Record<string, unknown>) => ({
+    bookingLeg: { findUnique: async () => leg },
+    tripJourneySnapshot: {
+      upsert: async (input: { create?: unknown; update?: unknown }) => {
+        upserts.push(input)
+        return {
+          id: 'snapshot1',
+          bookingLegId: 'leg1',
+          ...(input.create as object),
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        }
+      },
+    },
+  })
+
+  const pickupSnapshot = await getOrRefreshJourneyIntelligence({
+    bookingLegId: 'leg1',
+    client: client({ ...baseLeg, status: 'driver_en_route' }) as never,
+  })
+  assert.equal(pickupSnapshot?.target, 'pickup')
+  assert.equal(pickupSnapshot?.destinationLatitude, 6.5244)
+
+  const destinationSnapshot = await getOrRefreshJourneyIntelligence({
+    bookingLegId: 'leg1',
+    client: client({
+      ...baseLeg,
+      status: 'in_progress',
+      journeySnapshot: {
+        target: 'pickup',
+        originLatitude: 6.52,
+        originLongitude: 3.38,
+        calculatedAt: new Date('2026-08-29T09:59:00.000Z'),
+        expiresAt: new Date('2026-08-29T10:20:00.000Z'),
+      },
+    }) as never,
+  })
+  assert.equal(destinationSnapshot?.target, 'destination')
+  assert.equal(destinationSnapshot?.destinationLatitude, 6.3703)
+  assert.equal(calls.length, 2)
+  assert.equal(upserts.length, 2)
+
+  globalThis.fetch = originalFetch
+  if (originalKey === undefined) delete process.env.GOOGLE_ROUTES_API_KEY
+  else process.env.GOOGLE_ROUTES_API_KEY = originalKey
+})
+
+test('customer journey intelligence does not invent routes without active driver location', async () => {
+  const originalKey = process.env.GOOGLE_ROUTES_API_KEY
+  process.env.GOOGLE_ROUTES_API_KEY = 'test-key'
+  const originalFetch = globalThis.fetch
+  let calls = 0
+  globalThis.fetch = (async () => {
+    calls += 1
+    throw new Error('fetch should not be called')
+  }) as typeof fetch
+
+  const client = {
+    bookingLeg: {
+      findUnique: async () => ({
+        id: 'leg1',
+        direction: 'outbound',
+        status: 'driver_en_route',
+        latestLocation: null,
+        journeySnapshot: {
+          target: 'pickup',
+          originLatitude: 6.52,
+          originLongitude: 3.38,
+          calculatedAt: new Date('2026-08-29T09:59:00.000Z'),
+          expiresAt: new Date('2026-08-29T10:20:00.000Z'),
+        },
+        booking: {
+          pickupLatitude: 6.5244,
+          pickupLongitude: 3.3792,
+          dropoffLatitude: 6.3703,
+          dropoffLongitude: 2.3912,
+        },
+      }),
+    },
+    tripJourneySnapshot: { upsert: async () => assert.fail('should not upsert') },
+  }
+  const snapshot = await getOrRefreshJourneyIntelligence({
+    bookingLegId: 'leg1',
+    client: client as never,
+  })
+  assert.equal(snapshot, null)
+  assert.equal(calls, 0)
+
+  globalThis.fetch = originalFetch
+  if (originalKey === undefined) delete process.env.GOOGLE_ROUTES_API_KEY
+  else process.env.GOOGLE_ROUTES_API_KEY = originalKey
+})
+
+test('customer journey intelligence uses cache and degrades safely on Google failure', async () => {
+  const originalKey = process.env.GOOGLE_ROUTES_API_KEY
+  process.env.GOOGLE_ROUTES_API_KEY = 'test-key'
+  const originalFetch = globalThis.fetch
+  let calls = 0
+  const cachedSnapshot = {
+    id: 'snapshot1',
+    bookingLegId: 'leg1',
+    target: 'pickup',
+    originLatitude: 6.52,
+    originLongitude: 3.38,
+    destinationLatitude: 6.5244,
+    destinationLongitude: 3.3792,
+    encodedPolyline: 'cached-poly',
+    distanceMeters: 5000,
+    durationSeconds: 600,
+    trafficDurationSeconds: 660,
+    distanceRemainingMeters: 5000,
+    estimatedDurationSeconds: 660,
+    estimatedArrivalAt: new Date('2026-08-29T10:11:00.000Z'),
+    provider: 'google-routes',
+    providerStatus: 'ok',
+    calculatedAt: new Date(),
+    expiresAt: new Date(Date.now() + 60_000),
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  }
+  const activeLeg = {
+    id: 'leg1',
+    direction: 'outbound',
+    status: 'driver_en_route',
+    latestLocation: {
+      latitude: 6.52001,
+      longitude: 3.38001,
+      receivedAt: new Date(),
+    },
+    journeySnapshot: cachedSnapshot,
+    booking: {
+      pickupLatitude: 6.5244,
+      pickupLongitude: 3.3792,
+      dropoffLatitude: 6.3703,
+      dropoffLongitude: 2.3912,
+    },
+  }
+  const client = (leg: Record<string, unknown>) => ({
+    bookingLeg: { findUnique: async () => leg },
+    tripJourneySnapshot: { upsert: async () => assert.fail('fresh cache should not upsert') },
+  })
+  globalThis.fetch = (async () => {
+    calls += 1
+    return new Response(JSON.stringify({ error: { message: 'provider down' } }), {
+      status: 503,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }) as typeof fetch
+
+  const cached = await getOrRefreshJourneyIntelligence({
+    bookingLegId: 'leg1',
+    client: client(activeLeg) as never,
+  })
+  assert.equal(cached, cachedSnapshot)
+  assert.equal(calls, 0)
+
+  const staleFallback = await getOrRefreshJourneyIntelligence({
+    bookingLegId: 'leg1',
+    client: client({
+      ...activeLeg,
+      latestLocation: {
+        latitude: 6.61,
+        longitude: 3.38,
+        receivedAt: new Date(),
+      },
+    }) as never,
+  })
+  assert.equal(staleFallback, cachedSnapshot)
+  assert.equal(calls, 1)
+
+  const noSnapshot = await getOrRefreshJourneyIntelligence({
+    bookingLegId: 'leg1',
+    client: client({ ...activeLeg, journeySnapshot: null }) as never,
+  })
+  assert.equal(noSnapshot, null)
+  assert.equal(calls, 2)
+
+  globalThis.fetch = originalFetch
+  if (originalKey === undefined) delete process.env.GOOGLE_ROUTES_API_KEY
+  else process.env.GOOGLE_ROUTES_API_KEY = originalKey
+})
+
+test('customer tracking contract remains owner scoped and adds rate limiting', () => {
+  const source = readFileSync(
+    'src/app/api/mobile/v1/customer/bookings/[bookingId]/tracking/route.ts',
+    'utf8'
+  )
+  assert.match(source, /userId:\s*guard\.principal\.userId/)
+  assert.match(source, /scope:\s*'mobile-customer-tracking'/)
+  assert.doesNotMatch(source, /GOOGLE_ROUTES_API_KEY/)
 })
 
 test('mobile support config returns only configured support contacts', () => {
