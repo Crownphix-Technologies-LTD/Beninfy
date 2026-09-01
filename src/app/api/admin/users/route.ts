@@ -27,13 +27,27 @@ export async function GET(req: Request) {
       name: true,
       email: true,
       phone: true,
+      image: true,
       role: true,
+      disabledAt: true,
+      deletionRequestedAt: true,
+      scheduledDeletionAt: true,
+      deletionCancelledAt: true,
+      anonymizedAt: true,
+      accounts: { select: { provider: true } },
       createdAt: true,
       _count: { select: { bookings: true } },
     },
     take: 200,
   })
-  return NextResponse.json({ users, viewerRole: guard.role })
+  return NextResponse.json({
+    users: users.map((user) => ({
+      ...user,
+      googleLinked: user.accounts.some((account) => account.provider === 'google'),
+      accounts: undefined,
+    })),
+    viewerRole: guard.role,
+  })
 }
 
 const createSchema = z.object({

@@ -113,6 +113,7 @@ import {
   toTravelPreferenceDto,
   validCoordinates,
 } from '../src/lib/mobile/customerProduct'
+import { googleMobileAuthConfig } from '../src/lib/mobile/googleAuth'
 import { routes } from '../src/data/routes'
 import { vehicles } from '../src/data/vehicles'
 import { propagateCategoryRoutePrice } from '../src/lib/routePricePropagation'
@@ -3488,6 +3489,45 @@ test('secure account action policies are stable', () => {
     resendCooldownSeconds: 60,
     maxAttempts: 5,
   })
+})
+
+test('customer mobile Google auth is configured with backend-only mobile client IDs', () => {
+  const oldAndroid = process.env.GOOGLE_ANDROID_CLIENT_ID
+  const oldIos = process.env.GOOGLE_IOS_CLIENT_ID
+  const oldMobile = process.env.GOOGLE_MOBILE_CLIENT_IDS
+  try {
+    process.env.GOOGLE_ANDROID_CLIENT_ID = 'android-client.apps.googleusercontent.com'
+    process.env.GOOGLE_IOS_CLIENT_ID = 'ios-client.apps.googleusercontent.com'
+    process.env.GOOGLE_MOBILE_CLIENT_IDS = 'extra-client.apps.googleusercontent.com'
+    const config = googleMobileAuthConfig()
+    assert.deepEqual(config.clientIds, [
+      'android-client.apps.googleusercontent.com',
+      'ios-client.apps.googleusercontent.com',
+      'extra-client.apps.googleusercontent.com',
+    ])
+    assert.equal(config.clientIds.some((key) => key.startsWith('GOCSPX-')), false)
+  } finally {
+    process.env.GOOGLE_ANDROID_CLIENT_ID = oldAndroid
+    process.env.GOOGLE_IOS_CLIENT_ID = oldIos
+    process.env.GOOGLE_MOBILE_CLIENT_IDS = oldMobile
+  }
+})
+
+test('customer account docs expose staged deletion and avatar delete contracts', () => {
+  const source = readFileSync('docs/mobile-api/account-management.md', 'utf8')
+  assert.match(source, /DELETE \/api\/mobile\/v1\/customer\/profile\/avatar/)
+  assert.match(source, /deletion\.status = "pending"/)
+  assert.match(source, /POST \/api\/workers\/accounts\/anonymize/)
+  assert.match(source, /Bookings, trip records, payment\/accounting records/)
+})
+
+test('customer Google auth docs forbid client-side authoritative identity state', () => {
+  const source = readFileSync('docs/mobile-api/authentication.md', 'utf8')
+  assert.match(source, /POST \/api\/mobile\/v1\/auth\/google/)
+  assert.match(source, /GOOGLE_ANDROID_CLIENT_ID/)
+  assert.match(source, /GOOGLE_IOS_CLIENT_ID/)
+  assert.match(source, /Flutter must never send `userId`/)
+  assert.doesNotMatch(source, /GOOGLE_CLIENT_SECRET.*Customer mobile/)
 })
 
 test('mobile launch payment policy accepts NGN and rejects XOF', () => {

@@ -7,7 +7,7 @@ import { accountDeleteConfirmation, deleteCustomerAccount } from '@/lib/mobile/c
 export const runtime = 'nodejs'
 
 const schema = z.object({
-  currentPassword: z.string().min(1),
+  currentPassword: z.string().min(1).optional(),
   confirmation: z.literal(accountDeleteConfirmation()),
 })
 
@@ -33,5 +33,5 @@ export async function POST(req: Request) {
   })
   if (!result.ok) return mobileErrorFromCode(result.code)
 
-  return Response.json({ deleted: true, disabledAt: result.disabledAt, sessionsRevoked: true })
+  return Response.json({ deletion: result.deletion, sessionsRevoked: true })
 }

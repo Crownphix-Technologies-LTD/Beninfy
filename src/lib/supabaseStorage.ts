@@ -121,3 +121,53 @@ export async function uploadCatalogImage(kind: CatalogKind, id: string, file: Fi
 export async function uploadAvatarImage(userId: string, file: File) {
   return uploadStorageImage({ kind: 'avatars', id: userId, file, maxBytes: 2 * 1024 * 1024 })
 }
+
+function publicStoragePathFromUrl(url: string, config: { url: string; bucket: string }) {
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return null
+  }
+
+  const expectedOrigin = new URL(config.url).origin
+  if (parsed.origin !== expectedOrigin) return null
+
+  const prefix = `/storage/v1/object/public/${encodeURIComponent(config.bucket)}/`
+  if (!parsed.pathname.startsWith(prefix)) return null
+
+  const path = decodeURIComponent(parsed.pathname.slice(prefix.length))
+  if (!path || path.includes('..')) return null
+  return path
+}
+
+export async function deleteStorageImageByPublicUrl(url: string | null | undefined) {
+  if (!url) return { ok: true as const, skipped: true as const }
+  const config = getSupabaseStorageConfig()
+  if ('error' in config) return { ok: false as const, error: config.error }
+
+  const path = publicStoragePathFromUrl(url, config)
+  if (!path) return { ok: true as const, skipped: true as const }
+
+  const deleteUrl = `${config.url}/storage/v1/object/${encodeURIComponent(config.bucket)}/${path
+    .split('/')
+    .map(encodeURIComponent)
+    .join('/')}`
+  const res = await fetch(deleteUrl, {
+    method: 'DELETE',
+    headers: {
+      apikey: config.key,
+      Authorization: `Bearer ${config.key}`,
+    },
+  })
+
+  if (!res.ok && res.status !== 404) {
+    const message = await res.text().catch(() => '')
+    return {
+      ok: false as const,
+      error: `Supabase Storage delete failed (${res.status})${message ? `: ${message.slice(0, 180)}` : ''}`,
+    }
+  }
+
+  return { ok: true as const, skipped: false as const }
+}

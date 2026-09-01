@@ -5,6 +5,11 @@ export type MobileErrorCode =
   | 'FORBIDDEN'
   | 'INVALID_CREDENTIALS'
   | 'ACCOUNT_DISABLED'
+  | 'ACCOUNT_DELETION_PENDING'
+  | 'ACCOUNT_REAUTH_REQUIRED'
+  | 'GOOGLE_AUTH_UNAVAILABLE'
+  | 'GOOGLE_AUTH_INVALID'
+  | 'GOOGLE_ACCOUNT_CONFLICT'
   | 'DRIVER_NOT_LINKED'
   | 'DRIVER_INACTIVE'
   | 'INVALID_DRIVER_STATUS'
@@ -141,6 +146,16 @@ export function mobileErrorFromCode(code: MobileErrorCode, message?: string) {
       return mobileError(code, message ?? 'You are not allowed to perform this action', 403)
     case 'ACCOUNT_DISABLED':
       return mobileError(code, message ?? 'This account is disabled', 403)
+    case 'ACCOUNT_DELETION_PENDING':
+      return mobileError(code, message ?? 'This account is pending deletion', 403)
+    case 'ACCOUNT_REAUTH_REQUIRED':
+      return mobileError(code, message ?? 'Recent authentication is required', 401)
+    case 'GOOGLE_AUTH_UNAVAILABLE':
+      return mobileError(code, message ?? 'Google sign-in is not configured', 503)
+    case 'GOOGLE_AUTH_INVALID':
+      return mobileError(code, message ?? 'Google sign-in token is invalid', 401)
+    case 'GOOGLE_ACCOUNT_CONFLICT':
+      return mobileError(code, message ?? 'Google account cannot be linked to this customer', 409)
     case 'DRIVER_NOT_LINKED':
       return mobileError(
         code,

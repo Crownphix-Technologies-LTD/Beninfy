@@ -1,7 +1,8 @@
 import { requireMobilePrincipal } from '@/lib/mobile/auth'
 import { mobileError, mobileErrorFromCode } from '@/lib/mobile/errors'
 import { requireCompletedCustomerOnboarding } from '@/lib/mobile/onboarding'
-import { uploadCustomerAvatar } from '@/lib/mobile/customerProduct'
+import { toCustomerProfileDto } from '@/lib/mobile/dtos'
+import { deleteCustomerAvatar, uploadCustomerAvatar } from '@/lib/mobile/customerProduct'
 
 export const runtime = 'nodejs'
 
@@ -21,5 +22,18 @@ export async function POST(req: Request) {
   const result = await uploadCustomerAvatar({ principal: guard.principal, file })
   if (!result.ok) return mobileErrorFromCode(result.code, result.message)
 
-  return Response.json({ avatarUrl: result.avatarUrl })
+  return Response.json({ user: toCustomerProfileDto(result.user), avatarUrl: result.avatarUrl })
+}
+
+export async function DELETE(req: Request) {
+  const guard = await requireMobilePrincipal(req, 'CUSTOMER')
+  if (!guard.ok) return mobileErrorFromCode(guard.code ?? 'UNAUTHENTICATED')
+  const onboarding = await requireCompletedCustomerOnboarding(guard.user)
+  if (!onboarding.ok)
+    return mobileError(onboarding.code, 'Complete account onboarding to continue', 403, {
+      onboarding: onboarding.onboarding,
+    })
+
+  const result = await deleteCustomerAvatar(guard.principal)
+  return Response.json({ user: toCustomerProfileDto(result.user), avatarUrl: result.avatarUrl })
 }

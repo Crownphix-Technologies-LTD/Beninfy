@@ -101,6 +101,8 @@ function resolvePrincipal(
   user: User & { driver: Driver | null },
   requestedType?: MobilePrincipalType
 ) {
+  if (user.anonymizedAt || user.deletionRequestedAt)
+    return { error: 'ACCOUNT_DELETION_PENDING' as const }
   if (user.disabledAt) return { error: 'ACCOUNT_DISABLED' as const }
   if (isAdminRole(user.role)) return { error: 'FORBIDDEN' as const }
 
