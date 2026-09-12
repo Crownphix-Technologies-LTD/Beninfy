@@ -1,6 +1,12 @@
 import { tours as defaultTours } from '@/data/tours'
 import type { Tour } from '@/types'
 import { catalogImageUrl } from '@/lib/mediaImage'
+import {
+  toTourItineraryDto,
+  tourExecutionReadiness,
+  type TourItineraryDayDto,
+  type TourExecutionReadiness,
+} from '@/lib/tourItinerary'
 
 const TOUR_IMAGE_FALLBACKS: Record<string, string> = {
   'benin-history-lake': 'https://images.unsplash.com/photo-1612890009000-b9a73c018c85?auto=format&fit=crop&w=800&q=80',
@@ -17,7 +23,16 @@ function publicTourFallback() {
   return defaultTours.map((tour) => ({
     ...tour,
     image: tour.image || fallbackTourImage(tour.id),
+    executionReady: false,
+    executionReadinessReason: 'no_itinerary_days',
+    itineraryDays: [],
   }))
+}
+
+export type PublicTour = Tour & {
+  executionReady: boolean
+  executionReadinessReason: TourExecutionReadiness['reason']
+  itineraryDays: TourItineraryDayDto[]
 }
 
 export async function ensureDefaultTours() {
@@ -58,25 +73,38 @@ export async function getPublicTours() {
     const { prisma } = await import('@/lib/prisma')
     const tours = await prisma.tour.findMany({
       orderBy: [{ startingFromNGN: 'asc' }, { title: 'asc' }],
+      include: {
+        itineraryDays: {
+          orderBy: { dayNumber: 'asc' },
+          include: { stops: { orderBy: { sortOrder: 'asc' } } },
+        },
+      },
     })
 
-    return tours.map((t): Tour => ({
-      id: t.id,
-      title: t.title,
-      titleFr: t.titleFr ?? t.title,
-      destination: t.destination ?? t.country,
-      destinationFr: t.destinationFr ?? t.destination ?? t.country,
-      country: t.country,
-      durationDays: t.durationDays,
-      startingFromNGN: t.startingFromNGN,
-      image: catalogImageUrl('tours', t.id, t.image, t.updatedAt) || fallbackTourImage(t.id),
-      description: t.description,
-      descriptionFr: t.descriptionFr ?? t.description,
-      highlights: t.highlights,
-      highlightsFr: t.highlightsFr,
-      included: [],
-      includedFr: [],
-    }))
+    return tours.map((t): PublicTour => {
+      const readiness = tourExecutionReadiness(t)
+      return {
+        id: t.id,
+        title: t.title,
+        titleFr: t.titleFr ?? t.title,
+        destination: t.destination ?? t.country,
+        destinationFr: t.destinationFr ?? t.destination ?? t.country,
+        country: t.country,
+        countryFr: t.countryFr,
+        durationDays: t.durationDays,
+        startingFromNGN: t.startingFromNGN,
+        image: catalogImageUrl('tours', t.id, t.image, t.updatedAt) || fallbackTourImage(t.id),
+        description: t.description,
+        descriptionFr: t.descriptionFr ?? t.description,
+        highlights: t.highlights,
+        highlightsFr: t.highlightsFr,
+        included: [],
+        includedFr: [],
+        executionReady: readiness.executionReady,
+        executionReadinessReason: readiness.reason,
+        itineraryDays: toTourItineraryDto(t),
+      }
+    })
   } catch (error) {
     console.error('Falling back to default tour catalog', error)
     return publicTourFallback()

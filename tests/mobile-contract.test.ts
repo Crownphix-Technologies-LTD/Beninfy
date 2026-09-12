@@ -139,6 +139,13 @@ import { mobileSupportConfig } from '../src/lib/mobile/supportConfig'
 import { getFcmConfig } from '../src/lib/mobile/fcm'
 import { mobileErrorFromCode } from '../src/lib/mobile/errors'
 import {
+  normalizeTourItineraryInput,
+  toTourItineraryDto,
+  tourExecutionReadiness,
+  validateTourItineraryTemplate,
+  validTourCoordinate,
+} from '../src/lib/tourItinerary'
+import {
   locationMatchesRouteServiceArea,
   normalizeSupportedRouteCity,
   resolvePickupFareZoneForRoute,
@@ -1238,6 +1245,217 @@ test('admin driver creation provisions mobile auth user and never stores plainte
   assert.equal(accountRoute.includes('temporaryPasswordReturned'), true)
   assert.equal(accountRoute.includes('linkExistingUser'), true)
   assert.equal(accountRoute.includes('canLinkExistingUserToDriver'), true)
+})
+
+test('tour itinerary template validation enforces ordering and coordinates', () => {
+  const valid = validateTourItineraryTemplate([
+    {
+      dayNumber: 2,
+      title: 'Beach day',
+      defaultStartLatitude: 6.1304,
+      defaultStartLongitude: 1.2158,
+      stops: [
+        {
+          sortOrder: 2,
+          title: 'Aného Beach',
+          address: 'Aného, Togo',
+          latitude: 6.2274,
+          longitude: 1.5919,
+        },
+        {
+          sortOrder: 1,
+          title: 'Lomé pickup',
+          address: 'Lomé, Togo',
+          latitude: 6.1725,
+          longitude: 1.2314,
+        },
+      ],
+    },
+    {
+      dayNumber: 1,
+      title: 'Arrival',
+      stops: [
+        {
+          sortOrder: 1,
+          title: 'Grand Marche',
+          address: 'Grand Marche, Lome',
+          latitude: 6.1319,
+          longitude: 1.2228,
+        },
+      ],
+    },
+  ])
+
+  assert.equal(valid.ok, true)
+  if (valid.ok) {
+    assert.deepEqual(valid.days.map((day) => day.dayNumber), [1, 2])
+    assert.deepEqual(valid.days[1].stops.map((stop) => stop.sortOrder), [1, 2])
+  }
+
+  assert.equal(validTourCoordinate(6.1725, 1.2314), true)
+  assert.equal(validTourCoordinate(91, 1.2314), false)
+})
+
+test('tour itinerary template validation rejects duplicate days and stops', () => {
+  const duplicateDay = validateTourItineraryTemplate([
+    { dayNumber: 1, title: 'Day 1', stops: [] },
+    { dayNumber: 1, title: 'Day 1 again', stops: [] },
+  ])
+  assert.equal(duplicateDay.ok, false)
+  if (!duplicateDay.ok) assert.equal(duplicateDay.code, 'DUPLICATE_DAY_NUMBER')
+
+  const duplicateStop = validateTourItineraryTemplate([
+    {
+      dayNumber: 1,
+      title: 'Day 1',
+      stops: [
+        { sortOrder: 1, title: 'A', address: 'A', latitude: 6, longitude: 2 },
+        { sortOrder: 1, title: 'B', address: 'B', latitude: 6, longitude: 2 },
+      ],
+    },
+  ])
+  assert.equal(duplicateStop.ok, false)
+  if (!duplicateStop.ok) assert.equal(duplicateStop.code, 'DUPLICATE_STOP_ORDER')
+})
+
+test('tour execution readiness is derived from configured itinerary stops', () => {
+  assert.deepEqual(tourExecutionReadiness({ itineraryDays: [] }), {
+    executionReady: false,
+    reason: 'no_itinerary_days',
+  })
+
+  assert.deepEqual(
+    tourExecutionReadiness({
+      itineraryDays: [
+        {
+          id: 'day1',
+          dayNumber: 1,
+          title: 'Day 1',
+          titleFr: null,
+          description: null,
+          descriptionFr: null,
+          defaultStartLabel: null,
+          defaultStartAddress: null,
+          defaultStartLatitude: null,
+          defaultStartLongitude: null,
+          defaultEndLabel: null,
+          defaultEndAddress: null,
+          defaultEndLatitude: null,
+          defaultEndLongitude: null,
+          stops: [],
+        },
+      ],
+    }),
+    { executionReady: false, reason: 'missing_day_stop' }
+  )
+
+  assert.deepEqual(
+    tourExecutionReadiness({
+      itineraryDays: [
+        {
+          id: 'day1',
+          dayNumber: 1,
+          title: 'Day 1',
+          titleFr: null,
+          description: null,
+          descriptionFr: null,
+          defaultStartLabel: 'Hotel',
+          defaultStartAddress: 'Cotonou',
+          defaultStartLatitude: 6.37,
+          defaultStartLongitude: 2.39,
+          defaultEndLabel: null,
+          defaultEndAddress: null,
+          defaultEndLatitude: null,
+          defaultEndLongitude: null,
+          stops: [
+            {
+              id: 'stop1',
+              sortOrder: 1,
+              title: 'Ganvie',
+              titleFr: null,
+              description: null,
+              descriptionFr: null,
+              address: 'Ganvie, Benin',
+              latitude: 6.467,
+              longitude: 2.417,
+              estimatedDurationMinutes: 120,
+              required: true,
+            },
+          ],
+        },
+      ],
+    }),
+    { executionReady: true, reason: 'ready' }
+  )
+})
+
+test('tour itinerary DTO exposes ordered customer-safe template fields', () => {
+  const normalized = normalizeTourItineraryInput([
+    {
+      dayNumber: 1,
+      title: ' Cotonou and Ouidah ',
+      titleFr: ' Cotonou et Ouidah ',
+      defaultStartLabel: ' Hotel pickup ',
+      defaultStartAddress: ' Cotonou hotel ',
+      defaultStartLatitude: 6.3703,
+      defaultStartLongitude: 2.3912,
+      stops: [
+        {
+          sortOrder: 1,
+          title: ' Ouidah ',
+          titleFr: ' Ouidah ',
+          address: ' Ouidah, Benin ',
+          latitude: 6.3667,
+          longitude: 2.0833,
+          required: false,
+        },
+      ],
+    },
+  ])
+
+  const dto = toTourItineraryDto({
+    itineraryDays: normalized.map((day) => ({
+      id: `day-${day.dayNumber}`,
+      dayNumber: day.dayNumber,
+      title: day.title,
+      titleFr: day.titleFr,
+      description: day.description,
+      descriptionFr: day.descriptionFr,
+      defaultStartLabel: day.defaultStartLabel,
+      defaultStartAddress: day.defaultStartAddress,
+      defaultStartLatitude: day.defaultStartLatitude ?? null,
+      defaultStartLongitude: day.defaultStartLongitude ?? null,
+      defaultEndLabel: day.defaultEndLabel,
+      defaultEndAddress: day.defaultEndAddress,
+      defaultEndLatitude: day.defaultEndLatitude ?? null,
+      defaultEndLongitude: day.defaultEndLongitude ?? null,
+      stops: day.stops.map((stop) => ({
+        id: `stop-${stop.sortOrder}`,
+        sortOrder: stop.sortOrder,
+        title: stop.title,
+        titleFr: stop.titleFr,
+        description: stop.description,
+        descriptionFr: stop.descriptionFr,
+        address: stop.address,
+        latitude: stop.latitude,
+        longitude: stop.longitude,
+        estimatedDurationMinutes: stop.estimatedDurationMinutes ?? null,
+        required: stop.required,
+      })),
+    })),
+  })
+
+  assert.equal(dto[0].title, 'Cotonou and Ouidah')
+  assert.equal(dto[0].defaultStart.label, 'Hotel pickup')
+  assert.equal(dto[0].stops[0].address, 'Ouidah, Benin')
+  assert.equal(dto[0].stops[0].required, false)
+})
+
+test('tour execution foundation docs keep booking and driver execution out of phase one', () => {
+  const docs = readFileSync('docs/mobile-api/tours.md', 'utf8')
+  assert.match(docs, /executionReady/)
+  assert.match(docs, /GET \/api\/admin\/tours\/:id\/itinerary/)
+  assert.match(docs, /Tour booking, Tour payment, Driver Tour execution/)
 })
 
 test('mobile route discovery DTO is customer safe and stable', () => {

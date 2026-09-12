@@ -633,7 +633,7 @@ model Coupon {
 }
 
 model Tour {
-  id              String   @id
+  id              String              @id
   title           String
   titleFr         String?
   destination     String?
@@ -645,10 +645,57 @@ model Tour {
   image           String?
   description     String
   descriptionFr   String?
-  highlights      String[] @default([])
-  highlightsFr    String[] @default([])
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  highlights      String[]            @default([])
+  highlightsFr    String[]            @default([])
+  itineraryDays   TourItineraryDay[]
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+}
+
+model TourItineraryDay {
+  id                    String              @id @default(cuid())
+  tourId                String
+  tour                  Tour                @relation(fields: [tourId], references: [id], onDelete: Cascade)
+  dayNumber             Int
+  title                 String
+  titleFr               String?
+  description           String?
+  descriptionFr         String?
+  defaultStartLabel     String?
+  defaultStartAddress   String?
+  defaultStartLatitude  Float?
+  defaultStartLongitude Float?
+  defaultEndLabel       String?
+  defaultEndAddress     String?
+  defaultEndLatitude    Float?
+  defaultEndLongitude   Float?
+  stops                 TourItineraryStop[]
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+
+  @@unique([tourId, dayNumber])
+  @@index([tourId, dayNumber])
+}
+
+model TourItineraryStop {
+  id                       String           @id @default(cuid())
+  itineraryDayId           String
+  itineraryDay             TourItineraryDay @relation(fields: [itineraryDayId], references: [id], onDelete: Cascade)
+  sortOrder                Int
+  title                    String
+  titleFr                  String?
+  description              String?
+  descriptionFr            String?
+  address                  String
+  latitude                 Float
+  longitude                Float
+  estimatedDurationMinutes Int?
+  required                 Boolean          @default(true)
+  createdAt                DateTime         @default(now())
+  updatedAt                DateTime         @updatedAt
+
+  @@unique([itineraryDayId, sortOrder])
+  @@index([itineraryDayId, sortOrder])
 }
 
 model BorderFee {
