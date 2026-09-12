@@ -53,3 +53,35 @@ When a Tour is booked, execution rows should snapshot the configured day/stop ti
 - true with `ready` when all days have ordered stops with valid coordinates
 
 Flutter must treat this field as informational until booking endpoints exist. It must not create local Tour execution from catalogue data.
+
+## Phase 2 Booking Foundation
+
+Implemented:
+
+- `TourBooking` stores a customer-owned operational booking with human-readable references like `BFYT-0123ABCD45`.
+- `TourBookingDay` snapshots each configured reusable itinerary day when the booking is created.
+- `TourStopExecution` snapshots every configured stop for each booked day.
+- Customer mobile endpoints can create and read only the authenticated customer's Tour bookings.
+- Backoffice can read Tour bookings and their day/stop snapshots.
+
+Lifecycle values currently stored:
+
+- `TourBooking.status`: `payment_pending`, `confirmed`, `active`, `completed`, `cancelled`
+- `TourBooking.paymentStatus`: `pending`, `paid`, `failed`, `refunded`
+- `TourBookingDay.status`: `upcoming`, `assigned`, `driver_en_route`, `driver_arrived`, `in_progress`, `completed`, `cancelled`
+- `TourStopExecution.status`: `upcoming`, `en_route`, `arrived`, `completed`, `skipped`
+
+Booking is allowed only when the source Tour is execution-ready. Tours without complete structured itinerary remain visible in the catalogue, but customer booking creation returns `TOUR_NOT_EXECUTION_READY`.
+
+Pricing for Phase 2 is a fixed authoritative snapshot from `Tour.startingFromNGN`. This preserves today's catalogue meaning and does not invent traveller, coupon, or vehicle-specific Tour pricing. Future Tour pricing should be modeled separately before external payment initialization is enabled.
+
+Payment is deliberately a foundation only in Phase 2. Existing `Payment` rows are owned by ride `Booking` records and current settlement code assumes ride bookings. Tour bookings therefore store payment state directly for now and do not initialize Paystack or PayOnUs.
+
+Still not implemented:
+
+- Driver Tour assignment actions
+- Driver Tour lifecycle transitions
+- Customer Tour cancellation/refund
+- Tour coupons
+- Tour live tracking and route intelligence
+- Tour chat

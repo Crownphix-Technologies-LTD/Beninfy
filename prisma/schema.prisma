@@ -31,6 +31,7 @@ model User {
   termsVersion        String?
   privacyVersion      String?
   bookings            Booking[]
+  tourBookings        TourBooking[]
   savedPlaces         SavedPlace[]
   travelPreference    CustomerTravelPreference?
   tripReviews         TripReview[]
@@ -258,19 +259,20 @@ model Vehicle {
 }
 
 model FleetVehicle {
-  id          String         @id @default(cuid())
-  vehicleId   String
-  vehicle     Vehicle        @relation(fields: [vehicleId], references: [id])
-  label       String
-  plateNumber String         @unique
-  color       String?
-  status      String         @default("available")
-  currentCity String?
-  notes       String?
-  bookingLegs BookingLeg[]
-  blocks      VehicleBlock[]
-  createdAt   DateTime       @default(now())
-  updatedAt   DateTime       @updatedAt
+  id              String           @id @default(cuid())
+  vehicleId       String
+  vehicle         Vehicle          @relation(fields: [vehicleId], references: [id])
+  label           String
+  plateNumber     String           @unique
+  color           String?
+  status          String           @default("available")
+  currentCity     String?
+  notes           String?
+  bookingLegs     BookingLeg[]
+  blocks          VehicleBlock[]
+  tourBookingDays TourBookingDay[]
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
 
   @@index([vehicleId, status, label])
 }
@@ -287,6 +289,7 @@ model Driver {
   licenseNumber     String?
   notes             String?
   bookingLegs       BookingLeg[]
+  tourBookingDays   TourBookingDay[]
   assignmentHistory DriverTripAssignmentHistory[]
   tripReviews       TripReview[]
   presence          DriverPresence?
@@ -633,7 +636,7 @@ model Coupon {
 }
 
 model Tour {
-  id              String              @id
+  id              String             @id
   title           String
   titleFr         String?
   destination     String?
@@ -645,11 +648,12 @@ model Tour {
   image           String?
   description     String
   descriptionFr   String?
-  highlights      String[]            @default([])
-  highlightsFr    String[]            @default([])
+  highlights      String[]           @default([])
+  highlightsFr    String[]           @default([])
   itineraryDays   TourItineraryDay[]
-  createdAt       DateTime            @default(now())
-  updatedAt       DateTime            @updatedAt
+  tourBookings    TourBooking[]
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
 }
 
 model TourItineraryDay {
@@ -696,6 +700,115 @@ model TourItineraryStop {
 
   @@unique([itineraryDayId, sortOrder])
   @@index([itineraryDayId, sortOrder])
+}
+
+model TourBooking {
+  id                String           @id @default(cuid())
+  userId            String
+  user              User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tourId            String
+  tour              Tour             @relation(fields: [tourId], references: [id])
+  reference         String           @unique
+  status            String           @default("payment_pending")
+  paymentStatus     String           @default("pending")
+  currencyCode      String           @default("NGN")
+  priceNGN          Int
+  amountPaidNGN     Int              @default(0)
+  paymentProvider   String?
+  paymentReference  String?
+  idempotencyKey    String?
+  tourTitle         String
+  tourTitleFr       String?
+  tourDestination   String?
+  tourDestinationFr String?
+  tourCountry       String
+  tourCountryFr     String?
+  tourImage         String?
+  startDate         DateTime
+  endDate           DateTime
+  travellers        Int
+  cancelledAt       DateTime?
+  completedAt       DateTime?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  days              TourBookingDay[]
+
+  @@unique([userId, idempotencyKey])
+  @@index([userId, createdAt])
+  @@index([tourId, startDate])
+  @@index([status, startDate])
+  @@index([paymentStatus, createdAt])
+}
+
+model TourBookingDay {
+  id                     String              @id @default(cuid())
+  tourBookingId          String
+  tourBooking            TourBooking         @relation(fields: [tourBookingId], references: [id], onDelete: Cascade)
+  sourceItineraryDayId   String?
+  dayNumber              Int
+  scheduledDate          DateTime
+  status                 String              @default("upcoming")
+  title                  String
+  titleFr                String?
+  description            String?
+  descriptionFr          String?
+  pickupLabel            String?
+  pickupAddress          String?
+  pickupLatitude         Float?
+  pickupLongitude        Float?
+  endLabel               String?
+  endAddress             String?
+  endLatitude            Float?
+  endLongitude           Float?
+  assignedDriverId       String?
+  assignedDriver         Driver?             @relation(fields: [assignedDriverId], references: [id], onDelete: SetNull)
+  assignedFleetVehicleId String?
+  assignedFleetVehicle   FleetVehicle?       @relation(fields: [assignedFleetVehicleId], references: [id], onDelete: SetNull)
+  assignedAt             DateTime?
+  acceptedAt             DateTime?
+  driverEnRouteAt        DateTime?
+  driverArrivedAt        DateTime?
+  startedAt              DateTime?
+  completedAt            DateTime?
+  cancelledAt            DateTime?
+  createdAt              DateTime            @default(now())
+  updatedAt              DateTime            @updatedAt
+  stops                  TourStopExecution[]
+
+  @@unique([tourBookingId, dayNumber])
+  @@index([tourBookingId, scheduledDate])
+  @@index([assignedDriverId, scheduledDate])
+  @@index([assignedFleetVehicleId, scheduledDate])
+  @@index([status, scheduledDate])
+}
+
+model TourStopExecution {
+  id                       String         @id @default(cuid())
+  tourBookingDayId         String
+  tourBookingDay           TourBookingDay @relation(fields: [tourBookingDayId], references: [id], onDelete: Cascade)
+  sourceItineraryStopId    String?
+  sortOrder                Int
+  title                    String
+  titleFr                  String?
+  description              String?
+  descriptionFr            String?
+  address                  String
+  latitude                 Float
+  longitude                Float
+  estimatedDurationMinutes Int?
+  required                 Boolean        @default(true)
+  status                   String         @default("upcoming")
+  enRouteAt                DateTime?
+  arrivedAt                DateTime?
+  completedAt              DateTime?
+  skippedAt                DateTime?
+  skipReason               String?
+  createdAt                DateTime       @default(now())
+  updatedAt                DateTime       @updatedAt
+
+  @@unique([tourBookingDayId, sortOrder])
+  @@index([tourBookingDayId, sortOrder])
+  @@index([status])
 }
 
 model BorderFee {

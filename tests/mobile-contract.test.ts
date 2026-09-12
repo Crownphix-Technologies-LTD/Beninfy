@@ -146,6 +146,20 @@ import {
   validTourCoordinate,
 } from '../src/lib/tourItinerary'
 import {
+  TOUR_BOOKING_DAY_STATUSES,
+  TOUR_BOOKING_MAX_TRAVELLERS,
+  TOUR_BOOKING_MIN_TRAVELLERS,
+  TOUR_BOOKING_STATUSES,
+  TOUR_STOP_EXECUTION_STATUSES,
+  calculateTourPriceSnapshot,
+  generateTourBookingReference,
+  normalizeTourBookingIdempotencyKey,
+  toTourBookingDto,
+  tourPaymentFoundation,
+  validateTourStartDate,
+  validateTourTravellerCount,
+} from '../src/lib/mobile/tourBookings'
+import {
   locationMatchesRouteServiceArea,
   normalizeSupportedRouteCity,
   resolvePickupFareZoneForRoute,
@@ -1451,11 +1465,13 @@ test('tour itinerary DTO exposes ordered customer-safe template fields', () => {
   assert.equal(dto[0].stops[0].required, false)
 })
 
-test('tour execution foundation docs keep booking and driver execution out of phase one', () => {
+test('tour execution foundation docs separate booking foundation from later execution work', () => {
   const docs = readFileSync('docs/mobile-api/tours.md', 'utf8')
   assert.match(docs, /executionReady/)
   assert.match(docs, /GET \/api\/admin\/tours\/:id\/itinerary/)
-  assert.match(docs, /Tour booking, Tour payment, Driver Tour execution/)
+  assert.match(docs, /POST \/api\/mobile\/v1\/customer\/tours\/:tourId\/book/)
+  assert.match(docs, /Tour payment initialization is not implemented yet/)
+  assert.match(docs, /Driver Tour execution, Customer live Tour tracking/)
 })
 
 test('mobile route discovery DTO is customer safe and stable', () => {
@@ -4429,4 +4445,256 @@ test('fcm config stays server-side and requires all credential parts', () => {
   else process.env.FIREBASE_CLIENT_EMAIL = originalEmail
   if (originalKey === undefined) delete process.env.FIREBASE_PRIVATE_KEY
   else process.env.FIREBASE_PRIVATE_KEY = originalKey
+})
+
+test('tour booking date validation requires utc date-only and rejects past dates', () => {
+  const now = new Date(Date.UTC(2026, 8, 12, 12))
+
+  assert.deepEqual(validateTourStartDate('2026-09-12', now), {
+    ok: true,
+    date: new Date(Date.UTC(2026, 8, 12)),
+  })
+
+  assert.deepEqual(validateTourStartDate('2026-09-11', now), {
+    ok: false,
+    code: 'TOUR_BOOKING_DATE_INVALID',
+  })
+  assert.deepEqual(validateTourStartDate('2026-02-30', now), {
+    ok: false,
+    code: 'TOUR_BOOKING_DATE_INVALID',
+  })
+  assert.deepEqual(validateTourStartDate('2026-09-12T00:00:00Z', now), {
+    ok: false,
+    code: 'TOUR_BOOKING_DATE_INVALID',
+  })
+})
+
+test('tour booking traveller validation is bounded but does not invent vehicle capacity', () => {
+  assert.deepEqual(validateTourTravellerCount(TOUR_BOOKING_MIN_TRAVELLERS), {
+    ok: true,
+    travellers: TOUR_BOOKING_MIN_TRAVELLERS,
+  })
+  assert.deepEqual(validateTourTravellerCount(TOUR_BOOKING_MAX_TRAVELLERS), {
+    ok: true,
+    travellers: TOUR_BOOKING_MAX_TRAVELLERS,
+  })
+  assert.deepEqual(validateTourTravellerCount(0), {
+    ok: false,
+    code: 'TOUR_TRAVELLER_COUNT_INVALID',
+  })
+  assert.deepEqual(validateTourTravellerCount(31), {
+    ok: false,
+    code: 'TOUR_TRAVELLER_COUNT_INVALID',
+  })
+})
+
+test('tour booking idempotency key is optional and constrained for mobile retries', () => {
+  assert.deepEqual(normalizeTourBookingIdempotencyKey(undefined), { ok: true, key: null })
+  assert.deepEqual(normalizeTourBookingIdempotencyKey('request-123'), {
+    ok: true,
+    key: 'request-123',
+  })
+  assert.deepEqual(normalizeTourBookingIdempotencyKey('bad key with spaces'), {
+    ok: false,
+    code: 'VALIDATION_ERROR',
+  })
+})
+
+test('tour booking lifecycle constants expose the phase 2 source of truth', () => {
+  assert.deepEqual(TOUR_BOOKING_STATUSES, [
+    'payment_pending',
+    'confirmed',
+    'active',
+    'completed',
+    'cancelled',
+  ])
+  assert.deepEqual(TOUR_BOOKING_DAY_STATUSES, [
+    'upcoming',
+    'assigned',
+    'driver_en_route',
+    'driver_arrived',
+    'in_progress',
+    'completed',
+    'cancelled',
+  ])
+  assert.deepEqual(TOUR_STOP_EXECUTION_STATUSES, [
+    'upcoming',
+    'en_route',
+    'arrived',
+    'completed',
+    'skipped',
+  ])
+})
+
+test('tour booking references are customer-safe and human-readable', () => {
+  assert.match(generateTourBookingReference(), /^BFYT-[0-9A-F]{10}$/)
+})
+
+test('tour booking price snapshot uses the existing catalogue source only', () => {
+  assert.deepEqual(calculateTourPriceSnapshot({ startingFromNGN: 185000 }), {
+    currencyCode: 'NGN',
+    priceNGN: 185000,
+    pricingBasis: 'tour.startingFromNGN',
+  })
+})
+
+test('tour booking dto exposes snapshot days, stops, payment state and progress', () => {
+  const createdAt = new Date(Date.UTC(2026, 8, 12))
+  const dto = toTourBookingDto({
+    id: 'tb1',
+    userId: 'user1',
+    tourId: 'ganvie',
+    reference: 'BFYT-ABCDEF1234',
+    status: 'payment_pending',
+    paymentStatus: 'pending',
+    currencyCode: 'NGN',
+    priceNGN: 120000,
+    amountPaidNGN: 0,
+    paymentProvider: null,
+    paymentReference: null,
+    tourTitle: 'Ganvie Day Tour',
+    tourTitleFr: 'Tour de Ganvie',
+    tourDestination: 'Ganvie',
+    tourDestinationFr: 'Ganvie',
+    tourCountry: 'Benin Republic',
+    tourCountryFr: 'Benin',
+    tourImage: '/images/tours/ganvie.jpg',
+    startDate: createdAt,
+    endDate: createdAt,
+    travellers: 2,
+    cancelledAt: null,
+    completedAt: null,
+    createdAt,
+    updatedAt: createdAt,
+    days: [
+      {
+        id: 'day1',
+        tourBookingId: 'tb1',
+        sourceItineraryDayId: 'template-day1',
+        dayNumber: 1,
+        scheduledDate: createdAt,
+        status: 'upcoming',
+        title: 'Lagoon arrival',
+        titleFr: null,
+        description: 'Start the day',
+        descriptionFr: null,
+        pickupLabel: 'Hotel pickup',
+        pickupAddress: 'Cotonou hotel',
+        pickupLatitude: 6.3703,
+        pickupLongitude: 2.3912,
+        endLabel: 'Hotel dropoff',
+        endAddress: 'Cotonou hotel',
+        endLatitude: 6.3703,
+        endLongitude: 2.3912,
+        assignedDriverId: null,
+        assignedFleetVehicleId: null,
+        assignedAt: null,
+        acceptedAt: null,
+        driverEnRouteAt: null,
+        driverArrivedAt: null,
+        startedAt: null,
+        completedAt: null,
+        cancelledAt: null,
+        stops: [
+          {
+            id: 'stop1',
+            tourBookingDayId: 'day1',
+            sourceItineraryStopId: 'template-stop1',
+            sortOrder: 1,
+            title: 'Ganvie pier',
+            titleFr: null,
+            description: null,
+            descriptionFr: null,
+            address: 'Ganvie, Benin',
+            latitude: 6.4667,
+            longitude: 2.4167,
+            estimatedDurationMinutes: 90,
+            required: true,
+            status: 'upcoming',
+            enRouteAt: null,
+            arrivedAt: null,
+            completedAt: null,
+            skippedAt: null,
+            skipReason: null,
+          },
+        ],
+      },
+    ],
+  })
+
+  assert.equal(dto.reference, 'BFYT-ABCDEF1234')
+  assert.equal(dto.price.minorValue, 12000000)
+  assert.equal(dto.payment.canInitialize, true)
+  assert.equal(dto.progress.currentDay, 1)
+  assert.equal(dto.days[0]?.label, 'Day 1 of 1')
+  assert.equal(dto.days[0]?.stops[0]?.stopNumber, 1)
+  assert.deepEqual(dto.days[0]?.pickup.coordinates, { latitude: 6.3703, longitude: 2.3912 })
+})
+
+test('tour payment foundation documents that live ride payment ownership is unchanged', () => {
+  assert.deepEqual(tourPaymentFoundation(), {
+    externalPaymentInitializationImplemented: false,
+    reason:
+      'Existing Payment rows are ride Booking-owned. Phase 2 stores TourBooking payment state without changing live ride settlement.',
+    couponSupport: false,
+  })
+})
+
+test('tour booking endpoints require customer ownership and do not expose provider secrets', () => {
+  const createSource = readFileSync(
+    'src/app/api/mobile/v1/customer/tours/[tourId]/book/route.ts',
+    'utf8'
+  )
+  const listSource = readFileSync('src/app/api/mobile/v1/customer/tour-bookings/route.ts', 'utf8')
+  const detailSource = readFileSync(
+    'src/app/api/mobile/v1/customer/tour-bookings/[tourBookingId]/route.ts',
+    'utf8'
+  )
+  const paymentSource = readFileSync(
+    'src/app/api/mobile/v1/customer/tour-bookings/[tourBookingId]/payment/route.ts',
+    'utf8'
+  )
+  const serviceSource = readFileSync('src/lib/mobile/tourBookings.ts', 'utf8')
+
+  assert.match(createSource, /requireMobilePrincipal\(req,\s*'CUSTOMER'\)/)
+  assert.match(createSource, /requireCompletedCustomerOnboarding/)
+  assert.match(createSource, /scope:\s*'mobile-tour-booking-create'/)
+  assert.match(createSource, /idempotencyKey/)
+  assert.match(createSource, /result\.idempotent\s*\?\s*200\s*:\s*201/)
+  assert.match(listSource, /listCustomerTourBookings\(guard\.principal\)/)
+  assert.match(detailSource, /getCustomerTourBooking/)
+  assert.match(paymentSource, /TOUR_BOOKING_NOT_PAYABLE/)
+  assert.match(paymentSource, /getCustomerTourBooking\(\{\s*principal:\s*guard\.principal/)
+  assert.match(serviceSource, /where:\s*\{\s*id:\s*input\.tourBookingId,\s*userId:\s*input\.principal\.userId\s*\}/)
+  assert.match(serviceSource, /idempotencyKey:\s*idempotency\.key/)
+  assert.match(serviceSource, /pricingBasis:\s*'existing-idempotency-key'/)
+  assert.doesNotMatch(createSource + listSource + detailSource + paymentSource + serviceSource, /PAYSTACK_SECRET|PAYONUS|GOOGLE_/)
+})
+
+test('tour booking source snapshots itinerary and rejects unready catalogue tours', () => {
+  const source = readFileSync('src/lib/mobile/tourBookings.ts', 'utf8')
+
+  assert.match(source, /tourExecutionReadiness\(tour\)/)
+  assert.match(source, /code:\s*'TOUR_NOT_EXECUTION_READY'/)
+  assert.match(source, /sourceItineraryDayId:\s*day\.id/)
+  assert.match(source, /sourceItineraryStopId:\s*stop\.id/)
+  assert.match(source, /tourTitle:\s*tour\.title/)
+  assert.match(source, /tourImage:\s*tour\.image/)
+})
+
+test('tour booking migration links customer, source tour, assigned driver and assigned fleet vehicle', () => {
+  const migration = readFileSync(
+    'prisma/migrations/20260912110000_tour_bookings/migration.sql',
+    'utf8'
+  )
+
+  assert.match(migration, /CREATE TABLE "TourBooking"/)
+  assert.match(migration, /CREATE TABLE "TourBookingDay"/)
+  assert.match(migration, /CREATE TABLE "TourStopExecution"/)
+  assert.match(migration, /"idempotencyKey" TEXT/)
+  assert.match(migration, /"TourBooking_userId_idempotencyKey_key"/)
+  assert.match(migration, /"TourBooking_userId_fkey"/)
+  assert.match(migration, /"TourBooking_tourId_fkey"/)
+  assert.match(migration, /"TourBookingDay_assignedDriverId_fkey"/)
+  assert.match(migration, /"TourBookingDay_assignedFleetVehicleId_fkey"/)
 })

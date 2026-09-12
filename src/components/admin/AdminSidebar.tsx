@@ -43,6 +43,7 @@ const NAV_GROUPS = [
     label: 'Experience',
     items: [
       { href: '/tours', label: 'Tours', icon: 'travel_explore', hint: 'Packages', permission: 'tours' },
+      { href: '/tour-bookings', label: 'Tour bookings', icon: 'tour', hint: 'Booked tours', permission: 'tours' },
       { href: '/border-fees', label: 'Border fees', icon: 'currency_exchange', hint: 'Crossings', permission: 'border_fees' },
       { href: '/settings', label: 'Settings', icon: 'settings', hint: 'Security', permission: 'settings' },
     ],
