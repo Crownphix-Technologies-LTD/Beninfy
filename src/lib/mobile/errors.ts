@@ -102,6 +102,11 @@ export type MobileErrorCode =
   | 'TOUR_BOOKING_DATE_INVALID'
   | 'TOUR_BOOKING_NOT_PAYABLE'
   | 'TOUR_TRAVELLER_COUNT_INVALID'
+  | 'TOUR_DAY_NOT_FOUND'
+  | 'TOUR_DAY_NOT_ASSIGNED'
+  | 'TOUR_DAY_NOT_READY'
+  | 'TOUR_ACTION_NOT_ALLOWED'
+  | 'TOUR_STOP_NOT_CURRENT'
   | 'INTERNAL_ERROR'
 
 export type MobileErrorBody = {
@@ -345,6 +350,16 @@ export function mobileErrorFromCode(code: MobileErrorCode, message?: string) {
       return mobileError(code, message ?? 'Tour booking is not payable', 409)
     case 'TOUR_TRAVELLER_COUNT_INVALID':
       return mobileError(code, message ?? 'Traveller count is invalid', 400)
+    case 'TOUR_DAY_NOT_FOUND':
+      return mobileError(code, message ?? 'Tour day not found', 404)
+    case 'TOUR_DAY_NOT_ASSIGNED':
+      return mobileError(code, message ?? 'Tour day is not assigned to this driver', 409)
+    case 'TOUR_DAY_NOT_READY':
+      return mobileError(code, message ?? 'Tour day is not ready for execution', 409)
+    case 'TOUR_ACTION_NOT_ALLOWED':
+      return mobileError(code, message ?? 'Tour action is not allowed', 409)
+    case 'TOUR_STOP_NOT_CURRENT':
+      return mobileError(code, message ?? 'Tour stop is not current', 409)
     case 'VALIDATION_ERROR':
       return mobileValidationError(message)
     case 'INTERNAL_ERROR':

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { formatNGN } from '@/lib/utils'
 import { AdminModal, AdminPageHeader, AdminStatusBadge, adminSecondaryButtonClass } from '@/components/admin/AdminUI'
 
@@ -42,6 +42,19 @@ type TourBookingRow = {
   timestamps: { createdAt: string; updatedAt: string; cancelledAt: string | null; completedAt: string | null }
 }
 
+type DriverOption = {
+  id: string
+  name: string
+  status: string
+}
+
+type FleetVehicleOption = {
+  id: string
+  label: string
+  plateNumber: string
+  status: string
+}
+
 function formatDate(value: string) {
   return new Date(value).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
 }
@@ -49,36 +62,94 @@ function formatDate(value: string) {
 export default function AdminTourBookingsPage() {
   const [tourBookings, setTourBookings] = useState<TourBookingRow[]>([])
   const [selected, setSelected] = useState<TourBookingRow | null>(null)
+  const [drivers, setDrivers] = useState<DriverOption[]>([])
+  const [fleetVehicles, setFleetVehicles] = useState<FleetVehicleOption[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [assigningDayId, setAssigningDayId] = useState<string | null>(null)
 
-  useEffect(() => {
-    let mounted = true
-    const load = async () => {
-      setLoading(true)
-      setError(null)
-      try {
-        const res = await fetch('/api/admin/tour-bookings')
-        const data = await res.json().catch(() => ({}))
-        if (!res.ok) throw new Error(typeof data.error === 'string' ? data.error : 'Failed to load tour bookings')
-        if (mounted) setTourBookings(data.tourBookings ?? [])
-      } catch (err) {
-        if (mounted) setError(err instanceof Error ? err.message : 'Failed to load tour bookings')
-      } finally {
-        if (mounted) setLoading(false)
+  const load = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const [bookingsRes, driversRes, fleetRes] = await Promise.all([
+        fetch('/api/admin/tour-bookings'),
+        fetch('/api/admin/drivers'),
+        fetch('/api/admin/fleet-vehicles'),
+      ])
+      const [bookingsData, driversData, fleetData] = await Promise.all([
+        bookingsRes.json().catch(() => ({})),
+        driversRes.json().catch(() => ({})),
+        fleetRes.json().catch(() => ({})),
+      ])
+      if (!bookingsRes.ok) {
+        throw new Error(typeof bookingsData.error === 'string' ? bookingsData.error : 'Failed to load tour bookings')
       }
-    }
-    void load()
-    return () => {
-      mounted = false
+      setTourBookings(bookingsData.tourBookings ?? [])
+      setDrivers(driversRes.ok ? (driversData.drivers ?? []) : [])
+      setFleetVehicles(fleetRes.ok ? (fleetData.fleetVehicles ?? []) : [])
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load tour bookings')
+    } finally {
+      setLoading(false)
     }
   }, [])
+
+  useEffect(() => {
+    const initialLoad = async () => {
+      await load()
+    }
+    void initialLoad()
+  }, [load])
 
   const stats = useMemo(() => {
     const pending = tourBookings.filter((booking) => booking.payment.status === 'pending').length
     const paid = tourBookings.filter((booking) => booking.payment.status === 'paid').length
     return { pending, paid }
   }, [tourBookings])
+
+  const assignDay = async (dayId: string, driverId: string, fleetVehicleId: string) => {
+    setAssigningDayId(dayId)
+    setError(null)
+    try {
+      const res = await fetch(`/api/admin/tour-bookings/days/${dayId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          driverId: driverId || null,
+          fleetVehicleId: fleetVehicleId || null,
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error ?? 'Assignment failed')
+      await load()
+      setSelected((current) => {
+        if (!current) return current
+        return {
+          ...current,
+          days: current.days.map((day) =>
+            day.id === dayId
+              ? {
+                  ...day,
+                  status: data.tour?.day?.status ?? day.status,
+                  assignment: {
+                    ...day.assignment,
+                    driverId: data.tour?.driver?.id ?? null,
+                    fleetVehicleId: data.tour?.vehicle?.id ?? null,
+                    assignedAt: data.tour?.day?.timestamps?.assignedAt ?? day.assignment.assignedAt,
+                    acceptedAt: data.tour?.day?.timestamps?.acceptedAt ?? null,
+                  },
+                }
+              : day
+          ),
+        }
+      })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Assignment failed')
+    } finally {
+      setAssigningDayId(null)
+    }
+  }
 
   return (
     <div>
@@ -212,6 +283,40 @@ export default function AdminTourBookingsPage() {
                     <p><span className="font-semibold text-gray-800">Pickup:</span> {day.pickup.address ?? day.pickup.label ?? 'Not configured'}</p>
                     <p><span className="font-semibold text-gray-800">End:</span> {day.end.address ?? day.end.label ?? 'Not configured'}</p>
                   </div>
+                  <form
+                    className="mt-4 grid gap-3 rounded-xl border border-gray-100 bg-[#fbf7fc] p-3 md:grid-cols-[1fr_1fr_auto]"
+                    onSubmit={(event) => {
+                      event.preventDefault()
+                      const form = new FormData(event.currentTarget)
+                      void assignDay(
+                        day.id,
+                        String(form.get('driverId') ?? ''),
+                        String(form.get('fleetVehicleId') ?? '')
+                      )
+                    }}
+                  >
+                    <label className="text-xs font-semibold text-gray-600">
+                      Driver
+                      <select name="driverId" defaultValue={day.assignment.driverId ?? ''} className="mt-1 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs outline-none focus:border-[#3e004c] focus:ring-2 focus:ring-[#3e004c]/15">
+                        <option value="">Unassigned</option>
+                        {drivers.map((driver) => (
+                          <option key={driver.id} value={driver.id}>{driver.name} - {driver.status}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="text-xs font-semibold text-gray-600">
+                      Fleet vehicle
+                      <select name="fleetVehicleId" defaultValue={day.assignment.fleetVehicleId ?? ''} className="mt-1 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs outline-none focus:border-[#3e004c] focus:ring-2 focus:ring-[#3e004c]/15">
+                        <option value="">Unassigned</option>
+                        {fleetVehicles.map((vehicle) => (
+                          <option key={vehicle.id} value={vehicle.id}>{vehicle.label} - {vehicle.plateNumber}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <button type="submit" disabled={assigningDayId === day.id} className="self-end rounded-lg bg-[#3e004c] px-4 py-2 text-xs font-semibold text-white disabled:opacity-50">
+                      {assigningDayId === day.id ? 'Saving...' : 'Assign'}
+                    </button>
+                  </form>
                   <div className="mt-4 space-y-2">
                     {day.stops.map((stop) => (
                       <div key={stop.id} className="flex items-start justify-between gap-3 rounded-xl bg-[#fbf7fc] px-3 py-3">

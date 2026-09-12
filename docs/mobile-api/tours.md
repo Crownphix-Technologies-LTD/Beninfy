@@ -165,3 +165,154 @@ Backoffice read-only visibility:
 - `/:locale/admin/tour-bookings`
 
 Admin access requires the existing `tours` permission.
+
+## Driver Tour Execution
+
+Implemented endpoints:
+
+- `GET /api/mobile/v1/driver/tours`
+- `GET /api/mobile/v1/driver/tours/:tourBookingDayId`
+- `POST /api/mobile/v1/driver/tours/:tourBookingDayId/actions`
+
+Driver Tour work is day-scoped. A multi-day Tour can have different Drivers and fleet vehicles per day.
+
+Driver list response:
+
+```json
+{
+  "view": "all",
+  "tours": []
+}
+```
+
+Driver detail/action response:
+
+```json
+{
+  "tour": {
+    "tourBookingId": "tour_booking_id",
+    "tourBookingDayId": "tour_booking_day_id",
+    "reference": "BFYT-0123ABCD45",
+    "tour": {
+      "title": "Ganvie Day Tour",
+      "titleFr": null,
+      "destination": "Ganvie",
+      "destinationFr": null,
+      "country": "Benin Republic",
+      "countryFr": null,
+      "image": "/images/tours/ganvie.jpg"
+    },
+    "customer": {
+      "id": "customer_id",
+      "name": "Customer Name",
+      "email": "customer@example.com",
+      "phone": "+22951019134"
+    },
+    "group": {
+      "travellerCount": 2,
+      "passengerSummary": "2 travellers"
+    },
+    "payment": {
+      "status": "paid",
+      "executionAllowed": true
+    },
+    "day": {
+      "id": "tour_booking_day_id",
+      "dayNumber": 1,
+      "totalDays": 3,
+      "label": "Day 1 of 3",
+      "scheduledDate": "2026-10-15T00:00:00.000Z",
+      "status": "assigned",
+      "title": "Arrival and Ouidah",
+      "pickup": {
+        "label": "Hotel pickup",
+        "address": "Cotonou hotel",
+        "coordinates": { "latitude": 6.3703, "longitude": 2.3912 }
+      }
+    },
+    "vehicle": {
+      "id": "fleet_vehicle_id",
+      "label": "Toyota Sienna",
+      "plateNumber": "ABC-123",
+      "color": "Black",
+      "status": "available",
+      "currentCity": "Cotonou"
+    },
+    "stops": [],
+    "currentStop": null,
+    "nextStop": null,
+    "progress": {
+      "completedStopCount": 0,
+      "totalStopCount": 4,
+      "currentStopNumber": null
+    },
+    "allowedActions": ["accept", "decline"]
+  }
+}
+```
+
+Action request:
+
+```json
+{
+  "action": "accept",
+  "stopId": "required-for-arrive_stop-and-complete_stop"
+}
+```
+
+Day lifecycle:
+
+```text
+upcoming -> assigned -> driver_en_route -> driver_arrived -> in_progress -> completed
+cancelled
+```
+
+Driver acceptance is required:
+
+- `assigned` + `acceptedAt = null`: `accept`, `decline`
+- `accept`: keeps status as `assigned` and sets `acceptedAt`
+- `decline`: releases day assignment and returns the day to `upcoming`
+
+Stop lifecycle:
+
+```text
+upcoming -> en_route -> arrived -> completed
+skipped
+```
+
+`skip_stop` is not exposed in Phase 3. There is no approved customer/refund/operations policy for skipping required Tour stops yet.
+
+Allowed actions:
+
+- `accept`
+- `decline`
+- `start_en_route`
+- `arrive`
+- `start_day`
+- `arrive_stop`
+- `complete_stop`
+- `complete_day`
+
+Flutter must render and submit only actions returned in `allowedActions`.
+
+Payment gate:
+
+- `payment_pending` Tour bookings can be assigned and viewed by the assigned Driver.
+- Driver execution actions require `TourBooking.status` to be `confirmed`, `active`, or `completed`, and `paymentStatus` to be `paid`.
+
+Duty behavior:
+
+- `available`: eligible for new Tour day assignments and may execute already-assigned Tour days.
+- `off_duty`: not eligible for new Tour day assignments, but may execute already-assigned Tour days.
+- `inactive`: blocked from assignment and execution.
+
+Multi-day completion:
+
+- Completing Day 1 of a 3-day booking does not complete the overall Tour booking.
+- The overall Tour booking is completed only after every non-cancelled TourBookingDay is completed.
+
+Not implemented:
+
+- Tour live location/tracking/navigation: Phase 4.
+- Tour journey intelligence/ETA/polyline: Phase 4.
+- Tour chat: pending contract.

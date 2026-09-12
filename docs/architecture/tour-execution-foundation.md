@@ -85,3 +85,39 @@ Still not implemented:
 - Tour coupons
 - Tour live tracking and route intelligence
 - Tour chat
+
+## Phase 3 Driver Execution Foundation
+
+Implemented:
+
+- Driver and fleet assignment are day-scoped through `TourBookingDay`.
+- Backoffice can assign or reassign a Driver and fleet vehicle before a Tour day enters active execution.
+- Driver mobile can list assigned Tour days, open an authoritative Tour day DTO, and execute explicit lifecycle actions.
+- Driver acceptance is required before `start_en_route`.
+- Stop progression is server-owned using ordered `TourStopExecution` rows.
+
+Tour Day lifecycle:
+
+```text
+upcoming -> assigned -> driver_en_route -> driver_arrived -> in_progress -> completed
+cancelled
+```
+
+Tour Stop lifecycle:
+
+```text
+upcoming -> en_route -> arrived -> completed
+skipped
+```
+
+Phase 3 intentionally does not expose `skip_stop` because the business policy for skipping required Tour stops is not approved.
+
+Execution is payment-gated. A Driver may see an assigned Tour day, but lifecycle actions are rejected until the Tour booking is paid and execution-approved.
+
+Still not implemented:
+
+- Tour payment initialization
+- Tour GPS publishing
+- Customer live Tour tracking
+- Tour journey intelligence
+- Tour chat

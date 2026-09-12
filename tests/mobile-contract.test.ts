@@ -160,6 +160,15 @@ import {
   validateTourTravellerCount,
 } from '../src/lib/mobile/tourBookings'
 import {
+  DRIVER_TOUR_ACTIONS,
+  allowedDriverTourActions,
+  currentTourStop,
+  driverTourWhereForView,
+  nextTourStop,
+  toDriverTourDayDto,
+  type TourDayForDto,
+} from '../src/lib/mobile/tourExecution'
+import {
   locationMatchesRouteServiceArea,
   normalizeSupportedRouteCity,
   resolvePickupFareZoneForRoute,
@@ -4697,4 +4706,228 @@ test('tour booking migration links customer, source tour, assigned driver and as
   assert.match(migration, /"TourBooking_tourId_fkey"/)
   assert.match(migration, /"TourBookingDay_assignedDriverId_fkey"/)
   assert.match(migration, /"TourBookingDay_assignedFleetVehicleId_fkey"/)
+})
+
+function tourExecutionDay(overrides: Partial<TourDayForDto> = {}): TourDayForDto {
+  const baseDate = new Date(Date.UTC(2026, 9, 15))
+  return {
+    id: 'day1',
+    tourBookingId: 'tb1',
+    sourceItineraryDayId: 'template-day1',
+    dayNumber: 1,
+    scheduledDate: baseDate,
+    status: 'assigned',
+    title: 'Ouidah day',
+    titleFr: null,
+    description: null,
+    descriptionFr: null,
+    pickupLabel: 'Hotel pickup',
+    pickupAddress: 'Cotonou hotel',
+    pickupLatitude: 6.3703,
+    pickupLongitude: 2.3912,
+    endLabel: 'Hotel dropoff',
+    endAddress: 'Cotonou hotel',
+    endLatitude: 6.3703,
+    endLongitude: 2.3912,
+    assignedDriverId: 'driver1',
+    assignedFleetVehicleId: 'fleet1',
+    assignedAt: baseDate,
+    acceptedAt: null,
+    driverEnRouteAt: null,
+    driverArrivedAt: null,
+    startedAt: null,
+    completedAt: null,
+    cancelledAt: null,
+    createdAt: baseDate,
+    updatedAt: baseDate,
+    assignedDriver: {
+      id: 'driver1',
+      name: 'Driver One',
+      phone: '+22951019134',
+      email: 'driver@example.com',
+      status: 'available',
+    },
+    assignedFleetVehicle: {
+      id: 'fleet1',
+      label: 'Toyota Sienna',
+      plateNumber: 'ABC-123',
+      color: 'Black',
+      status: 'available',
+      currentCity: 'Cotonou',
+    },
+    stops: [
+      {
+        id: 'stop1',
+        tourBookingDayId: 'day1',
+        sourceItineraryStopId: 'template-stop1',
+        sortOrder: 1,
+        title: 'Ouidah Museum',
+        titleFr: null,
+        description: null,
+        descriptionFr: null,
+        address: 'Ouidah, Benin',
+        latitude: 6.3667,
+        longitude: 2.0833,
+        estimatedDurationMinutes: 90,
+        required: true,
+        status: 'upcoming',
+        enRouteAt: null,
+        arrivedAt: null,
+        completedAt: null,
+        skippedAt: null,
+        skipReason: null,
+      },
+      {
+        id: 'stop2',
+        tourBookingDayId: 'day1',
+        sourceItineraryStopId: 'template-stop2',
+        sortOrder: 2,
+        title: 'Python Temple',
+        titleFr: null,
+        description: null,
+        descriptionFr: null,
+        address: 'Ouidah, Benin',
+        latitude: 6.363,
+        longitude: 2.085,
+        estimatedDurationMinutes: 45,
+        required: true,
+        status: 'upcoming',
+        enRouteAt: null,
+        arrivedAt: null,
+        completedAt: null,
+        skippedAt: null,
+        skipReason: null,
+      },
+    ],
+    tourBooking: {
+      id: 'tb1',
+      reference: 'BFYT-ABCDEF1234',
+      status: 'confirmed',
+      paymentStatus: 'paid',
+      tourTitle: 'Ouidah Heritage Tour',
+      tourTitleFr: null,
+      tourDestination: 'Ouidah',
+      tourDestinationFr: null,
+      tourCountry: 'Benin Republic',
+      tourCountryFr: null,
+      tourImage: '/images/tours/ouidah.jpg',
+      startDate: baseDate,
+      endDate: new Date(Date.UTC(2026, 9, 17)),
+      travellers: 3,
+      priceNGN: 300000,
+      currencyCode: 'NGN',
+      user: { id: 'user1', name: 'Customer One', email: 'customer@example.com', phone: '+22951019134' },
+      days: [
+        { id: 'day1', dayNumber: 1, status: 'assigned' },
+        { id: 'day2', dayNumber: 2, status: 'upcoming' },
+        { id: 'day3', dayNumber: 3, status: 'upcoming' },
+      ],
+    },
+    ...overrides,
+  }
+}
+
+test('driver tour allowed actions require acceptance and payment-approved execution', () => {
+  assert.deepEqual(allowedDriverTourActions(tourExecutionDay()), ['accept', 'decline'])
+  assert.deepEqual(allowedDriverTourActions(tourExecutionDay({ acceptedAt: new Date() })), [
+    'start_en_route',
+  ])
+  assert.deepEqual(
+    allowedDriverTourActions(
+      tourExecutionDay({
+        acceptedAt: new Date(),
+        tourBooking: {
+          ...tourExecutionDay().tourBooking,
+          status: 'payment_pending',
+          paymentStatus: 'pending',
+        },
+      })
+    ),
+    []
+  )
+})
+
+test('driver tour dto exposes day stop progress vehicle traveller count and allowed actions', () => {
+  const dto = toDriverTourDayDto(tourExecutionDay({ acceptedAt: new Date() }))
+
+  assert.equal(dto.reference, 'BFYT-ABCDEF1234')
+  assert.equal(dto.day.label, 'Day 1 of 3')
+  assert.equal(dto.group.travellerCount, 3)
+  assert.equal(dto.vehicle?.plateNumber, 'ABC-123')
+  assert.equal(dto.day.pickup.coordinates?.latitude, 6.3703)
+  assert.equal(dto.currentStop?.id, 'stop1')
+  assert.equal(dto.nextStop?.id, 'stop2')
+  assert.equal(dto.progress.currentStopNumber, 1)
+  assert.deepEqual(dto.allowedActions, ['start_en_route'])
+})
+
+test('driver tour current and next stop are server-derived from ordered execution rows', () => {
+  const day = tourExecutionDay({
+    status: 'in_progress',
+    stops: [
+      { ...tourExecutionDay().stops[1], status: 'upcoming' },
+      { ...tourExecutionDay().stops[0], status: 'completed' },
+    ],
+  })
+
+  assert.equal(currentTourStop(day.stops)?.id, 'stop2')
+  assert.equal(nextTourStop(day.stops, 'stop1')?.id, 'stop2')
+  assert.deepEqual(allowedDriverTourActions(day), ['arrive_stop'])
+})
+
+test('driver tour action and assignment endpoints are scoped and transactional', () => {
+  const listSource = readFileSync('src/app/api/mobile/v1/driver/tours/route.ts', 'utf8')
+  const detailSource = readFileSync(
+    'src/app/api/mobile/v1/driver/tours/[tourBookingDayId]/route.ts',
+    'utf8'
+  )
+  const actionSource = readFileSync(
+    'src/app/api/mobile/v1/driver/tours/[tourBookingDayId]/actions/route.ts',
+    'utf8'
+  )
+  const serviceSource = readFileSync('src/lib/mobile/tourExecution.ts', 'utf8')
+  const adminSource = readFileSync(
+    'src/app/api/admin/tour-bookings/days/[dayId]/route.ts',
+    'utf8'
+  )
+
+  assert.match(listSource, /requireMobilePrincipal\(req,\s*'DRIVER'\)/)
+  assert.match(detailSource, /getDriverTourDay\(guard\.principal/)
+  assert.match(actionSource, /scope:\s*'mobile-driver-tour-action'/)
+  assert.match(serviceSource, /assignedDriverId !== principal\.driverId/)
+  assert.match(serviceSource, /canDriverReceiveNewAssignment/)
+  assert.match(serviceSource, /canDriverExecuteAssignedTrip/)
+  assert.match(serviceSource, /bookingLeg\.findFirst/)
+  assert.match(serviceSource, /NON_BLOCKING_LEG_STATUSES/)
+  assert.match(serviceSource, /paymentStatus[\s\S]*paid/)
+  assert.match(serviceSource, /Prisma\.TransactionIsolationLevel\.Serializable/)
+  assert.match(adminSource, /requireAdminPermission\('tours'\)/)
+})
+
+test('driver tour lifecycle contract intentionally excludes live location chat and skip stop', () => {
+  assert.deepEqual(DRIVER_TOUR_ACTIONS, [
+    'accept',
+    'decline',
+    'start_en_route',
+    'arrive',
+    'start_day',
+    'arrive_stop',
+    'complete_stop',
+    'complete_day',
+  ])
+  assert.equal(DRIVER_TOUR_ACTIONS.includes('skip_stop' as never), false)
+  const docs = readFileSync('docs/mobile-api/tours.md', 'utf8')
+  assert.match(docs, /Tour live location\/tracking\/navigation: Phase 4/)
+  assert.match(docs, /Tour chat: pending contract/)
+})
+
+test('driver tour view filters are driver scoped', () => {
+  assert.deepEqual(driverTourWhereForView('driver1', 'upcoming'), {
+    assignedDriverId: 'driver1',
+    status: { in: ['assigned'] },
+  })
+  assert.deepEqual(driverTourWhereForView('driver1', 'active'), {
+    assignedDriverId: 'driver1',
+    status: { in: ['driver_en_route', 'driver_arrived', 'in_progress'] },
+  })
 })
