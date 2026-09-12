@@ -294,6 +294,7 @@ model Driver {
   tripReviews       TripReview[]
   presence          DriverPresence?
   latestLocations   LatestTripLocation[]
+  tourLatestLocations LatestTourLocation[]
   createdAt         DateTime                      @default(now())
   updatedAt         DateTime                      @updatedAt
 
@@ -464,6 +465,30 @@ model LatestTripLocation {
   @@index([driverId, receivedAt])
   @@index([expiresAt])
   @@index([bookingLegId, capturedAt])
+}
+
+model LatestTourLocation {
+  id                   String         @id @default(cuid())
+  tourBookingDayId     String         @unique
+  tourBookingDay       TourBookingDay @relation(fields: [tourBookingDayId], references: [id], onDelete: Cascade)
+  driverId             String
+  driver               Driver         @relation(fields: [driverId], references: [id], onDelete: Cascade)
+  latitude             Float
+  longitude            Float
+  accuracyMeters       Float?
+  headingDegrees       Float?
+  speedMetersPerSecond Float?
+  sequence             Int?
+  capturedAt           DateTime
+  receivedAt           DateTime       @default(now())
+  expiresAt            DateTime
+  sourceSessionId      String?
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+
+  @@index([driverId, receivedAt])
+  @@index([expiresAt])
+  @@index([tourBookingDayId, capturedAt])
 }
 
 model PushDevice {
@@ -732,6 +757,7 @@ model TourBooking {
   createdAt         DateTime         @default(now())
   updatedAt         DateTime         @updatedAt
   days              TourBookingDay[]
+  payments          Payment[]
 
   @@unique([userId, idempotencyKey])
   @@index([userId, createdAt])
@@ -774,6 +800,8 @@ model TourBookingDay {
   createdAt              DateTime            @default(now())
   updatedAt              DateTime            @updatedAt
   stops                  TourStopExecution[]
+  latestLocation         LatestTourLocation?
+  journeySnapshot        TourJourneySnapshot?
 
   @@unique([tourBookingId, dayNumber])
   @@index([tourBookingId, scheduledDate])
@@ -811,6 +839,35 @@ model TourStopExecution {
   @@index([status])
 }
 
+model TourJourneySnapshot {
+  id                       String         @id @default(cuid())
+  tourBookingDayId         String         @unique
+  tourBookingDay           TourBookingDay @relation(fields: [tourBookingDayId], references: [id], onDelete: Cascade)
+  target                   String
+  targetStopId             String?
+  originLatitude           Float
+  originLongitude          Float
+  destinationLatitude      Float
+  destinationLongitude     Float
+  encodedPolyline          String?
+  distanceMeters           Int?
+  durationSeconds          Int?
+  trafficDurationSeconds   Int?
+  distanceRemainingMeters  Int?
+  estimatedDurationSeconds Int?
+  estimatedArrivalAt       DateTime?
+  provider                 String
+  providerStatus           String         @default("ok")
+  calculatedAt             DateTime
+  expiresAt                DateTime
+  createdAt                DateTime       @default(now())
+  updatedAt                DateTime       @updatedAt
+
+  @@index([expiresAt])
+  @@index([calculatedAt])
+  @@index([target, targetStopId, calculatedAt])
+}
+
 model BorderFee {
   id              String   @id
   country         String
@@ -834,7 +891,8 @@ model BorderFee {
 
 model Payment {
   id                  String             @id @default(cuid())
-  bookingId           String
+  bookingId           String?
+  tourBookingId       String?
   amountNGN           Int
   status              String
   reference           String             @unique
@@ -849,13 +907,16 @@ model Payment {
   failureCode         String?
   createdAt           DateTime           @default(now())
   updatedAt           DateTime           @updatedAt
-  booking             Booking            @relation(fields: [bookingId], references: [id])
+  booking             Booking?           @relation(fields: [bookingId], references: [id])
+  tourBooking         TourBooking?        @relation(fields: [tourBookingId], references: [id])
   resolution          PaymentResolution?
 
   @@index([bookingId, createdAt])
+  @@index([tourBookingId, createdAt])
   @@index([status, createdAt])
   @@index([provider, status, createdAt])
   @@index([bookingId, status, createdAt])
+  @@index([tourBookingId, status, createdAt])
 }
 
 model PaymentResolution {

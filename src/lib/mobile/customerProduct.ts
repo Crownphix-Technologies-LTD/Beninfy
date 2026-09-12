@@ -131,7 +131,7 @@ export function toTripReviewDto(review: {
 
 export function toPaymentHistoryDto(payment: {
   id: string
-  bookingId: string
+  bookingId: string | null
   amountNGN: number
   status: string
   reference: string
@@ -151,8 +151,11 @@ export function toPaymentHistoryDto(payment: {
     returnDate: Dateish | null
     tripType: string
     status: string
-  }
+  } | null
 }) {
+  if (!payment.bookingId || !payment.booking) {
+    throw new Error('Payment history DTO requires a ride-owned payment')
+  }
   return {
     id: payment.id,
     bookingId: payment.bookingId,

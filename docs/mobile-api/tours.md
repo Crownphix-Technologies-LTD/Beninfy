@@ -149,14 +149,15 @@ Errors:
 - `TOUR_BOOKING_DATE_INVALID` when `startDate` is not a future/current `YYYY-MM-DD` UTC calendar date.
 - `TOUR_TRAVELLER_COUNT_INVALID` when `travellers` is outside the launch range of 1 to 30.
 - `TOUR_BOOKING_NOT_FOUND` when a customer requests another customer's Tour booking or an unknown ID.
-- `TOUR_BOOKING_NOT_PAYABLE` when Flutter attempts Tour payment initialization before Tour payment ownership is implemented.
+- `TOUR_BOOKING_NOT_PAYABLE` when a Tour booking is not in a payable pending state.
 
-Phase 2 limitations:
+Launch limitations:
 
-- Tour payment initialization is not implemented yet.
-- Tour coupons are not supported yet because the current coupon model is ride-booking-owned.
-- Customer Tour cancellation/refund is not implemented yet.
-- Driver Tour execution, Customer live Tour tracking, Tour journey intelligence, and Tour chat are not implemented yet.
+- Tour payment initialization is supported through explicit Tour-owned `Payment` rows.
+- Tour coupons are not supported because the current coupon model is ride-booking-owned.
+- Customer Tour cancellation is supported only before payment is completed. Refund handling remains an operations policy.
+- Driver Tour execution, Customer live Tour tracking, and Tour journey intelligence are implemented for paid Tour bookings.
+- Tour chat is not supported in v1.
 
 Backoffice read-only visibility:
 
@@ -295,6 +296,22 @@ Allowed actions:
 
 Flutter must render and submit only actions returned in `allowedActions`.
 
+Canonical Driver transition table:
+
+| Screen/action | Endpoint | Required payload | Required status | Result |
+| --- | --- | --- | --- | --- |
+| Tour assignment list | `GET /api/mobile/v1/driver/tours` | none | assigned Driver | Returns day-scoped Tour assignments. |
+| Tour detail | `GET /api/mobile/v1/driver/tours/:tourBookingDayId` | none | assigned Driver | Returns customer, vehicle, day, stops, progress, and `allowedActions`. |
+| Accept assignment | `POST /api/mobile/v1/driver/tours/:tourBookingDayId/actions` | `{ "action": "accept" }` | day `assigned`, `acceptedAt = null` | Sets `acceptedAt`; day remains `assigned`. |
+| Decline assignment | `POST /api/mobile/v1/driver/tours/:tourBookingDayId/actions` | `{ "action": "decline" }` | day `assigned`, `acceptedAt = null` | Releases Driver/vehicle assignment and returns day to `upcoming`. |
+| Start heading to pickup | `POST /api/mobile/v1/driver/tours/:tourBookingDayId/actions` | `{ "action": "start_en_route" }` | day `assigned`, accepted | Sets day to `driver_en_route`. |
+| Arrive at pickup | `POST /api/mobile/v1/driver/tours/:tourBookingDayId/actions` | `{ "action": "arrive" }` | day `driver_en_route` | Sets day to `driver_arrived`. |
+| Start Tour day | `POST /api/mobile/v1/driver/tours/:tourBookingDayId/actions` | `{ "action": "start_day" }` | day `driver_arrived` | Sets day and first pending stop to active execution. |
+| Publish live location | `POST /api/mobile/v1/driver/tours/:tourBookingDayId/location` | latitude/longitude payload | day `driver_en_route`, `driver_arrived`, or `in_progress` | Stores latest day-scoped Driver location. |
+| Arrive at stop | `POST /api/mobile/v1/driver/tours/:tourBookingDayId/actions` | `{ "action": "arrive_stop", "stopId": "..." }` | stop `en_route` | Sets stop to `arrived`. |
+| Complete stop | `POST /api/mobile/v1/driver/tours/:tourBookingDayId/actions` | `{ "action": "complete_stop", "stopId": "..." }` | stop `arrived` | Sets stop to `completed` and advances next stop where applicable. |
+| Complete day | `POST /api/mobile/v1/driver/tours/:tourBookingDayId/actions` | `{ "action": "complete_day" }` | day `in_progress`, all required stops complete | Sets day to `completed`; completes Tour booking only when all active days are completed. |
+
 Payment gate:
 
 - `payment_pending` Tour bookings can be assigned and viewed by the assigned Driver.
@@ -311,8 +328,124 @@ Multi-day completion:
 - Completing Day 1 of a 3-day booking does not complete the overall Tour booking.
 - The overall Tour booking is completed only after every non-cancelled TourBookingDay is completed.
 
-Not implemented:
+## Tour Payment V1
 
-- Tour live location/tracking/navigation: Phase 4.
-- Tour journey intelligence/ETA/polyline: Phase 4.
-- Tour chat: pending contract.
+Tour payment uses the shared Payment model with explicit ownership:
+
+- ride payments set `bookingId`
+- Tour payments set `tourBookingId`
+- exactly one owner must be present
+
+Customer endpoints:
+
+- `GET /api/mobile/v1/customer/tour-bookings/:tourBookingId/payment`
+- `POST /api/mobile/v1/customer/tour-bookings/:tourBookingId/payment`
+- `POST /api/mobile/v1/customer/tour-bookings/:tourBookingId/payment/verify`
+
+Payment initialization supports the launch mobile providers:
+
+- `paystack`
+- `payonus`
+
+The backend remains authoritative for:
+
+- Tour price
+- NGN launch currency
+- payment reference
+- provider initialization
+- webhook/verification settlement
+- `TourBooking.status`
+- `TourBooking.paymentStatus`
+
+Tour price v1 uses `Tour.startingFromNGN` as the actual payable package price snapshot. It is not multiplied by traveller count. Traveller count is operational manifest data unless a later Tour pricing model explicitly introduces per-person or vehicle-specific Tour pricing.
+
+Tour coupons are unsupported in v1. Ride coupons must not be silently applied to Tour bookings.
+
+If the authoritative Tour price is zero, the backend confirms the Tour booking without initializing an external provider.
+
+## Tour Live Tracking V1
+
+Driver endpoint:
+
+- `POST /api/mobile/v1/driver/tours/:tourBookingDayId/location`
+
+Only the currently assigned Driver can publish location for a Tour day. Location publishing is accepted only while the TourBookingDay is:
+
+- `driver_en_route`
+- `driver_arrived`
+- `in_progress`
+
+Location publishing stops after:
+
+- `completed`
+- `cancelled`
+
+Tour live location is stored on `LatestTourLocation` keyed by `tourBookingDayId`. It uses the same validation quality as ride tracking:
+
+- finite latitude/longitude
+- coordinate bounds
+- accuracy bounds
+- heading bounds
+- speed bounds
+- captured timestamp sanity
+- sequence/capturedAt stale-packet protection
+
+Customer endpoint:
+
+- `GET /api/mobile/v1/customer/tour-bookings/:tourBookingId/tracking`
+
+The tracking response is customer-owned and backend-authoritative. It includes:
+
+- TourBooking status
+- current TourBookingDay
+- Day X of Y
+- current stop
+- next stop
+- stop progress
+- assigned Driver
+- assigned Vehicle
+- latest Driver location
+- location freshness
+- optional journey intelligence
+
+## Tour Journey Intelligence V1
+
+Tour routing reuses the backend-only Google Compute Routes architecture. Flutter never receives Google server credentials and never submits arbitrary routing targets.
+
+Target policy:
+
+- `driver_en_route`: Driver latest coordinate -> Tour day pickup
+- `driver_arrived`: no active pickup ETA route
+- `in_progress`: Driver latest coordinate -> authoritative current stop
+- `completed` or `cancelled`: no active route
+
+No Driver location means no ETA or route polyline. The backend must not fabricate an origin from pickup, previous stops, or the Tour destination.
+
+Tour journey snapshots are stored on `TourJourneySnapshot` keyed by `tourBookingDayId`. Cache identity includes:
+
+- TourBookingDay
+- target type
+- target stop ID for stop routes
+- last routed Driver coordinate
+- calculatedAt/expiresAt
+
+Google Routes is not called on every customer poll. Recalculation occurs only when the cache is stale, the Driver has moved meaningfully, or the lifecycle target changes.
+
+## Cancellation and Refund V1
+
+Customer self-cancellation is intentionally narrow:
+
+- unpaid `payment_pending` Tour bookings can be cancelled by the owning Customer
+- paid, confirmed, active, or completed Tour bookings are not auto-cancelled through mobile v1
+
+Refund policy is separate from cancellation state. If a paid Tour needs cancellation or refund review, operations/backoffice must handle it under a later explicit refund workflow.
+
+Endpoint:
+
+- `POST /api/mobile/v1/customer/tour-bookings/:tourBookingId/cancel`
+
+## Chat V1 Ruling
+
+Tour chat is unsupported in v1.
+
+Preferred future architecture is `TourBookingDay`-scoped chat because Drivers and Vehicles can differ by day. It should not pretend a Tour day is a ride `BookingLeg`, and it should be implemented only after a safe shared or Tour-specific conversation model is approved.

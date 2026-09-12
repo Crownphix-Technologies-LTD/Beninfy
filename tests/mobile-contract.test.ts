@@ -169,6 +169,15 @@ import {
   type TourDayForDto,
 } from '../src/lib/mobile/tourExecution'
 import {
+  TOUR_TRACKING_ENABLED_DAY_STATUSES,
+  tourJourneyTargetForDay,
+} from '../src/lib/mobile/tourTracking'
+import {
+  tourBookingPayable,
+  tourCouponsSupported,
+  tourPaymentState,
+} from '../src/lib/mobile/tourPayments'
+import {
   locationMatchesRouteServiceArea,
   normalizeSupportedRouteCity,
   resolvePickupFareZoneForRoute,
@@ -1479,8 +1488,8 @@ test('tour execution foundation docs separate booking foundation from later exec
   assert.match(docs, /executionReady/)
   assert.match(docs, /GET \/api\/admin\/tours\/:id\/itinerary/)
   assert.match(docs, /POST \/api\/mobile\/v1\/customer\/tours\/:tourId\/book/)
-  assert.match(docs, /Tour payment initialization is not implemented yet/)
-  assert.match(docs, /Driver Tour execution, Customer live Tour tracking/)
+  assert.match(docs, /Tour payment initialization is supported/)
+  assert.match(docs, /Driver Tour execution, Customer live Tour tracking, and Tour journey intelligence are implemented/)
 })
 
 test('mobile route discovery DTO is customer safe and stable', () => {
@@ -4640,11 +4649,11 @@ test('tour booking dto exposes snapshot days, stops, payment state and progress'
   assert.deepEqual(dto.days[0]?.pickup.coordinates, { latitude: 6.3703, longitude: 2.3912 })
 })
 
-test('tour payment foundation documents that live ride payment ownership is unchanged', () => {
+test('tour payment foundation documents explicit tour-owned payment support', () => {
   assert.deepEqual(tourPaymentFoundation(), {
-    externalPaymentInitializationImplemented: false,
+    externalPaymentInitializationImplemented: true,
     reason:
-      'Existing Payment rows are ride Booking-owned. Phase 2 stores TourBooking payment state without changing live ride settlement.',
+      'Tour payments use explicit Payment.tourBookingId ownership and the shared Paystack/PayOnUs provider settlement path.',
     couponSupport: false,
   })
 })
@@ -4672,8 +4681,9 @@ test('tour booking endpoints require customer ownership and do not expose provid
   assert.match(createSource, /result\.idempotent\s*\?\s*200\s*:\s*201/)
   assert.match(listSource, /listCustomerTourBookings\(guard\.principal\)/)
   assert.match(detailSource, /getCustomerTourBooking/)
-  assert.match(paymentSource, /TOUR_BOOKING_NOT_PAYABLE/)
-  assert.match(paymentSource, /getCustomerTourBooking\(\{\s*principal:\s*guard\.principal/)
+  assert.match(paymentSource, /initiateMobileTourBookingPayment/)
+  assert.doesNotMatch(paymentSource, /disabled/i)
+  assert.match(paymentSource, /getMobileTourBookingPayment\(\{\s*principal:\s*guard\.principal/)
   assert.match(serviceSource, /where:\s*\{\s*id:\s*input\.tourBookingId,\s*userId:\s*input\.principal\.userId\s*\}/)
   assert.match(serviceSource, /idempotencyKey:\s*idempotency\.key/)
   assert.match(serviceSource, /pricingBasis:\s*'existing-idempotency-key'/)
@@ -4904,7 +4914,7 @@ test('driver tour action and assignment endpoints are scoped and transactional',
   assert.match(adminSource, /requireAdminPermission\('tours'\)/)
 })
 
-test('driver tour lifecycle contract intentionally excludes live location chat and skip stop', () => {
+test('driver tour lifecycle contract intentionally excludes chat and skip stop', () => {
   assert.deepEqual(DRIVER_TOUR_ACTIONS, [
     'accept',
     'decline',
@@ -4917,8 +4927,8 @@ test('driver tour lifecycle contract intentionally excludes live location chat a
   ])
   assert.equal(DRIVER_TOUR_ACTIONS.includes('skip_stop' as never), false)
   const docs = readFileSync('docs/mobile-api/tours.md', 'utf8')
-  assert.match(docs, /Tour live location\/tracking\/navigation: Phase 4/)
-  assert.match(docs, /Tour chat: pending contract/)
+  assert.match(docs, /Tour Live Tracking V1/)
+  assert.match(docs, /Tour chat is unsupported in v1/)
 })
 
 test('driver tour view filters are driver scoped', () => {
@@ -4930,4 +4940,104 @@ test('driver tour view filters are driver scoped', () => {
     assignedDriverId: 'driver1',
     status: { in: ['driver_en_route', 'driver_arrived', 'in_progress'] },
   })
+})
+
+test('tour payment ownership is explicit and isolated from ride payments', () => {
+  const schema = readFileSync('prisma/schema.prisma', 'utf8')
+  const migration = readFileSync(
+    'prisma/migrations/20260912130000_tour_payment_tracking/migration.sql',
+    'utf8'
+  )
+  const paymentRoute = readFileSync(
+    'src/app/api/mobile/v1/customer/tour-bookings/[tourBookingId]/payment/route.ts',
+    'utf8'
+  )
+  const verifyRoute = readFileSync(
+    'src/app/api/mobile/v1/customer/tour-bookings/[tourBookingId]/payment/verify/route.ts',
+    'utf8'
+  )
+  const tourPayments = readFileSync('src/lib/mobile/tourPayments.ts', 'utf8')
+
+  assert.match(schema, /tourBookingId\s+String\?/)
+  assert.match(schema, /tourBooking\s+TourBooking\?/)
+  assert.match(migration, /Payment_exactly_one_owner_check/)
+  assert.match(migration, /"bookingId" IS NOT NULL AND "tourBookingId" IS NULL/)
+  assert.match(migration, /"bookingId" IS NULL AND "tourBookingId" IS NOT NULL/)
+  assert.match(paymentRoute, /initiateMobileTourBookingPayment/)
+  assert.match(verifyRoute, /verifyMobileTourBookingPayment/)
+  assert.match(tourPayments, /tourBookingId:\s*booking\.id/)
+  assert.match(tourPayments, /initializePaystackTransaction/)
+  assert.match(tourPayments, /accessCode/)
+  assert.match(tourPayments, /payOnUsTourCheckoutConfig/)
+  assert.equal(tourCouponsSupported(), false)
+  assert.equal(tourBookingPayable({ status: 'payment_pending', paymentStatus: 'pending', priceNGN: 1 }), true)
+  assert.equal(tourBookingPayable({ status: 'confirmed', paymentStatus: 'paid', priceNGN: 1 }), false)
+  assert.equal(tourPaymentState({ bookingStatus: 'payment_pending', paymentStatus: 'pending' }), 'pending')
+  assert.equal(tourPaymentState({ bookingStatus: 'confirmed', paymentStatus: 'paid' }), 'paid')
+})
+
+test('tour live tracking stores day-scoped location and uses Google route cache snapshots', () => {
+  const schema = readFileSync('prisma/schema.prisma', 'utf8')
+  const driverLocationRoute = readFileSync(
+    'src/app/api/mobile/v1/driver/tours/[tourBookingDayId]/location/route.ts',
+    'utf8'
+  )
+  const customerTrackingRoute = readFileSync(
+    'src/app/api/mobile/v1/customer/tour-bookings/[tourBookingId]/tracking/route.ts',
+    'utf8'
+  )
+  const tracking = readFileSync('src/lib/mobile/tourTracking.ts', 'utf8')
+
+  assert.match(schema, /model LatestTourLocation/)
+  assert.match(schema, /model TourJourneySnapshot/)
+  assert.match(schema, /targetStopId\s+String\?/)
+  assert.deepEqual(TOUR_TRACKING_ENABLED_DAY_STATUSES, [
+    'driver_en_route',
+    'driver_arrived',
+    'in_progress',
+  ])
+  assert.match(driverLocationRoute, /requireMobilePrincipal\(req,\s*'DRIVER'\)/)
+  assert.match(driverLocationRoute, /mobile-driver-tour-location/)
+  assert.match(customerTrackingRoute, /requireMobilePrincipal\(req,\s*'CUSTOMER'\)/)
+  assert.match(customerTrackingRoute, /mobile-customer-tour-tracking/)
+  assert.match(tracking, /shouldReplaceLocation/)
+  assert.match(tracking, /computeGoogleRoute/)
+  assert.match(tracking, /JOURNEY_ROUTE_MOVEMENT_THRESHOLD_METERS/)
+  assert.match(tracking, /targetStopId/)
+})
+
+test('tour journey target is lifecycle authoritative', () => {
+  const headingToPickup = tourExecutionDay({ status: 'driver_en_route' })
+  const atPickup = tourExecutionDay({ status: 'driver_arrived' })
+  const inProgress = tourExecutionDay({ status: 'in_progress' })
+  const completed = tourExecutionDay({ status: 'completed' })
+
+  assert.deepEqual(tourJourneyTargetForDay(headingToPickup), {
+    type: 'pickup',
+    id: 'day1',
+    coordinates: { latitude: 6.3703, longitude: 2.3912 },
+  })
+  assert.equal(tourJourneyTargetForDay(atPickup), null)
+  assert.deepEqual(tourJourneyTargetForDay(inProgress), {
+    type: 'stop',
+    id: 'stop1',
+    coordinates: { latitude: 6.3667, longitude: 2.0833 },
+  })
+  assert.equal(tourJourneyTargetForDay(completed), null)
+})
+
+test('tour cancellation is unpaid-customer only and keeps refund policy separate', () => {
+  const route = readFileSync(
+    'src/app/api/mobile/v1/customer/tour-bookings/[tourBookingId]/cancel/route.ts',
+    'utf8'
+  )
+  const service = readFileSync('src/lib/mobile/tourBookings.ts', 'utf8')
+  const docs = readFileSync('docs/mobile-api/tours.md', 'utf8')
+
+  assert.match(route, /requireMobilePrincipal\(req,\s*'CUSTOMER'\)/)
+  assert.match(route, /mobile-tour-cancel/)
+  assert.match(service, /status !== 'payment_pending'/)
+  assert.match(service, /paymentStatus !== 'pending'/)
+  assert.match(service, /TOUR_ACTION_NOT_ALLOWED/)
+  assert.match(docs, /refund policy/i)
 })

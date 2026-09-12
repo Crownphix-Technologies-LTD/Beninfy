@@ -50,7 +50,9 @@ async function verify(req: Request, reference: string, providerReference?: strin
   if (!payment) {
     return NextResponse.json({ error: 'Payment not found' }, { status: 404 })
   }
-  const sessionOwnsPayment = Boolean(session?.user?.id && payment.booking.userId === session.user.id)
+  const sessionOwnsPayment = Boolean(
+    session?.user?.id && payment.booking?.userId === session.user.id
+  )
   const providerReferenceMatches = Boolean(providerReference && providerReference === payment.providerReference)
   if (!sessionOwnsPayment && !providerReferenceMatches) {
     return NextResponse.json({ error: 'Payment not found' }, { status: 404 })

@@ -128,7 +128,7 @@ export async function refreshStalePayOnUsPayments({
           where: { id: payment.id },
           data: { status: 'failed', failureCode: 'PAYMENT_EXPIRED' },
         })
-        await failBookingPayment(payment.bookingId)
+        if (payment.bookingId) await failBookingPayment(payment.bookingId)
         refreshed += 1
       }
       continue

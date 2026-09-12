@@ -394,7 +394,7 @@ export function toDriverProfileDto(driver: {
 
 export function toPaymentDto(payment: {
   id: string
-  bookingId: string
+  bookingId: string | null
   reference: string
   provider: string
   amountNGN: number
@@ -404,6 +404,9 @@ export function toPaymentDto(payment: {
   createdAt: Dateish
   updatedAt: Dateish
 }): PaymentDto {
+  if (!payment.bookingId) {
+    throw new Error('Booking payment DTO requires a ride-owned payment')
+  }
   return {
     id: payment.id,
     bookingId: payment.bookingId,

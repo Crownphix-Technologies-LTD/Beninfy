@@ -144,6 +144,9 @@ export async function settlePaymentFromPayaza(
   if (!payment) {
     return { ok: false, status: 'not_found', message: 'Payment record not found' }
   }
+  if (!payment.bookingId) {
+    return { ok: false, status: 'not_found', message: 'Ride payment owner not found' }
+  }
 
   const data = verified.data
   const status = data?.transaction_status?.toLowerCase()

@@ -1,7 +1,12 @@
 import { createHmac, timingSafeEqual } from 'crypto'
 import { prisma } from '@/lib/prisma'
 import { notifyPaymentIssue, notifyPaymentSuccess } from '@/lib/notifications'
-import { failBookingPayment, markPaymentPaidAndReserveBooking } from '@/lib/paymentSettlement'
+import {
+  failBookingPayment,
+  failTourBookingPayment,
+  markPaymentPaidAndConfirmTourBooking,
+  markPaymentPaidAndReserveBooking,
+} from '@/lib/paymentSettlement'
 
 const PAYSTACK_BASE_URL = 'https://api.paystack.co'
 
@@ -30,7 +35,14 @@ export type PaystackVerifyResponse = {
 }
 
 export type PaymentSettlement =
-  | { ok: true; status: 'paid'; bookingId: string; reference: string; providerReference?: string }
+  | {
+      ok: true
+      status: 'paid'
+      bookingId?: string | null
+      tourBookingId?: string | null
+      reference: string
+      providerReference?: string
+    }
   | {
       ok: false
       status: 'pending' | 'failed' | 'amount_mismatch' | 'availability_conflict' | 'not_found'
@@ -159,7 +171,7 @@ export async function settlePaymentFromPaystack(
 ): Promise<PaymentSettlement> {
   const payment = await prisma.payment.findUnique({
     where: { reference },
-    include: { booking: true },
+    include: { booking: true, tourBooking: true },
   })
 
   if (!payment) {
@@ -177,9 +189,10 @@ export async function settlePaymentFromPaystack(
       },
     })
     if (nextStatus === 'failed') {
-      await failBookingPayment(payment.bookingId)
+      if (payment.bookingId) await failBookingPayment(payment.bookingId)
+      if (payment.tourBookingId) await failTourBookingPayment(payment.tourBookingId)
     }
-    if (payment.status !== nextStatus && nextStatus === 'failed') {
+    if (payment.status !== nextStatus && nextStatus === 'failed' && payment.bookingId) {
       await notifyPaymentIssue({
         bookingId: payment.bookingId,
         reference,
@@ -201,8 +214,9 @@ export async function settlePaymentFromPaystack(
       where: { reference },
       data: { status: 'amount_mismatch', failureCode: 'PAYMENT_AMOUNT_MISMATCH' },
     })
-    await failBookingPayment(payment.bookingId)
-    if (payment.status !== 'amount_mismatch') {
+    if (payment.bookingId) await failBookingPayment(payment.bookingId)
+    if (payment.tourBookingId) await failTourBookingPayment(payment.tourBookingId)
+    if (payment.status !== 'amount_mismatch' && payment.bookingId) {
       await notifyPaymentIssue({
         bookingId: payment.bookingId,
         reference,
@@ -218,21 +232,37 @@ export async function settlePaymentFromPaystack(
     }
   }
 
-  const reservation = await markPaymentPaidAndReserveBooking({
-    paymentId: payment.id,
-    bookingId: payment.bookingId,
-    paymentData: {
-      provider: 'paystack',
-      providerReference: transaction.reference ?? payment.providerReference,
-      currencyCode: 'NGN',
-      checkoutAmount: payment.amountNGN,
-      paidAt: new Date(),
-      failureCode: null,
-    },
-  })
+  const paymentData = {
+    provider: 'paystack',
+    providerReference: transaction.reference ?? payment.providerReference,
+    currencyCode: 'NGN',
+    checkoutAmount: payment.amountNGN,
+    paidAt: new Date(),
+    failureCode: null,
+  }
+  const reservation = payment.tourBookingId
+    ? await markPaymentPaidAndConfirmTourBooking({
+        paymentId: payment.id,
+        tourBookingId: payment.tourBookingId,
+        amountNGN: payment.amountNGN,
+        provider: 'paystack',
+        providerReference: transaction.reference ?? payment.providerReference,
+        paymentData,
+      })
+    : payment.bookingId
+      ? await markPaymentPaidAndReserveBooking({
+          paymentId: payment.id,
+          bookingId: payment.bookingId,
+          paymentData,
+        })
+      : {
+          ok: false as const,
+          status: 'not_found' as const,
+          message: 'Payment owner not found',
+        }
 
   if (!reservation.ok) {
-    if (payment.status !== 'paid') {
+    if (payment.status !== 'paid' && payment.bookingId) {
       await notifyPaymentIssue({
         bookingId: payment.bookingId,
         reference,
@@ -244,7 +274,7 @@ export async function settlePaymentFromPaystack(
     return { ok: false, status: reservation.status, message: reservation.message }
   }
 
-  if (payment.status !== 'paid' && !reservation.alreadySettled) {
+  if (payment.status !== 'paid' && !reservation.alreadySettled && payment.bookingId) {
     await notifyPaymentSuccess(payment.bookingId, payment.id)
   }
 
@@ -252,6 +282,7 @@ export async function settlePaymentFromPaystack(
     ok: true,
     status: 'paid',
     bookingId: payment.bookingId,
+    tourBookingId: payment.tourBookingId,
     reference,
     providerReference: transaction.reference,
   }

@@ -57,7 +57,7 @@ export default async function BookingConfirmedPage({ params, searchParams }: Pro
       where: { reference: paymentReference },
       include: { booking: true },
     })
-    if (payment?.booking.userId === customerUserId) {
+    if (payment?.booking?.userId === customerUserId && payment.bookingId) {
       const onusReference = providerReference || payment.providerReference
       if (payment.provider === 'paystack' && payment.status !== 'paid') {
         const secret = getPaystackSecret()

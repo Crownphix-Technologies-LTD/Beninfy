@@ -93,6 +93,27 @@ type TourBookingDayWithStops = {
   completedAt: Dateish | null
   cancelledAt: Dateish | null
   stops: TourStopExecutionForDto[]
+  latestLocation?: {
+    latitude: number
+    longitude: number
+    accuracyMeters: number | null
+    headingDegrees: number | null
+    speedMetersPerSecond: number | null
+    sequence: number | null
+    capturedAt: Dateish
+    receivedAt: Dateish
+    expiresAt: Dateish
+  } | null
+  journeySnapshot?: {
+    target?: string | null
+    targetStopId?: string | null
+    encodedPolyline: string | null
+    distanceRemainingMeters: number | null
+    estimatedDurationSeconds: number | null
+    estimatedArrivalAt: Dateish | null
+    calculatedAt: Dateish
+    expiresAt: Dateish
+  } | null
 }
 
 type TourStopExecutionForDto = {
@@ -265,6 +286,33 @@ export function toTourBookingDayDto(day: TourBookingDayWithStops, totalDays: num
       cancelledAt: iso(day.cancelledAt),
     },
     stops,
+    tracking: {
+      latestLocation: day.latestLocation
+        ? {
+            latitude: day.latestLocation.latitude,
+            longitude: day.latestLocation.longitude,
+            accuracyMeters: day.latestLocation.accuracyMeters,
+            headingDegrees: day.latestLocation.headingDegrees,
+            speedMetersPerSecond: day.latestLocation.speedMetersPerSecond,
+            sequence: day.latestLocation.sequence,
+            capturedAt: iso(day.latestLocation.capturedAt),
+            receivedAt: iso(day.latestLocation.receivedAt),
+            expiresAt: iso(day.latestLocation.expiresAt),
+          }
+        : null,
+      journey: day.journeySnapshot
+        ? {
+            target: day.journeySnapshot.target,
+            targetStopId: day.journeySnapshot.targetStopId,
+            routePolyline: day.journeySnapshot.encodedPolyline,
+            distanceRemainingMeters: day.journeySnapshot.distanceRemainingMeters,
+            estimatedDurationSeconds: day.journeySnapshot.estimatedDurationSeconds,
+            estimatedArrivalAt: iso(day.journeySnapshot.estimatedArrivalAt),
+            calculatedAt: iso(day.journeySnapshot.calculatedAt),
+            expiresAt: iso(day.journeySnapshot.expiresAt),
+          }
+        : null,
+    },
   }
 }
 
@@ -312,7 +360,11 @@ export function toTourBookingDto(booking: TourBookingWithDays) {
 const tourBookingInclude = {
   days: {
     orderBy: { dayNumber: 'asc' as const },
-    include: { stops: { orderBy: { sortOrder: 'asc' as const } } },
+    include: {
+      stops: { orderBy: { sortOrder: 'asc' as const } },
+      latestLocation: true,
+      journeySnapshot: true,
+    },
   },
 } satisfies Prisma.TourBookingInclude
 
@@ -488,6 +540,49 @@ export async function getCustomerTourBooking(input: {
   return { ok: true as const, booking, dto: toTourBookingDto(booking) }
 }
 
+export async function cancelCustomerTourBooking(input: {
+  principal: MobilePrincipal
+  tourBookingId: string
+}) {
+  const booking = await prisma.tourBooking.findFirst({
+    where: { id: input.tourBookingId, userId: input.principal.userId },
+    include: tourBookingInclude,
+  })
+  if (!booking) return { ok: false as const, code: 'TOUR_BOOKING_NOT_FOUND' as MobileErrorCode }
+  if (booking.status === 'cancelled') {
+    return { ok: true as const, booking, dto: toTourBookingDto(booking), idempotent: true }
+  }
+  if (booking.status !== 'payment_pending' || booking.paymentStatus !== 'pending') {
+    return { ok: false as const, code: 'TOUR_ACTION_NOT_ALLOWED' as MobileErrorCode }
+  }
+  const now = new Date()
+  const updated = await prisma.$transaction(
+    async (tx) => {
+      await tx.tourBookingDay.updateMany({
+        where: {
+          tourBookingId: booking.id,
+          status: { notIn: ['completed', 'cancelled'] },
+        },
+        data: { status: 'cancelled', cancelledAt: now },
+      })
+      await tx.tourStopExecution.updateMany({
+        where: {
+          tourBookingDay: { tourBookingId: booking.id },
+          status: { notIn: ['completed', 'skipped'] },
+        },
+        data: { status: 'skipped', skippedAt: now, skipReason: 'tour_cancelled' },
+      })
+      return tx.tourBooking.update({
+        where: { id: booking.id },
+        data: { status: 'cancelled', paymentStatus: 'failed', cancelledAt: now },
+        include: tourBookingInclude,
+      })
+    },
+    { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+  )
+  return { ok: true as const, booking: updated, dto: toTourBookingDto(updated), idempotent: false }
+}
+
 export async function listAdminTourBookings() {
   const bookings = await prisma.tourBooking.findMany({
     orderBy: { createdAt: 'desc' },
@@ -520,9 +615,9 @@ export async function getAdminTourBooking(id: string) {
 
 export function tourPaymentFoundation() {
   return {
-    externalPaymentInitializationImplemented: false,
+    externalPaymentInitializationImplemented: true,
     reason:
-      'Existing Payment rows are ride Booking-owned. Phase 2 stores TourBooking payment state without changing live ride settlement.',
+      'Tour payments use explicit Payment.tourBookingId ownership and the shared Paystack/PayOnUs provider settlement path.',
     couponSupport: false,
   }
 }

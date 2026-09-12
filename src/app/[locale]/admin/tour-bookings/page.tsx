@@ -15,6 +15,22 @@ type TourBookingDay = {
   pickup: { label: string | null; address: string | null; coordinates: { latitude: number; longitude: number } | null }
   end: { label: string | null; address: string | null; coordinates: { latitude: number; longitude: number } | null }
   assignment: { driverId: string | null; fleetVehicleId: string | null; assignedAt: string | null; acceptedAt: string | null }
+  tracking?: {
+    latestLocation: {
+      latitude: number
+      longitude: number
+      receivedAt: string | null
+      expiresAt: string | null
+    } | null
+    journey: {
+      target: string | null
+      targetStopId: string | null
+      distanceRemainingMeters: number | null
+      estimatedDurationSeconds: number | null
+      estimatedArrivalAt: string | null
+      calculatedAt: string | null
+    } | null
+  }
   stops: Array<{
     id: string
     stopNumber: number
@@ -57,6 +73,27 @@ type FleetVehicleOption = {
 
 function formatDate(value: string) {
   return new Date(value).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+}
+
+function freshness(
+  latestLocation: {
+    latitude: number
+    longitude: number
+    receivedAt: string | null
+    expiresAt: string | null
+  } | null
+) {
+  if (!latestLocation?.receivedAt) return 'unavailable'
+  if (latestLocation.expiresAt && new Date(latestLocation.expiresAt).getTime() < Date.now()) return 'unavailable'
+  const ageSeconds = Math.floor((Date.now() - new Date(latestLocation.receivedAt).getTime()) / 1000)
+  if (ageSeconds <= 90) return 'live'
+  return 'stale'
+}
+
+function eta(seconds: number | null | undefined) {
+  if (typeof seconds !== 'number') return '—'
+  const minutes = Math.max(1, Math.round(seconds / 60))
+  return `${minutes} min`
 }
 
 export default function AdminTourBookingsPage() {
@@ -282,6 +319,26 @@ export default function AdminTourBookingsPage() {
                   <div className="grid gap-3 text-xs text-gray-600 md:grid-cols-2">
                     <p><span className="font-semibold text-gray-800">Pickup:</span> {day.pickup.address ?? day.pickup.label ?? 'Not configured'}</p>
                     <p><span className="font-semibold text-gray-800">End:</span> {day.end.address ?? day.end.label ?? 'Not configured'}</p>
+                  </div>
+                  <div className="mt-4 grid gap-3 rounded-xl border border-[#ecdff0] bg-white p-3 text-xs text-gray-600 md:grid-cols-4">
+                    <div>
+                      <p className="font-semibold uppercase tracking-[0.12em] text-gray-400">Live state</p>
+                      <p className="mt-1 font-semibold capitalize text-gray-900">{day.status.replace(/_/g, ' ')}</p>
+                    </div>
+                    <div>
+                      <p className="font-semibold uppercase tracking-[0.12em] text-gray-400">Stop progress</p>
+                      <p className="mt-1 font-semibold text-gray-900">
+                        {day.stops.filter((stop) => stop.status === 'completed').length} / {day.stops.length}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="font-semibold uppercase tracking-[0.12em] text-gray-400">Location</p>
+                      <p className="mt-1 font-semibold capitalize text-gray-900">{freshness(day.tracking?.latestLocation ?? null)}</p>
+                    </div>
+                    <div>
+                      <p className="font-semibold uppercase tracking-[0.12em] text-gray-400">ETA</p>
+                      <p className="mt-1 font-semibold text-gray-900">{eta(day.tracking?.journey?.estimatedDurationSeconds)}</p>
+                    </div>
                   </div>
                   <form
                     className="mt-4 grid gap-3 rounded-xl border border-gray-100 bg-[#fbf7fc] p-3 md:grid-cols-[1fr_1fr_auto]"
