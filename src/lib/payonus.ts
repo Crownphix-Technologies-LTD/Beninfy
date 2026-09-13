@@ -1,7 +1,12 @@
 import { createHash, timingSafeEqual } from 'crypto'
 import { prisma } from '@/lib/prisma'
 import { notifyPaymentIssue, notifyPaymentSuccess } from '@/lib/notifications'
-import { failBookingPayment, markPaymentPaidAndReserveBooking } from '@/lib/paymentSettlement'
+import {
+  failBookingPayment,
+  failTourBookingPayment,
+  markPaymentPaidAndConfirmTourBooking,
+  markPaymentPaidAndReserveBooking,
+} from '@/lib/paymentSettlement'
 
 type PayOnUsEnvironment = 'test' | 'production'
 
@@ -60,7 +65,14 @@ export type PayOnUsWebhookPayload = {
 }
 
 export type PaymentSettlement =
-  | { ok: true; status: 'paid'; bookingId: string; reference: string; providerReference?: string }
+  | {
+      ok: true
+      status: 'paid'
+      bookingId?: string | null
+      tourBookingId?: string | null
+      reference: string
+      providerReference?: string | null
+    }
   | {
       ok: false
       status: 'pending' | 'failed' | 'amount_mismatch' | 'availability_conflict' | 'not_found'
@@ -183,12 +195,15 @@ async function findPayment(reference?: string | null, providerReference?: string
   if (reference) {
     const payment = await prisma.payment.findUnique({
       where: { reference },
-      include: { booking: true },
+      include: { booking: true, tourBooking: true },
     })
     if (payment) return payment
   }
   if (providerReference) {
-    return prisma.payment.findUnique({ where: { providerReference }, include: { booking: true } })
+    return prisma.payment.findUnique({
+      where: { providerReference },
+      include: { booking: true, tourBooking: true },
+    })
   }
   return null
 }
@@ -213,9 +228,10 @@ export async function settlePaymentFromPayOnUs(
       },
     })
     if (nextStatus === 'failed') {
-      await failBookingPayment(payment.bookingId)
+      if (payment.bookingId) await failBookingPayment(payment.bookingId)
+      if (payment.tourBookingId) await failTourBookingPayment(payment.tourBookingId)
     }
-    if (payment.status !== nextStatus && nextStatus === 'failed') {
+    if (payment.status !== nextStatus && nextStatus === 'failed' && payment.bookingId) {
       await notifyPaymentIssue({
         bookingId: payment.bookingId,
         reference: payment.reference,
@@ -242,8 +258,9 @@ export async function settlePaymentFromPayOnUs(
         failureCode: 'PAYMENT_AMOUNT_MISMATCH',
       },
     })
-    await failBookingPayment(payment.bookingId)
-    if (payment.status !== 'amount_mismatch') {
+    if (payment.bookingId) await failBookingPayment(payment.bookingId)
+    if (payment.tourBookingId) await failTourBookingPayment(payment.tourBookingId)
+    if (payment.status !== 'amount_mismatch' && payment.bookingId) {
       await notifyPaymentIssue({
         bookingId: payment.bookingId,
         reference: payment.reference,
@@ -260,21 +277,37 @@ export async function settlePaymentFromPayOnUs(
   }
 
   const providerReference = data?.onusReference ?? onusReference
-  const reservation = await markPaymentPaidAndReserveBooking({
-    paymentId: payment.id,
-    bookingId: payment.bookingId,
-    paymentData: {
-      provider: 'payonus',
-      providerReference,
-      currencyCode: 'NGN',
-      checkoutAmount: payment.amountNGN,
-      paidAt: new Date(),
-      failureCode: null,
-    },
-  })
+  const paymentData = {
+    provider: 'payonus',
+    providerReference,
+    currencyCode: 'NGN',
+    checkoutAmount: payment.amountNGN,
+    paidAt: new Date(),
+    failureCode: null,
+  }
+  const reservation = payment.tourBookingId
+    ? await markPaymentPaidAndConfirmTourBooking({
+        paymentId: payment.id,
+        tourBookingId: payment.tourBookingId,
+        amountNGN: payment.amountNGN,
+        provider: 'payonus',
+        providerReference,
+        paymentData,
+      })
+    : payment.bookingId
+      ? await markPaymentPaidAndReserveBooking({
+          paymentId: payment.id,
+          bookingId: payment.bookingId,
+          paymentData,
+        })
+      : {
+          ok: false as const,
+          status: 'not_found' as const,
+          message: 'Payment owner not found',
+        }
 
   if (!reservation.ok) {
-    if (payment.status !== 'paid') {
+    if (payment.status !== 'paid' && payment.bookingId) {
       await notifyPaymentIssue({
         bookingId: payment.bookingId,
         reference: payment.reference,
@@ -286,7 +319,7 @@ export async function settlePaymentFromPayOnUs(
     return { ok: false, status: reservation.status, message: reservation.message }
   }
 
-  if (payment.status !== 'paid' && !reservation.alreadySettled) {
+  if (payment.status !== 'paid' && !reservation.alreadySettled && payment.bookingId) {
     await notifyPaymentSuccess(payment.bookingId, payment.id)
   }
 
@@ -294,6 +327,7 @@ export async function settlePaymentFromPayOnUs(
     ok: true,
     status: 'paid',
     bookingId: payment.bookingId,
+    tourBookingId: payment.tourBookingId,
     reference: payment.reference,
     providerReference,
   }
@@ -331,9 +365,10 @@ export async function settlePaymentFromPayOnUsWebhook(
       },
     })
     if (nextStatus === 'failed') {
-      await failBookingPayment(payment.bookingId)
+      if (payment.bookingId) await failBookingPayment(payment.bookingId)
+      if (payment.tourBookingId) await failTourBookingPayment(payment.tourBookingId)
     }
-    if (payment.status !== nextStatus && nextStatus === 'failed') {
+    if (payment.status !== nextStatus && nextStatus === 'failed' && payment.bookingId) {
       await notifyPaymentIssue({
         bookingId: payment.bookingId,
         reference: payment.reference,
@@ -355,8 +390,9 @@ export async function settlePaymentFromPayOnUsWebhook(
         failureCode: 'PAYMENT_AMOUNT_MISMATCH',
       },
     })
-    await failBookingPayment(payment.bookingId)
-    if (payment.status !== 'amount_mismatch') {
+    if (payment.bookingId) await failBookingPayment(payment.bookingId)
+    if (payment.tourBookingId) await failTourBookingPayment(payment.tourBookingId)
+    if (payment.status !== 'amount_mismatch' && payment.bookingId) {
       await notifyPaymentIssue({
         bookingId: payment.bookingId,
         reference: payment.reference,
@@ -372,21 +408,38 @@ export async function settlePaymentFromPayOnUsWebhook(
     }
   }
 
-  const reservation = await markPaymentPaidAndReserveBooking({
-    paymentId: payment.id,
-    bookingId: payment.bookingId,
-    paymentData: {
-      provider: 'payonus',
-      providerReference: onusReference ?? payment.providerReference,
-      currencyCode: 'NGN',
-      checkoutAmount: payment.amountNGN,
-      paidAt: new Date(),
-      failureCode: null,
-    },
-  })
+  const webhookProviderReference = onusReference ?? payment.providerReference
+  const webhookPaymentData = {
+    provider: 'payonus',
+    providerReference: webhookProviderReference,
+    currencyCode: 'NGN',
+    checkoutAmount: payment.amountNGN,
+    paidAt: new Date(),
+    failureCode: null,
+  }
+  const reservation = payment.tourBookingId
+    ? await markPaymentPaidAndConfirmTourBooking({
+        paymentId: payment.id,
+        tourBookingId: payment.tourBookingId,
+        amountNGN: payment.amountNGN,
+        provider: 'payonus',
+        providerReference: webhookProviderReference,
+        paymentData: webhookPaymentData,
+      })
+    : payment.bookingId
+      ? await markPaymentPaidAndReserveBooking({
+          paymentId: payment.id,
+          bookingId: payment.bookingId,
+          paymentData: webhookPaymentData,
+        })
+      : {
+          ok: false as const,
+          status: 'not_found' as const,
+          message: 'Payment owner not found',
+        }
 
   if (!reservation.ok) {
-    if (payment.status !== 'paid') {
+    if (payment.status !== 'paid' && payment.bookingId) {
       await notifyPaymentIssue({
         bookingId: payment.bookingId,
         reference: payment.reference,
@@ -398,7 +451,7 @@ export async function settlePaymentFromPayOnUsWebhook(
     return { ok: false, status: reservation.status, message: reservation.message }
   }
 
-  if (payment.status !== 'paid' && !reservation.alreadySettled) {
+  if (payment.status !== 'paid' && !reservation.alreadySettled && payment.bookingId) {
     await notifyPaymentSuccess(payment.bookingId, payment.id)
   }
 
@@ -406,6 +459,7 @@ export async function settlePaymentFromPayOnUsWebhook(
     ok: true,
     status: 'paid',
     bookingId: payment.bookingId,
+    tourBookingId: payment.tourBookingId,
     reference: payment.reference,
     providerReference: onusReference,
   }

@@ -50,7 +50,7 @@ type BookingForPayment = {
 
 type PaymentForDto = {
   id: string
-  bookingId: string
+  bookingId: string | null
   amountNGN: number
   status: string
   reference: string

@@ -219,3 +219,77 @@ export function failBookingPayment(bookingId: string) {
     }),
   ])
 }
+
+export async function markPaymentPaidAndConfirmTourBooking({
+  paymentId,
+  tourBookingId,
+  amountNGN,
+  provider,
+  providerReference,
+  paymentData,
+}: {
+  paymentId: string
+  tourBookingId: string
+  amountNGN: number
+  provider: string
+  providerReference?: string | null
+  paymentData: Prisma.PaymentUpdateInput
+}) {
+  return prisma.$transaction(
+    async (tx) => {
+      const payment = await tx.payment.findUnique({
+        where: { id: paymentId },
+        select: { status: true },
+      })
+      if (!payment) {
+        throw new Error('Payment not found during tour payment settlement')
+      }
+
+      const tourBooking = await tx.tourBooking.findUnique({
+        where: { id: tourBookingId },
+        select: { id: true, status: true, paymentStatus: true },
+      })
+      if (!tourBooking) {
+        throw new Error('Tour booking not found during payment settlement')
+      }
+
+      await tx.payment.update({
+        where: { id: paymentId },
+        data: {
+          ...paymentData,
+          status: 'paid',
+        },
+      })
+
+      await tx.tourBooking.update({
+        where: { id: tourBookingId },
+        data: {
+          status: tourBooking.status === 'completed' ? 'completed' : 'confirmed',
+          paymentStatus: 'paid',
+          amountPaidNGN: amountNGN,
+          paymentProvider: provider,
+          paymentReference: providerReference,
+        },
+      })
+
+      return {
+        ok: true as const,
+        status: 'confirmed' as const,
+        alreadySettled: payment.status === 'paid' || tourBooking.paymentStatus === 'paid',
+      }
+    },
+    { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+  )
+}
+
+export function failTourBookingPayment(tourBookingId: string) {
+  return prisma.tourBooking.updateMany({
+    where: {
+      id: tourBookingId,
+      status: 'payment_pending',
+    },
+    data: {
+      paymentStatus: 'failed',
+    },
+  })
+}

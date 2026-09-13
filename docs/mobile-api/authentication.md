@@ -27,6 +27,7 @@ Refresh token:
 | ------------------------------------------- | ----------- | ------------------------------------------- |
 | `POST /api/mobile/v1/auth/register`         | IMPLEMENTED | PUBLIC customer registration                |
 | `POST /api/mobile/v1/auth/login`            | IMPLEMENTED | PUBLIC customer or driver login             |
+| `POST /api/mobile/v1/auth/google`           | IMPLEMENTED | PUBLIC customer Google Sign-In              |
 | `POST /api/mobile/v1/auth/refresh`          | IMPLEMENTED | PUBLIC with valid refresh token             |
 | `POST /api/mobile/v1/auth/logout`           | IMPLEMENTED | Refresh token revocation                    |
 | `POST /api/mobile/v1/auth/logout-all`       | IMPLEMENTED | Revoke all mobile sessions for principal    |
@@ -41,7 +42,7 @@ Refresh token:
 | `GET /api/mobile/v1/auth/sessions`          | PLANNED     | CUSTOMER or DRIVER                          |
 | `DELETE /api/mobile/v1/auth/sessions/:id`   | PLANNED     | CUSTOMER or DRIVER                          |
 
-Google sign-in can be added later by verifying Google ID tokens server-side. Google client secrets must remain server-side.
+Google sign-in for Customer mobile verifies Google ID tokens server-side. Flutter must never call Beninfy backend APIs with Google server credentials, and must never initialize a Beninfy user session by trusting client-side Google profile fields alone.
 
 ## Login Example
 
@@ -62,6 +63,56 @@ Google sign-in can be added later by verifying Google ID tokens server-side. Goo
 `principalType` can be `CUSTOMER` or `DRIVER`. Driver login succeeds only when the authenticated `User` is linked to an active operational `Driver`.
 
 Refresh tokens are stored only as hashes in `MobileSession`.
+
+## Customer Google Sign-In
+
+```text
+POST /api/mobile/v1/auth/google
+```
+
+Request:
+
+```json
+{
+  "idToken": "GOOGLE_ID_TOKEN_FROM_PLATFORM_SDK",
+  "principalType": "CUSTOMER",
+  "device": {
+    "deviceId": "ios-device-id",
+    "platform": "ios",
+    "deviceName": "iPhone",
+    "appVersion": "1.0.0"
+  }
+}
+```
+
+The backend verifies issuer, audience, expiry, `sub`, and verified email against configured mobile OAuth client IDs:
+
+- `GOOGLE_ANDROID_CLIENT_ID`
+- `GOOGLE_IOS_CLIENT_ID`
+- `GOOGLE_MOBILE_CLIENT_IDS`
+
+Response shape matches password login:
+
+```json
+{
+  "principalType": "CUSTOMER",
+  "user": {},
+  "onboarding": { "status": "phone_required" },
+  "driver": null,
+  "accessToken": "mobile-access-token",
+  "refreshToken": "mobile-refresh-token",
+  "tokenType": "Bearer",
+  "expiresIn": 900
+}
+```
+
+Google linking rules:
+
+- Existing Google account by provider/sub signs in the linked Customer.
+- Verified Google email may link to an existing legitimate Customer account.
+- New verified Customer email creates a Customer account.
+- Driver/Admin accounts, disabled accounts, deletion-pending accounts, and anonymized accounts are rejected.
+- Flutter must never send `userId`, Google account ownership IDs other than the provider-issued ID token, OAuth secrets, or authoritative verification state.
 
 ## Customer Onboarding
 

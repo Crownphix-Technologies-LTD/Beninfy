@@ -5,6 +5,11 @@ export type MobileErrorCode =
   | 'FORBIDDEN'
   | 'INVALID_CREDENTIALS'
   | 'ACCOUNT_DISABLED'
+  | 'ACCOUNT_DELETION_PENDING'
+  | 'ACCOUNT_REAUTH_REQUIRED'
+  | 'GOOGLE_AUTH_UNAVAILABLE'
+  | 'GOOGLE_AUTH_INVALID'
+  | 'GOOGLE_ACCOUNT_CONFLICT'
   | 'DRIVER_NOT_LINKED'
   | 'DRIVER_INACTIVE'
   | 'INVALID_DRIVER_STATUS'
@@ -92,6 +97,16 @@ export type MobileErrorCode =
   | 'AVATAR_STORAGE_UNAVAILABLE'
   | 'ACCOUNT_DELETE_CONFIRMATION_INVALID'
   | 'TOUR_NOT_FOUND'
+  | 'TOUR_NOT_EXECUTION_READY'
+  | 'TOUR_BOOKING_NOT_FOUND'
+  | 'TOUR_BOOKING_DATE_INVALID'
+  | 'TOUR_BOOKING_NOT_PAYABLE'
+  | 'TOUR_TRAVELLER_COUNT_INVALID'
+  | 'TOUR_DAY_NOT_FOUND'
+  | 'TOUR_DAY_NOT_ASSIGNED'
+  | 'TOUR_DAY_NOT_READY'
+  | 'TOUR_ACTION_NOT_ALLOWED'
+  | 'TOUR_STOP_NOT_CURRENT'
   | 'INTERNAL_ERROR'
 
 export type MobileErrorBody = {
@@ -141,6 +156,16 @@ export function mobileErrorFromCode(code: MobileErrorCode, message?: string) {
       return mobileError(code, message ?? 'You are not allowed to perform this action', 403)
     case 'ACCOUNT_DISABLED':
       return mobileError(code, message ?? 'This account is disabled', 403)
+    case 'ACCOUNT_DELETION_PENDING':
+      return mobileError(code, message ?? 'This account is pending deletion', 403)
+    case 'ACCOUNT_REAUTH_REQUIRED':
+      return mobileError(code, message ?? 'Recent authentication is required', 401)
+    case 'GOOGLE_AUTH_UNAVAILABLE':
+      return mobileError(code, message ?? 'Google sign-in is not configured', 503)
+    case 'GOOGLE_AUTH_INVALID':
+      return mobileError(code, message ?? 'Google sign-in token is invalid', 401)
+    case 'GOOGLE_ACCOUNT_CONFLICT':
+      return mobileError(code, message ?? 'Google account cannot be linked to this customer', 409)
     case 'DRIVER_NOT_LINKED':
       return mobileError(
         code,
@@ -315,6 +340,26 @@ export function mobileErrorFromCode(code: MobileErrorCode, message?: string) {
       return mobileError(code, message ?? 'Account deletion confirmation is invalid', 400)
     case 'TOUR_NOT_FOUND':
       return mobileError(code, message ?? 'Tour not found', 404)
+    case 'TOUR_NOT_EXECUTION_READY':
+      return mobileError(code, message ?? 'This tour is not ready for booking', 409)
+    case 'TOUR_BOOKING_NOT_FOUND':
+      return mobileError(code, message ?? 'Tour booking not found', 404)
+    case 'TOUR_BOOKING_DATE_INVALID':
+      return mobileError(code, message ?? 'Tour start date is invalid', 400)
+    case 'TOUR_BOOKING_NOT_PAYABLE':
+      return mobileError(code, message ?? 'Tour booking is not payable', 409)
+    case 'TOUR_TRAVELLER_COUNT_INVALID':
+      return mobileError(code, message ?? 'Traveller count is invalid', 400)
+    case 'TOUR_DAY_NOT_FOUND':
+      return mobileError(code, message ?? 'Tour day not found', 404)
+    case 'TOUR_DAY_NOT_ASSIGNED':
+      return mobileError(code, message ?? 'Tour day is not assigned to this driver', 409)
+    case 'TOUR_DAY_NOT_READY':
+      return mobileError(code, message ?? 'Tour day is not ready for execution', 409)
+    case 'TOUR_ACTION_NOT_ALLOWED':
+      return mobileError(code, message ?? 'Tour action is not allowed', 409)
+    case 'TOUR_STOP_NOT_CURRENT':
+      return mobileError(code, message ?? 'Tour stop is not current', 409)
     case 'VALIDATION_ERROR':
       return mobileValidationError(message)
     case 'INTERNAL_ERROR':

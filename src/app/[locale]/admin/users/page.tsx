@@ -17,7 +17,14 @@ interface UserRow {
   name: string | null
   email: string | null
   phone: string | null
+  image: string | null
   role: AppRole
+  disabledAt: string | null
+  deletionRequestedAt: string | null
+  scheduledDeletionAt: string | null
+  deletionCancelledAt: string | null
+  anonymizedAt: string | null
+  googleLinked: boolean
   createdAt: string
   _count: { bookings: number }
 }
@@ -98,6 +105,20 @@ export default function AdminUsersPage() {
         return
       }
       setUsers((prev) => prev.filter((u) => u.id !== id))
+    } finally { setBusy(null) }
+  }
+
+  const restoreDeletion = async (id: string) => {
+    if (!confirm('Restore this deletion-pending customer account? Old mobile sessions will not be restored.')) return
+    setBusy(id)
+    try {
+      const res = await fetch(`/api/admin/users/${id}/restore-deletion`, { method: 'POST' })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        alert(data.error ?? 'Failed to restore account')
+        return
+      }
+      await load()
     } finally { setBusy(null) }
   }
 
@@ -196,6 +217,8 @@ export default function AdminUsersPage() {
               <th className="text-left px-5 py-3.5 font-semibold">Name</th>
               <th className="text-left px-5 py-3.5 font-semibold">Email</th>
               <th className="text-left px-5 py-3.5 font-semibold">Phone</th>
+              <th className="text-left px-5 py-3.5 font-semibold">Identity</th>
+              <th className="text-left px-5 py-3.5 font-semibold">Account</th>
               <th className="text-left px-5 py-3.5 font-semibold">Bookings</th>
               <th className="text-left px-5 py-3.5 font-semibold">Joined</th>
               <th className="text-left px-5 py-3.5 font-semibold">Role</th>
@@ -204,16 +227,49 @@ export default function AdminUsersPage() {
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={isSuper ? 7 : 6} className="px-5 py-14 text-center text-gray-400">Loading...</td></tr>
+              <tr><td colSpan={isSuper ? 9 : 8} className="px-5 py-14 text-center text-gray-400">Loading...</td></tr>
             ) : users.length === 0 ? (
-              <tr><td colSpan={isSuper ? 7 : 6} className="px-5 py-14 text-center text-gray-400">No users.</td></tr>
+              <tr><td colSpan={isSuper ? 9 : 8} className="px-5 py-14 text-center text-gray-400">No users.</td></tr>
             ) : users.map((u) => {
               const isThisSuper = u.role === 'super_admin'
+              const deletionPending = Boolean(u.deletionRequestedAt && !u.anonymizedAt)
+              const accountStatus = u.anonymizedAt
+                ? 'Anonymized'
+                : deletionPending
+                  ? 'Deletion pending'
+                  : u.disabledAt
+                    ? 'Disabled'
+                    : 'Active'
               return (
                 <tr key={u.id} className="border-t border-gray-100 transition-colors hover:bg-[#fcf9fd]">
-                  <td className="px-5 py-4 font-medium text-gray-800">{u.name ?? '—'}</td>
+                  <td className="px-5 py-4 font-medium text-gray-800">
+                    <div className="flex items-center gap-3">
+                      {u.image ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={u.image} alt="" className="h-9 w-9 rounded-full object-cover" />
+                      ) : (
+                        <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[#f7eff8] text-xs font-semibold text-[#3e004c]">
+                          {(u.name ?? u.email ?? '?').slice(0, 1).toUpperCase()}
+                        </span>
+                      )}
+                      <span>{u.name ?? '—'}</span>
+                    </div>
+                  </td>
                   <td className="px-5 py-4 text-gray-700">{u.email ?? '—'}</td>
                   <td className="px-5 py-4 text-gray-700">{u.phone ?? '—'}</td>
+                  <td className="px-5 py-4">
+                    <AdminStatusBadge status={u.googleLinked ? 'Google linked' : 'Password/local'} />
+                  </td>
+                  <td className="px-5 py-4">
+                    <div className="space-y-1">
+                      <AdminStatusBadge status={accountStatus} />
+                      {deletionPending && u.scheduledDeletionAt && (
+                        <p className="text-[11px] text-gray-500">
+                          Due {new Date(u.scheduledDeletionAt).toLocaleDateString()}
+                        </p>
+                      )}
+                    </div>
+                  </td>
                   <td className="px-5 py-4 text-gray-700">{u._count.bookings}</td>
                   <td className="px-5 py-4 text-xs text-gray-500">{new Date(u.createdAt).toLocaleDateString()}</td>
                   <td className="px-5 py-4">
@@ -256,6 +312,16 @@ export default function AdminUsersPage() {
                           >
                             <span className="material-symbols-outlined text-[17px]">delete</span>
                           </button>
+                          {deletionPending && (
+                            <button
+                              onClick={() => restoreDeletion(u.id)}
+                              disabled={busy === u.id}
+                              className="ml-2 inline-flex h-8 w-8 items-center justify-center rounded-lg border border-emerald-100 text-emerald-700 transition-colors hover:bg-emerald-50 disabled:opacity-50"
+                              title="Restore deletion-pending customer"
+                            >
+                              <span className="material-symbols-outlined text-[17px]">restore</span>
+                            </button>
+                          )}
                         </>
                       )}
                     </td>

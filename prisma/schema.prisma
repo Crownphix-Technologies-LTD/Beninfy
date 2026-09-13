@@ -21,12 +21,17 @@ model User {
   role                String                    @default("user")
   sessionVersion      Int                       @default(0)
   disabledAt          DateTime?
+  deletionRequestedAt DateTime?
+  scheduledDeletionAt DateTime?
+  deletionCancelledAt DateTime?
+  anonymizedAt        DateTime?
   locale              String?
   termsAcceptedAt     DateTime?
   privacyAcceptedAt   DateTime?
   termsVersion        String?
   privacyVersion      String?
   bookings            Booking[]
+  tourBookings        TourBooking[]
   savedPlaces         SavedPlace[]
   travelPreference    CustomerTravelPreference?
   tripReviews         TripReview[]
@@ -41,6 +46,9 @@ model User {
   sessions            Session[]
   createdAt           DateTime                  @default(now())
   updatedAt           DateTime                  @updatedAt
+
+  @@index([scheduledDeletionAt, anonymizedAt])
+  @@index([deletionRequestedAt])
 }
 
 model SavedPlace {
@@ -251,19 +259,20 @@ model Vehicle {
 }
 
 model FleetVehicle {
-  id          String         @id @default(cuid())
-  vehicleId   String
-  vehicle     Vehicle        @relation(fields: [vehicleId], references: [id])
-  label       String
-  plateNumber String         @unique
-  color       String?
-  status      String         @default("available")
-  currentCity String?
-  notes       String?
-  bookingLegs BookingLeg[]
-  blocks      VehicleBlock[]
-  createdAt   DateTime       @default(now())
-  updatedAt   DateTime       @updatedAt
+  id              String           @id @default(cuid())
+  vehicleId       String
+  vehicle         Vehicle          @relation(fields: [vehicleId], references: [id])
+  label           String
+  plateNumber     String           @unique
+  color           String?
+  status          String           @default("available")
+  currentCity     String?
+  notes           String?
+  bookingLegs     BookingLeg[]
+  blocks          VehicleBlock[]
+  tourBookingDays TourBookingDay[]
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
 
   @@index([vehicleId, status, label])
 }
@@ -280,10 +289,12 @@ model Driver {
   licenseNumber     String?
   notes             String?
   bookingLegs       BookingLeg[]
+  tourBookingDays   TourBookingDay[]
   assignmentHistory DriverTripAssignmentHistory[]
   tripReviews       TripReview[]
   presence          DriverPresence?
   latestLocations   LatestTripLocation[]
+  tourLatestLocations LatestTourLocation[]
   createdAt         DateTime                      @default(now())
   updatedAt         DateTime                      @updatedAt
 
@@ -456,6 +467,30 @@ model LatestTripLocation {
   @@index([bookingLegId, capturedAt])
 }
 
+model LatestTourLocation {
+  id                   String         @id @default(cuid())
+  tourBookingDayId     String         @unique
+  tourBookingDay       TourBookingDay @relation(fields: [tourBookingDayId], references: [id], onDelete: Cascade)
+  driverId             String
+  driver               Driver         @relation(fields: [driverId], references: [id], onDelete: Cascade)
+  latitude             Float
+  longitude            Float
+  accuracyMeters       Float?
+  headingDegrees       Float?
+  speedMetersPerSecond Float?
+  sequence             Int?
+  capturedAt           DateTime
+  receivedAt           DateTime       @default(now())
+  expiresAt            DateTime
+  sourceSessionId      String?
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+
+  @@index([driverId, receivedAt])
+  @@index([expiresAt])
+  @@index([tourBookingDayId, capturedAt])
+}
+
 model PushDevice {
   id            String                 @id @default(cuid())
   userId        String
@@ -626,7 +661,7 @@ model Coupon {
 }
 
 model Tour {
-  id              String   @id
+  id              String             @id
   title           String
   titleFr         String?
   destination     String?
@@ -638,10 +673,199 @@ model Tour {
   image           String?
   description     String
   descriptionFr   String?
-  highlights      String[] @default([])
-  highlightsFr    String[] @default([])
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  highlights      String[]           @default([])
+  highlightsFr    String[]           @default([])
+  itineraryDays   TourItineraryDay[]
+  tourBookings    TourBooking[]
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+}
+
+model TourItineraryDay {
+  id                    String              @id @default(cuid())
+  tourId                String
+  tour                  Tour                @relation(fields: [tourId], references: [id], onDelete: Cascade)
+  dayNumber             Int
+  title                 String
+  titleFr               String?
+  description           String?
+  descriptionFr         String?
+  defaultStartLabel     String?
+  defaultStartAddress   String?
+  defaultStartLatitude  Float?
+  defaultStartLongitude Float?
+  defaultEndLabel       String?
+  defaultEndAddress     String?
+  defaultEndLatitude    Float?
+  defaultEndLongitude   Float?
+  stops                 TourItineraryStop[]
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+
+  @@unique([tourId, dayNumber])
+  @@index([tourId, dayNumber])
+}
+
+model TourItineraryStop {
+  id                       String           @id @default(cuid())
+  itineraryDayId           String
+  itineraryDay             TourItineraryDay @relation(fields: [itineraryDayId], references: [id], onDelete: Cascade)
+  sortOrder                Int
+  title                    String
+  titleFr                  String?
+  description              String?
+  descriptionFr            String?
+  address                  String
+  latitude                 Float
+  longitude                Float
+  estimatedDurationMinutes Int?
+  required                 Boolean          @default(true)
+  createdAt                DateTime         @default(now())
+  updatedAt                DateTime         @updatedAt
+
+  @@unique([itineraryDayId, sortOrder])
+  @@index([itineraryDayId, sortOrder])
+}
+
+model TourBooking {
+  id                String           @id @default(cuid())
+  userId            String
+  user              User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tourId            String
+  tour              Tour             @relation(fields: [tourId], references: [id])
+  reference         String           @unique
+  status            String           @default("payment_pending")
+  paymentStatus     String           @default("pending")
+  currencyCode      String           @default("NGN")
+  priceNGN          Int
+  amountPaidNGN     Int              @default(0)
+  paymentProvider   String?
+  paymentReference  String?
+  idempotencyKey    String?
+  tourTitle         String
+  tourTitleFr       String?
+  tourDestination   String?
+  tourDestinationFr String?
+  tourCountry       String
+  tourCountryFr     String?
+  tourImage         String?
+  startDate         DateTime
+  endDate           DateTime
+  travellers        Int
+  cancelledAt       DateTime?
+  completedAt       DateTime?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  days              TourBookingDay[]
+  payments          Payment[]
+
+  @@unique([userId, idempotencyKey])
+  @@index([userId, createdAt])
+  @@index([tourId, startDate])
+  @@index([status, startDate])
+  @@index([paymentStatus, createdAt])
+}
+
+model TourBookingDay {
+  id                     String              @id @default(cuid())
+  tourBookingId          String
+  tourBooking            TourBooking         @relation(fields: [tourBookingId], references: [id], onDelete: Cascade)
+  sourceItineraryDayId   String?
+  dayNumber              Int
+  scheduledDate          DateTime
+  status                 String              @default("upcoming")
+  title                  String
+  titleFr                String?
+  description            String?
+  descriptionFr          String?
+  pickupLabel            String?
+  pickupAddress          String?
+  pickupLatitude         Float?
+  pickupLongitude        Float?
+  endLabel               String?
+  endAddress             String?
+  endLatitude            Float?
+  endLongitude           Float?
+  assignedDriverId       String?
+  assignedDriver         Driver?             @relation(fields: [assignedDriverId], references: [id], onDelete: SetNull)
+  assignedFleetVehicleId String?
+  assignedFleetVehicle   FleetVehicle?       @relation(fields: [assignedFleetVehicleId], references: [id], onDelete: SetNull)
+  assignedAt             DateTime?
+  acceptedAt             DateTime?
+  driverEnRouteAt        DateTime?
+  driverArrivedAt        DateTime?
+  startedAt              DateTime?
+  completedAt            DateTime?
+  cancelledAt            DateTime?
+  createdAt              DateTime            @default(now())
+  updatedAt              DateTime            @updatedAt
+  stops                  TourStopExecution[]
+  latestLocation         LatestTourLocation?
+  journeySnapshot        TourJourneySnapshot?
+
+  @@unique([tourBookingId, dayNumber])
+  @@index([tourBookingId, scheduledDate])
+  @@index([assignedDriverId, scheduledDate])
+  @@index([assignedFleetVehicleId, scheduledDate])
+  @@index([status, scheduledDate])
+}
+
+model TourStopExecution {
+  id                       String         @id @default(cuid())
+  tourBookingDayId         String
+  tourBookingDay           TourBookingDay @relation(fields: [tourBookingDayId], references: [id], onDelete: Cascade)
+  sourceItineraryStopId    String?
+  sortOrder                Int
+  title                    String
+  titleFr                  String?
+  description              String?
+  descriptionFr            String?
+  address                  String
+  latitude                 Float
+  longitude                Float
+  estimatedDurationMinutes Int?
+  required                 Boolean        @default(true)
+  status                   String         @default("upcoming")
+  enRouteAt                DateTime?
+  arrivedAt                DateTime?
+  completedAt              DateTime?
+  skippedAt                DateTime?
+  skipReason               String?
+  createdAt                DateTime       @default(now())
+  updatedAt                DateTime       @updatedAt
+
+  @@unique([tourBookingDayId, sortOrder])
+  @@index([tourBookingDayId, sortOrder])
+  @@index([status])
+}
+
+model TourJourneySnapshot {
+  id                       String         @id @default(cuid())
+  tourBookingDayId         String         @unique
+  tourBookingDay           TourBookingDay @relation(fields: [tourBookingDayId], references: [id], onDelete: Cascade)
+  target                   String
+  targetStopId             String?
+  originLatitude           Float
+  originLongitude          Float
+  destinationLatitude      Float
+  destinationLongitude     Float
+  encodedPolyline          String?
+  distanceMeters           Int?
+  durationSeconds          Int?
+  trafficDurationSeconds   Int?
+  distanceRemainingMeters  Int?
+  estimatedDurationSeconds Int?
+  estimatedArrivalAt       DateTime?
+  provider                 String
+  providerStatus           String         @default("ok")
+  calculatedAt             DateTime
+  expiresAt                DateTime
+  createdAt                DateTime       @default(now())
+  updatedAt                DateTime       @updatedAt
+
+  @@index([expiresAt])
+  @@index([calculatedAt])
+  @@index([target, targetStopId, calculatedAt])
 }
 
 model BorderFee {
@@ -667,7 +891,8 @@ model BorderFee {
 
 model Payment {
   id                  String             @id @default(cuid())
-  bookingId           String
+  bookingId           String?
+  tourBookingId       String?
   amountNGN           Int
   status              String
   reference           String             @unique
@@ -682,13 +907,16 @@ model Payment {
   failureCode         String?
   createdAt           DateTime           @default(now())
   updatedAt           DateTime           @updatedAt
-  booking             Booking            @relation(fields: [bookingId], references: [id])
+  booking             Booking?           @relation(fields: [bookingId], references: [id])
+  tourBooking         TourBooking?        @relation(fields: [tourBookingId], references: [id])
   resolution          PaymentResolution?
 
   @@index([bookingId, createdAt])
+  @@index([tourBookingId, createdAt])
   @@index([status, createdAt])
   @@index([provider, status, createdAt])
   @@index([bookingId, status, createdAt])
+  @@index([tourBookingId, status, createdAt])
 }
 
 model PaymentResolution {

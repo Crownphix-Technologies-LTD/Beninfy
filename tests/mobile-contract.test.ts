@@ -113,6 +113,7 @@ import {
   toTravelPreferenceDto,
   validCoordinates,
 } from '../src/lib/mobile/customerProduct'
+import { googleMobileAuthConfig } from '../src/lib/mobile/googleAuth'
 import { routes } from '../src/data/routes'
 import { vehicles } from '../src/data/vehicles'
 import { propagateCategoryRoutePrice } from '../src/lib/routePricePropagation'
@@ -137,6 +138,45 @@ import {
 import { mobileSupportConfig } from '../src/lib/mobile/supportConfig'
 import { getFcmConfig } from '../src/lib/mobile/fcm'
 import { mobileErrorFromCode } from '../src/lib/mobile/errors'
+import {
+  normalizeTourItineraryInput,
+  toTourItineraryDto,
+  tourExecutionReadiness,
+  validateTourItineraryTemplate,
+  validTourCoordinate,
+} from '../src/lib/tourItinerary'
+import {
+  TOUR_BOOKING_DAY_STATUSES,
+  TOUR_BOOKING_MAX_TRAVELLERS,
+  TOUR_BOOKING_MIN_TRAVELLERS,
+  TOUR_BOOKING_STATUSES,
+  TOUR_STOP_EXECUTION_STATUSES,
+  calculateTourPriceSnapshot,
+  generateTourBookingReference,
+  normalizeTourBookingIdempotencyKey,
+  toTourBookingDto,
+  tourPaymentFoundation,
+  validateTourStartDate,
+  validateTourTravellerCount,
+} from '../src/lib/mobile/tourBookings'
+import {
+  DRIVER_TOUR_ACTIONS,
+  allowedDriverTourActions,
+  currentTourStop,
+  driverTourWhereForView,
+  nextTourStop,
+  toDriverTourDayDto,
+  type TourDayForDto,
+} from '../src/lib/mobile/tourExecution'
+import {
+  TOUR_TRACKING_ENABLED_DAY_STATUSES,
+  tourJourneyTargetForDay,
+} from '../src/lib/mobile/tourTracking'
+import {
+  tourBookingPayable,
+  tourCouponsSupported,
+  tourPaymentState,
+} from '../src/lib/mobile/tourPayments'
 import {
   locationMatchesRouteServiceArea,
   normalizeSupportedRouteCity,
@@ -1237,6 +1277,219 @@ test('admin driver creation provisions mobile auth user and never stores plainte
   assert.equal(accountRoute.includes('temporaryPasswordReturned'), true)
   assert.equal(accountRoute.includes('linkExistingUser'), true)
   assert.equal(accountRoute.includes('canLinkExistingUserToDriver'), true)
+})
+
+test('tour itinerary template validation enforces ordering and coordinates', () => {
+  const valid = validateTourItineraryTemplate([
+    {
+      dayNumber: 2,
+      title: 'Beach day',
+      defaultStartLatitude: 6.1304,
+      defaultStartLongitude: 1.2158,
+      stops: [
+        {
+          sortOrder: 2,
+          title: 'Aného Beach',
+          address: 'Aného, Togo',
+          latitude: 6.2274,
+          longitude: 1.5919,
+        },
+        {
+          sortOrder: 1,
+          title: 'Lomé pickup',
+          address: 'Lomé, Togo',
+          latitude: 6.1725,
+          longitude: 1.2314,
+        },
+      ],
+    },
+    {
+      dayNumber: 1,
+      title: 'Arrival',
+      stops: [
+        {
+          sortOrder: 1,
+          title: 'Grand Marche',
+          address: 'Grand Marche, Lome',
+          latitude: 6.1319,
+          longitude: 1.2228,
+        },
+      ],
+    },
+  ])
+
+  assert.equal(valid.ok, true)
+  if (valid.ok) {
+    assert.deepEqual(valid.days.map((day) => day.dayNumber), [1, 2])
+    assert.deepEqual(valid.days[1].stops.map((stop) => stop.sortOrder), [1, 2])
+  }
+
+  assert.equal(validTourCoordinate(6.1725, 1.2314), true)
+  assert.equal(validTourCoordinate(91, 1.2314), false)
+})
+
+test('tour itinerary template validation rejects duplicate days and stops', () => {
+  const duplicateDay = validateTourItineraryTemplate([
+    { dayNumber: 1, title: 'Day 1', stops: [] },
+    { dayNumber: 1, title: 'Day 1 again', stops: [] },
+  ])
+  assert.equal(duplicateDay.ok, false)
+  if (!duplicateDay.ok) assert.equal(duplicateDay.code, 'DUPLICATE_DAY_NUMBER')
+
+  const duplicateStop = validateTourItineraryTemplate([
+    {
+      dayNumber: 1,
+      title: 'Day 1',
+      stops: [
+        { sortOrder: 1, title: 'A', address: 'A', latitude: 6, longitude: 2 },
+        { sortOrder: 1, title: 'B', address: 'B', latitude: 6, longitude: 2 },
+      ],
+    },
+  ])
+  assert.equal(duplicateStop.ok, false)
+  if (!duplicateStop.ok) assert.equal(duplicateStop.code, 'DUPLICATE_STOP_ORDER')
+})
+
+test('tour execution readiness is derived from configured itinerary stops', () => {
+  assert.deepEqual(tourExecutionReadiness({ itineraryDays: [] }), {
+    executionReady: false,
+    reason: 'no_itinerary_days',
+  })
+
+  assert.deepEqual(
+    tourExecutionReadiness({
+      itineraryDays: [
+        {
+          id: 'day1',
+          dayNumber: 1,
+          title: 'Day 1',
+          titleFr: null,
+          description: null,
+          descriptionFr: null,
+          defaultStartLabel: null,
+          defaultStartAddress: null,
+          defaultStartLatitude: null,
+          defaultStartLongitude: null,
+          defaultEndLabel: null,
+          defaultEndAddress: null,
+          defaultEndLatitude: null,
+          defaultEndLongitude: null,
+          stops: [],
+        },
+      ],
+    }),
+    { executionReady: false, reason: 'missing_day_stop' }
+  )
+
+  assert.deepEqual(
+    tourExecutionReadiness({
+      itineraryDays: [
+        {
+          id: 'day1',
+          dayNumber: 1,
+          title: 'Day 1',
+          titleFr: null,
+          description: null,
+          descriptionFr: null,
+          defaultStartLabel: 'Hotel',
+          defaultStartAddress: 'Cotonou',
+          defaultStartLatitude: 6.37,
+          defaultStartLongitude: 2.39,
+          defaultEndLabel: null,
+          defaultEndAddress: null,
+          defaultEndLatitude: null,
+          defaultEndLongitude: null,
+          stops: [
+            {
+              id: 'stop1',
+              sortOrder: 1,
+              title: 'Ganvie',
+              titleFr: null,
+              description: null,
+              descriptionFr: null,
+              address: 'Ganvie, Benin',
+              latitude: 6.467,
+              longitude: 2.417,
+              estimatedDurationMinutes: 120,
+              required: true,
+            },
+          ],
+        },
+      ],
+    }),
+    { executionReady: true, reason: 'ready' }
+  )
+})
+
+test('tour itinerary DTO exposes ordered customer-safe template fields', () => {
+  const normalized = normalizeTourItineraryInput([
+    {
+      dayNumber: 1,
+      title: ' Cotonou and Ouidah ',
+      titleFr: ' Cotonou et Ouidah ',
+      defaultStartLabel: ' Hotel pickup ',
+      defaultStartAddress: ' Cotonou hotel ',
+      defaultStartLatitude: 6.3703,
+      defaultStartLongitude: 2.3912,
+      stops: [
+        {
+          sortOrder: 1,
+          title: ' Ouidah ',
+          titleFr: ' Ouidah ',
+          address: ' Ouidah, Benin ',
+          latitude: 6.3667,
+          longitude: 2.0833,
+          required: false,
+        },
+      ],
+    },
+  ])
+
+  const dto = toTourItineraryDto({
+    itineraryDays: normalized.map((day) => ({
+      id: `day-${day.dayNumber}`,
+      dayNumber: day.dayNumber,
+      title: day.title,
+      titleFr: day.titleFr,
+      description: day.description,
+      descriptionFr: day.descriptionFr,
+      defaultStartLabel: day.defaultStartLabel,
+      defaultStartAddress: day.defaultStartAddress,
+      defaultStartLatitude: day.defaultStartLatitude ?? null,
+      defaultStartLongitude: day.defaultStartLongitude ?? null,
+      defaultEndLabel: day.defaultEndLabel,
+      defaultEndAddress: day.defaultEndAddress,
+      defaultEndLatitude: day.defaultEndLatitude ?? null,
+      defaultEndLongitude: day.defaultEndLongitude ?? null,
+      stops: day.stops.map((stop) => ({
+        id: `stop-${stop.sortOrder}`,
+        sortOrder: stop.sortOrder,
+        title: stop.title,
+        titleFr: stop.titleFr,
+        description: stop.description,
+        descriptionFr: stop.descriptionFr,
+        address: stop.address,
+        latitude: stop.latitude,
+        longitude: stop.longitude,
+        estimatedDurationMinutes: stop.estimatedDurationMinutes ?? null,
+        required: stop.required,
+      })),
+    })),
+  })
+
+  assert.equal(dto[0].title, 'Cotonou and Ouidah')
+  assert.equal(dto[0].defaultStart.label, 'Hotel pickup')
+  assert.equal(dto[0].stops[0].address, 'Ouidah, Benin')
+  assert.equal(dto[0].stops[0].required, false)
+})
+
+test('tour execution foundation docs separate booking foundation from later execution work', () => {
+  const docs = readFileSync('docs/mobile-api/tours.md', 'utf8')
+  assert.match(docs, /executionReady/)
+  assert.match(docs, /GET \/api\/admin\/tours\/:id\/itinerary/)
+  assert.match(docs, /POST \/api\/mobile\/v1\/customer\/tours\/:tourId\/book/)
+  assert.match(docs, /Tour payment initialization is supported/)
+  assert.match(docs, /Driver Tour execution, Customer live Tour tracking, and Tour journey intelligence are implemented/)
 })
 
 test('mobile route discovery DTO is customer safe and stable', () => {
@@ -3490,6 +3743,45 @@ test('secure account action policies are stable', () => {
   })
 })
 
+test('customer mobile Google auth is configured with backend-only mobile client IDs', () => {
+  const oldAndroid = process.env.GOOGLE_ANDROID_CLIENT_ID
+  const oldIos = process.env.GOOGLE_IOS_CLIENT_ID
+  const oldMobile = process.env.GOOGLE_MOBILE_CLIENT_IDS
+  try {
+    process.env.GOOGLE_ANDROID_CLIENT_ID = 'android-client.apps.googleusercontent.com'
+    process.env.GOOGLE_IOS_CLIENT_ID = 'ios-client.apps.googleusercontent.com'
+    process.env.GOOGLE_MOBILE_CLIENT_IDS = 'extra-client.apps.googleusercontent.com'
+    const config = googleMobileAuthConfig()
+    assert.deepEqual(config.clientIds, [
+      'android-client.apps.googleusercontent.com',
+      'ios-client.apps.googleusercontent.com',
+      'extra-client.apps.googleusercontent.com',
+    ])
+    assert.equal(config.clientIds.some((key) => key.startsWith('GOCSPX-')), false)
+  } finally {
+    process.env.GOOGLE_ANDROID_CLIENT_ID = oldAndroid
+    process.env.GOOGLE_IOS_CLIENT_ID = oldIos
+    process.env.GOOGLE_MOBILE_CLIENT_IDS = oldMobile
+  }
+})
+
+test('customer account docs expose staged deletion and avatar delete contracts', () => {
+  const source = readFileSync('docs/mobile-api/account-management.md', 'utf8')
+  assert.match(source, /DELETE \/api\/mobile\/v1\/customer\/profile\/avatar/)
+  assert.match(source, /deletion\.status = "pending"/)
+  assert.match(source, /POST \/api\/workers\/accounts\/anonymize/)
+  assert.match(source, /Bookings, trip records, payment\/accounting records/)
+})
+
+test('customer Google auth docs forbid client-side authoritative identity state', () => {
+  const source = readFileSync('docs/mobile-api/authentication.md', 'utf8')
+  assert.match(source, /POST \/api\/mobile\/v1\/auth\/google/)
+  assert.match(source, /GOOGLE_ANDROID_CLIENT_ID/)
+  assert.match(source, /GOOGLE_IOS_CLIENT_ID/)
+  assert.match(source, /Flutter must never send `userId`/)
+  assert.doesNotMatch(source, /GOOGLE_CLIENT_SECRET.*Customer mobile/)
+})
+
 test('mobile launch payment policy accepts NGN and rejects XOF', () => {
   assert.deepEqual(assertMobileLaunchCurrency('NGN'), { ok: true, currency: 'NGN' })
   const rejected = assertMobileLaunchCurrency('XOF')
@@ -4171,4 +4463,581 @@ test('fcm config stays server-side and requires all credential parts', () => {
   else process.env.FIREBASE_CLIENT_EMAIL = originalEmail
   if (originalKey === undefined) delete process.env.FIREBASE_PRIVATE_KEY
   else process.env.FIREBASE_PRIVATE_KEY = originalKey
+})
+
+test('tour booking date validation requires utc date-only and rejects past dates', () => {
+  const now = new Date(Date.UTC(2026, 8, 12, 12))
+
+  assert.deepEqual(validateTourStartDate('2026-09-12', now), {
+    ok: true,
+    date: new Date(Date.UTC(2026, 8, 12)),
+  })
+
+  assert.deepEqual(validateTourStartDate('2026-09-11', now), {
+    ok: false,
+    code: 'TOUR_BOOKING_DATE_INVALID',
+  })
+  assert.deepEqual(validateTourStartDate('2026-02-30', now), {
+    ok: false,
+    code: 'TOUR_BOOKING_DATE_INVALID',
+  })
+  assert.deepEqual(validateTourStartDate('2026-09-12T00:00:00Z', now), {
+    ok: false,
+    code: 'TOUR_BOOKING_DATE_INVALID',
+  })
+})
+
+test('tour booking traveller validation is bounded but does not invent vehicle capacity', () => {
+  assert.deepEqual(validateTourTravellerCount(TOUR_BOOKING_MIN_TRAVELLERS), {
+    ok: true,
+    travellers: TOUR_BOOKING_MIN_TRAVELLERS,
+  })
+  assert.deepEqual(validateTourTravellerCount(TOUR_BOOKING_MAX_TRAVELLERS), {
+    ok: true,
+    travellers: TOUR_BOOKING_MAX_TRAVELLERS,
+  })
+  assert.deepEqual(validateTourTravellerCount(0), {
+    ok: false,
+    code: 'TOUR_TRAVELLER_COUNT_INVALID',
+  })
+  assert.deepEqual(validateTourTravellerCount(31), {
+    ok: false,
+    code: 'TOUR_TRAVELLER_COUNT_INVALID',
+  })
+})
+
+test('tour booking idempotency key is optional and constrained for mobile retries', () => {
+  assert.deepEqual(normalizeTourBookingIdempotencyKey(undefined), { ok: true, key: null })
+  assert.deepEqual(normalizeTourBookingIdempotencyKey('request-123'), {
+    ok: true,
+    key: 'request-123',
+  })
+  assert.deepEqual(normalizeTourBookingIdempotencyKey('bad key with spaces'), {
+    ok: false,
+    code: 'VALIDATION_ERROR',
+  })
+})
+
+test('tour booking lifecycle constants expose the phase 2 source of truth', () => {
+  assert.deepEqual(TOUR_BOOKING_STATUSES, [
+    'payment_pending',
+    'confirmed',
+    'active',
+    'completed',
+    'cancelled',
+  ])
+  assert.deepEqual(TOUR_BOOKING_DAY_STATUSES, [
+    'upcoming',
+    'assigned',
+    'driver_en_route',
+    'driver_arrived',
+    'in_progress',
+    'completed',
+    'cancelled',
+  ])
+  assert.deepEqual(TOUR_STOP_EXECUTION_STATUSES, [
+    'upcoming',
+    'en_route',
+    'arrived',
+    'completed',
+    'skipped',
+  ])
+})
+
+test('tour booking references are customer-safe and human-readable', () => {
+  assert.match(generateTourBookingReference(), /^BFYT-[0-9A-F]{10}$/)
+})
+
+test('tour booking price snapshot uses the existing catalogue source only', () => {
+  assert.deepEqual(calculateTourPriceSnapshot({ startingFromNGN: 185000 }), {
+    currencyCode: 'NGN',
+    priceNGN: 185000,
+    pricingBasis: 'tour.startingFromNGN',
+  })
+})
+
+test('tour booking dto exposes snapshot days, stops, payment state and progress', () => {
+  const createdAt = new Date(Date.UTC(2026, 8, 12))
+  const dto = toTourBookingDto({
+    id: 'tb1',
+    userId: 'user1',
+    tourId: 'ganvie',
+    reference: 'BFYT-ABCDEF1234',
+    status: 'payment_pending',
+    paymentStatus: 'pending',
+    currencyCode: 'NGN',
+    priceNGN: 120000,
+    amountPaidNGN: 0,
+    paymentProvider: null,
+    paymentReference: null,
+    tourTitle: 'Ganvie Day Tour',
+    tourTitleFr: 'Tour de Ganvie',
+    tourDestination: 'Ganvie',
+    tourDestinationFr: 'Ganvie',
+    tourCountry: 'Benin Republic',
+    tourCountryFr: 'Benin',
+    tourImage: '/images/tours/ganvie.jpg',
+    startDate: createdAt,
+    endDate: createdAt,
+    travellers: 2,
+    cancelledAt: null,
+    completedAt: null,
+    createdAt,
+    updatedAt: createdAt,
+    days: [
+      {
+        id: 'day1',
+        tourBookingId: 'tb1',
+        sourceItineraryDayId: 'template-day1',
+        dayNumber: 1,
+        scheduledDate: createdAt,
+        status: 'upcoming',
+        title: 'Lagoon arrival',
+        titleFr: null,
+        description: 'Start the day',
+        descriptionFr: null,
+        pickupLabel: 'Hotel pickup',
+        pickupAddress: 'Cotonou hotel',
+        pickupLatitude: 6.3703,
+        pickupLongitude: 2.3912,
+        endLabel: 'Hotel dropoff',
+        endAddress: 'Cotonou hotel',
+        endLatitude: 6.3703,
+        endLongitude: 2.3912,
+        assignedDriverId: null,
+        assignedFleetVehicleId: null,
+        assignedAt: null,
+        acceptedAt: null,
+        driverEnRouteAt: null,
+        driverArrivedAt: null,
+        startedAt: null,
+        completedAt: null,
+        cancelledAt: null,
+        stops: [
+          {
+            id: 'stop1',
+            tourBookingDayId: 'day1',
+            sourceItineraryStopId: 'template-stop1',
+            sortOrder: 1,
+            title: 'Ganvie pier',
+            titleFr: null,
+            description: null,
+            descriptionFr: null,
+            address: 'Ganvie, Benin',
+            latitude: 6.4667,
+            longitude: 2.4167,
+            estimatedDurationMinutes: 90,
+            required: true,
+            status: 'upcoming',
+            enRouteAt: null,
+            arrivedAt: null,
+            completedAt: null,
+            skippedAt: null,
+            skipReason: null,
+          },
+        ],
+      },
+    ],
+  })
+
+  assert.equal(dto.reference, 'BFYT-ABCDEF1234')
+  assert.equal(dto.price.minorValue, 12000000)
+  assert.equal(dto.payment.canInitialize, true)
+  assert.equal(dto.progress.currentDay, 1)
+  assert.equal(dto.days[0]?.label, 'Day 1 of 1')
+  assert.equal(dto.days[0]?.stops[0]?.stopNumber, 1)
+  assert.deepEqual(dto.days[0]?.pickup.coordinates, { latitude: 6.3703, longitude: 2.3912 })
+})
+
+test('tour payment foundation documents explicit tour-owned payment support', () => {
+  assert.deepEqual(tourPaymentFoundation(), {
+    externalPaymentInitializationImplemented: true,
+    reason:
+      'Tour payments use explicit Payment.tourBookingId ownership and the shared Paystack/PayOnUs provider settlement path.',
+    couponSupport: false,
+  })
+})
+
+test('tour booking endpoints require customer ownership and do not expose provider secrets', () => {
+  const createSource = readFileSync(
+    'src/app/api/mobile/v1/customer/tours/[tourId]/book/route.ts',
+    'utf8'
+  )
+  const listSource = readFileSync('src/app/api/mobile/v1/customer/tour-bookings/route.ts', 'utf8')
+  const detailSource = readFileSync(
+    'src/app/api/mobile/v1/customer/tour-bookings/[tourBookingId]/route.ts',
+    'utf8'
+  )
+  const paymentSource = readFileSync(
+    'src/app/api/mobile/v1/customer/tour-bookings/[tourBookingId]/payment/route.ts',
+    'utf8'
+  )
+  const serviceSource = readFileSync('src/lib/mobile/tourBookings.ts', 'utf8')
+
+  assert.match(createSource, /requireMobilePrincipal\(req,\s*'CUSTOMER'\)/)
+  assert.match(createSource, /requireCompletedCustomerOnboarding/)
+  assert.match(createSource, /scope:\s*'mobile-tour-booking-create'/)
+  assert.match(createSource, /idempotencyKey/)
+  assert.match(createSource, /result\.idempotent\s*\?\s*200\s*:\s*201/)
+  assert.match(listSource, /listCustomerTourBookings\(guard\.principal\)/)
+  assert.match(detailSource, /getCustomerTourBooking/)
+  assert.match(paymentSource, /initiateMobileTourBookingPayment/)
+  assert.doesNotMatch(paymentSource, /disabled/i)
+  assert.match(paymentSource, /getMobileTourBookingPayment\(\{\s*principal:\s*guard\.principal/)
+  assert.match(serviceSource, /where:\s*\{\s*id:\s*input\.tourBookingId,\s*userId:\s*input\.principal\.userId\s*\}/)
+  assert.match(serviceSource, /idempotencyKey:\s*idempotency\.key/)
+  assert.match(serviceSource, /pricingBasis:\s*'existing-idempotency-key'/)
+  assert.doesNotMatch(createSource + listSource + detailSource + paymentSource + serviceSource, /PAYSTACK_SECRET|PAYONUS|GOOGLE_/)
+})
+
+test('tour booking source snapshots itinerary and rejects unready catalogue tours', () => {
+  const source = readFileSync('src/lib/mobile/tourBookings.ts', 'utf8')
+
+  assert.match(source, /tourExecutionReadiness\(tour\)/)
+  assert.match(source, /code:\s*'TOUR_NOT_EXECUTION_READY'/)
+  assert.match(source, /sourceItineraryDayId:\s*day\.id/)
+  assert.match(source, /sourceItineraryStopId:\s*stop\.id/)
+  assert.match(source, /tourTitle:\s*tour\.title/)
+  assert.match(source, /tourImage:\s*tour\.image/)
+})
+
+test('tour booking migration links customer, source tour, assigned driver and assigned fleet vehicle', () => {
+  const migration = readFileSync(
+    'prisma/migrations/20260912110000_tour_bookings/migration.sql',
+    'utf8'
+  )
+
+  assert.match(migration, /CREATE TABLE "TourBooking"/)
+  assert.match(migration, /CREATE TABLE "TourBookingDay"/)
+  assert.match(migration, /CREATE TABLE "TourStopExecution"/)
+  assert.match(migration, /"idempotencyKey" TEXT/)
+  assert.match(migration, /"TourBooking_userId_idempotencyKey_key"/)
+  assert.match(migration, /"TourBooking_userId_fkey"/)
+  assert.match(migration, /"TourBooking_tourId_fkey"/)
+  assert.match(migration, /"TourBookingDay_assignedDriverId_fkey"/)
+  assert.match(migration, /"TourBookingDay_assignedFleetVehicleId_fkey"/)
+})
+
+function tourExecutionDay(overrides: Partial<TourDayForDto> = {}): TourDayForDto {
+  const baseDate = new Date(Date.UTC(2026, 9, 15))
+  return {
+    id: 'day1',
+    tourBookingId: 'tb1',
+    sourceItineraryDayId: 'template-day1',
+    dayNumber: 1,
+    scheduledDate: baseDate,
+    status: 'assigned',
+    title: 'Ouidah day',
+    titleFr: null,
+    description: null,
+    descriptionFr: null,
+    pickupLabel: 'Hotel pickup',
+    pickupAddress: 'Cotonou hotel',
+    pickupLatitude: 6.3703,
+    pickupLongitude: 2.3912,
+    endLabel: 'Hotel dropoff',
+    endAddress: 'Cotonou hotel',
+    endLatitude: 6.3703,
+    endLongitude: 2.3912,
+    assignedDriverId: 'driver1',
+    assignedFleetVehicleId: 'fleet1',
+    assignedAt: baseDate,
+    acceptedAt: null,
+    driverEnRouteAt: null,
+    driverArrivedAt: null,
+    startedAt: null,
+    completedAt: null,
+    cancelledAt: null,
+    createdAt: baseDate,
+    updatedAt: baseDate,
+    assignedDriver: {
+      id: 'driver1',
+      name: 'Driver One',
+      phone: '+22951019134',
+      email: 'driver@example.com',
+      status: 'available',
+    },
+    assignedFleetVehicle: {
+      id: 'fleet1',
+      label: 'Toyota Sienna',
+      plateNumber: 'ABC-123',
+      color: 'Black',
+      status: 'available',
+      currentCity: 'Cotonou',
+    },
+    stops: [
+      {
+        id: 'stop1',
+        tourBookingDayId: 'day1',
+        sourceItineraryStopId: 'template-stop1',
+        sortOrder: 1,
+        title: 'Ouidah Museum',
+        titleFr: null,
+        description: null,
+        descriptionFr: null,
+        address: 'Ouidah, Benin',
+        latitude: 6.3667,
+        longitude: 2.0833,
+        estimatedDurationMinutes: 90,
+        required: true,
+        status: 'upcoming',
+        enRouteAt: null,
+        arrivedAt: null,
+        completedAt: null,
+        skippedAt: null,
+        skipReason: null,
+      },
+      {
+        id: 'stop2',
+        tourBookingDayId: 'day1',
+        sourceItineraryStopId: 'template-stop2',
+        sortOrder: 2,
+        title: 'Python Temple',
+        titleFr: null,
+        description: null,
+        descriptionFr: null,
+        address: 'Ouidah, Benin',
+        latitude: 6.363,
+        longitude: 2.085,
+        estimatedDurationMinutes: 45,
+        required: true,
+        status: 'upcoming',
+        enRouteAt: null,
+        arrivedAt: null,
+        completedAt: null,
+        skippedAt: null,
+        skipReason: null,
+      },
+    ],
+    tourBooking: {
+      id: 'tb1',
+      reference: 'BFYT-ABCDEF1234',
+      status: 'confirmed',
+      paymentStatus: 'paid',
+      tourTitle: 'Ouidah Heritage Tour',
+      tourTitleFr: null,
+      tourDestination: 'Ouidah',
+      tourDestinationFr: null,
+      tourCountry: 'Benin Republic',
+      tourCountryFr: null,
+      tourImage: '/images/tours/ouidah.jpg',
+      startDate: baseDate,
+      endDate: new Date(Date.UTC(2026, 9, 17)),
+      travellers: 3,
+      priceNGN: 300000,
+      currencyCode: 'NGN',
+      user: { id: 'user1', name: 'Customer One', email: 'customer@example.com', phone: '+22951019134' },
+      days: [
+        { id: 'day1', dayNumber: 1, status: 'assigned' },
+        { id: 'day2', dayNumber: 2, status: 'upcoming' },
+        { id: 'day3', dayNumber: 3, status: 'upcoming' },
+      ],
+    },
+    ...overrides,
+  }
+}
+
+test('driver tour allowed actions require acceptance and payment-approved execution', () => {
+  assert.deepEqual(allowedDriverTourActions(tourExecutionDay()), ['accept', 'decline'])
+  assert.deepEqual(allowedDriverTourActions(tourExecutionDay({ acceptedAt: new Date() })), [
+    'start_en_route',
+  ])
+  assert.deepEqual(
+    allowedDriverTourActions(
+      tourExecutionDay({
+        acceptedAt: new Date(),
+        tourBooking: {
+          ...tourExecutionDay().tourBooking,
+          status: 'payment_pending',
+          paymentStatus: 'pending',
+        },
+      })
+    ),
+    []
+  )
+})
+
+test('driver tour dto exposes day stop progress vehicle traveller count and allowed actions', () => {
+  const dto = toDriverTourDayDto(tourExecutionDay({ acceptedAt: new Date() }))
+
+  assert.equal(dto.reference, 'BFYT-ABCDEF1234')
+  assert.equal(dto.day.label, 'Day 1 of 3')
+  assert.equal(dto.group.travellerCount, 3)
+  assert.equal(dto.vehicle?.plateNumber, 'ABC-123')
+  assert.equal(dto.day.pickup.coordinates?.latitude, 6.3703)
+  assert.equal(dto.currentStop?.id, 'stop1')
+  assert.equal(dto.nextStop?.id, 'stop2')
+  assert.equal(dto.progress.currentStopNumber, 1)
+  assert.deepEqual(dto.allowedActions, ['start_en_route'])
+})
+
+test('driver tour current and next stop are server-derived from ordered execution rows', () => {
+  const day = tourExecutionDay({
+    status: 'in_progress',
+    stops: [
+      { ...tourExecutionDay().stops[1], status: 'upcoming' },
+      { ...tourExecutionDay().stops[0], status: 'completed' },
+    ],
+  })
+
+  assert.equal(currentTourStop(day.stops)?.id, 'stop2')
+  assert.equal(nextTourStop(day.stops, 'stop1')?.id, 'stop2')
+  assert.deepEqual(allowedDriverTourActions(day), ['arrive_stop'])
+})
+
+test('driver tour action and assignment endpoints are scoped and transactional', () => {
+  const listSource = readFileSync('src/app/api/mobile/v1/driver/tours/route.ts', 'utf8')
+  const detailSource = readFileSync(
+    'src/app/api/mobile/v1/driver/tours/[tourBookingDayId]/route.ts',
+    'utf8'
+  )
+  const actionSource = readFileSync(
+    'src/app/api/mobile/v1/driver/tours/[tourBookingDayId]/actions/route.ts',
+    'utf8'
+  )
+  const serviceSource = readFileSync('src/lib/mobile/tourExecution.ts', 'utf8')
+  const adminSource = readFileSync(
+    'src/app/api/admin/tour-bookings/days/[dayId]/route.ts',
+    'utf8'
+  )
+
+  assert.match(listSource, /requireMobilePrincipal\(req,\s*'DRIVER'\)/)
+  assert.match(detailSource, /getDriverTourDay\(guard\.principal/)
+  assert.match(actionSource, /scope:\s*'mobile-driver-tour-action'/)
+  assert.match(serviceSource, /assignedDriverId !== principal\.driverId/)
+  assert.match(serviceSource, /canDriverReceiveNewAssignment/)
+  assert.match(serviceSource, /canDriverExecuteAssignedTrip/)
+  assert.match(serviceSource, /bookingLeg\.findFirst/)
+  assert.match(serviceSource, /NON_BLOCKING_LEG_STATUSES/)
+  assert.match(serviceSource, /paymentStatus[\s\S]*paid/)
+  assert.match(serviceSource, /Prisma\.TransactionIsolationLevel\.Serializable/)
+  assert.match(adminSource, /requireAdminPermission\('tours'\)/)
+})
+
+test('driver tour lifecycle contract intentionally excludes chat and skip stop', () => {
+  assert.deepEqual(DRIVER_TOUR_ACTIONS, [
+    'accept',
+    'decline',
+    'start_en_route',
+    'arrive',
+    'start_day',
+    'arrive_stop',
+    'complete_stop',
+    'complete_day',
+  ])
+  assert.equal(DRIVER_TOUR_ACTIONS.includes('skip_stop' as never), false)
+  const docs = readFileSync('docs/mobile-api/tours.md', 'utf8')
+  assert.match(docs, /Tour Live Tracking V1/)
+  assert.match(docs, /Tour chat is unsupported in v1/)
+})
+
+test('driver tour view filters are driver scoped', () => {
+  assert.deepEqual(driverTourWhereForView('driver1', 'upcoming'), {
+    assignedDriverId: 'driver1',
+    status: { in: ['assigned'] },
+  })
+  assert.deepEqual(driverTourWhereForView('driver1', 'active'), {
+    assignedDriverId: 'driver1',
+    status: { in: ['driver_en_route', 'driver_arrived', 'in_progress'] },
+  })
+})
+
+test('tour payment ownership is explicit and isolated from ride payments', () => {
+  const schema = readFileSync('prisma/schema.prisma', 'utf8')
+  const migration = readFileSync(
+    'prisma/migrations/20260912130000_tour_payment_tracking/migration.sql',
+    'utf8'
+  )
+  const paymentRoute = readFileSync(
+    'src/app/api/mobile/v1/customer/tour-bookings/[tourBookingId]/payment/route.ts',
+    'utf8'
+  )
+  const verifyRoute = readFileSync(
+    'src/app/api/mobile/v1/customer/tour-bookings/[tourBookingId]/payment/verify/route.ts',
+    'utf8'
+  )
+  const tourPayments = readFileSync('src/lib/mobile/tourPayments.ts', 'utf8')
+
+  assert.match(schema, /tourBookingId\s+String\?/)
+  assert.match(schema, /tourBooking\s+TourBooking\?/)
+  assert.match(migration, /Payment_exactly_one_owner_check/)
+  assert.match(migration, /"bookingId" IS NOT NULL AND "tourBookingId" IS NULL/)
+  assert.match(migration, /"bookingId" IS NULL AND "tourBookingId" IS NOT NULL/)
+  assert.match(paymentRoute, /initiateMobileTourBookingPayment/)
+  assert.match(verifyRoute, /verifyMobileTourBookingPayment/)
+  assert.match(tourPayments, /tourBookingId:\s*booking\.id/)
+  assert.match(tourPayments, /initializePaystackTransaction/)
+  assert.match(tourPayments, /accessCode/)
+  assert.match(tourPayments, /payOnUsTourCheckoutConfig/)
+  assert.equal(tourCouponsSupported(), false)
+  assert.equal(tourBookingPayable({ status: 'payment_pending', paymentStatus: 'pending', priceNGN: 1 }), true)
+  assert.equal(tourBookingPayable({ status: 'confirmed', paymentStatus: 'paid', priceNGN: 1 }), false)
+  assert.equal(tourPaymentState({ bookingStatus: 'payment_pending', paymentStatus: 'pending' }), 'pending')
+  assert.equal(tourPaymentState({ bookingStatus: 'confirmed', paymentStatus: 'paid' }), 'paid')
+})
+
+test('tour live tracking stores day-scoped location and uses Google route cache snapshots', () => {
+  const schema = readFileSync('prisma/schema.prisma', 'utf8')
+  const driverLocationRoute = readFileSync(
+    'src/app/api/mobile/v1/driver/tours/[tourBookingDayId]/location/route.ts',
+    'utf8'
+  )
+  const customerTrackingRoute = readFileSync(
+    'src/app/api/mobile/v1/customer/tour-bookings/[tourBookingId]/tracking/route.ts',
+    'utf8'
+  )
+  const tracking = readFileSync('src/lib/mobile/tourTracking.ts', 'utf8')
+
+  assert.match(schema, /model LatestTourLocation/)
+  assert.match(schema, /model TourJourneySnapshot/)
+  assert.match(schema, /targetStopId\s+String\?/)
+  assert.deepEqual(TOUR_TRACKING_ENABLED_DAY_STATUSES, [
+    'driver_en_route',
+    'driver_arrived',
+    'in_progress',
+  ])
+  assert.match(driverLocationRoute, /requireMobilePrincipal\(req,\s*'DRIVER'\)/)
+  assert.match(driverLocationRoute, /mobile-driver-tour-location/)
+  assert.match(customerTrackingRoute, /requireMobilePrincipal\(req,\s*'CUSTOMER'\)/)
+  assert.match(customerTrackingRoute, /mobile-customer-tour-tracking/)
+  assert.match(tracking, /shouldReplaceLocation/)
+  assert.match(tracking, /computeGoogleRoute/)
+  assert.match(tracking, /JOURNEY_ROUTE_MOVEMENT_THRESHOLD_METERS/)
+  assert.match(tracking, /targetStopId/)
+})
+
+test('tour journey target is lifecycle authoritative', () => {
+  const headingToPickup = tourExecutionDay({ status: 'driver_en_route' })
+  const atPickup = tourExecutionDay({ status: 'driver_arrived' })
+  const inProgress = tourExecutionDay({ status: 'in_progress' })
+  const completed = tourExecutionDay({ status: 'completed' })
+
+  assert.deepEqual(tourJourneyTargetForDay(headingToPickup), {
+    type: 'pickup',
+    id: 'day1',
+    coordinates: { latitude: 6.3703, longitude: 2.3912 },
+  })
+  assert.equal(tourJourneyTargetForDay(atPickup), null)
+  assert.deepEqual(tourJourneyTargetForDay(inProgress), {
+    type: 'stop',
+    id: 'stop1',
+    coordinates: { latitude: 6.3667, longitude: 2.0833 },
+  })
+  assert.equal(tourJourneyTargetForDay(completed), null)
+})
+
+test('tour cancellation is unpaid-customer only and keeps refund policy separate', () => {
+  const route = readFileSync(
+    'src/app/api/mobile/v1/customer/tour-bookings/[tourBookingId]/cancel/route.ts',
+    'utf8'
+  )
+  const service = readFileSync('src/lib/mobile/tourBookings.ts', 'utf8')
+  const docs = readFileSync('docs/mobile-api/tours.md', 'utf8')
+
+  assert.match(route, /requireMobilePrincipal\(req,\s*'CUSTOMER'\)/)
+  assert.match(route, /mobile-tour-cancel/)
+  assert.match(service, /status !== 'payment_pending'/)
+  assert.match(service, /paymentStatus !== 'pending'/)
+  assert.match(service, /TOUR_ACTION_NOT_ALLOWED/)
+  assert.match(docs, /refund policy/i)
 })
