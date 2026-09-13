@@ -524,13 +524,15 @@ export async function applyDriverTourAction({
   const now = new Date()
   const result = await prisma.$transaction(
     async (tx) => {
+      let applied = true
       if (action === 'accept') {
-        await tx.tourBookingDay.updateMany({
+        const update = await tx.tourBookingDay.updateMany({
           where: { id: day.id, assignedDriverId: principal.driverId, status: 'assigned', acceptedAt: null },
           data: { acceptedAt: now },
         })
+        applied = update.count > 0
       } else if (action === 'decline') {
-        await tx.tourBookingDay.updateMany({
+        const update = await tx.tourBookingDay.updateMany({
           where: { id: day.id, assignedDriverId: principal.driverId, status: 'assigned' },
           data: {
             assignedDriverId: null,
@@ -540,21 +542,26 @@ export async function applyDriverTourAction({
             status: 'upcoming',
           },
         })
+        applied = update.count > 0
       } else if (action === 'start_en_route') {
-        await tx.tourBookingDay.updateMany({
+        const update = await tx.tourBookingDay.updateMany({
           where: { id: day.id, assignedDriverId: principal.driverId, status: 'assigned', acceptedAt: { not: null } },
           data: { status: 'driver_en_route', driverEnRouteAt: now },
         })
+        applied = update.count > 0
       } else if (action === 'arrive') {
-        await tx.tourBookingDay.updateMany({
+        const update = await tx.tourBookingDay.updateMany({
           where: { id: day.id, assignedDriverId: principal.driverId, status: 'driver_en_route' },
           data: { status: 'driver_arrived', driverArrivedAt: now },
         })
+        applied = update.count > 0
       } else if (action === 'start_day') {
-        await tx.tourBookingDay.updateMany({
+        const update = await tx.tourBookingDay.updateMany({
           where: { id: day.id, assignedDriverId: principal.driverId, status: 'driver_arrived' },
           data: { status: 'in_progress', startedAt: now },
         })
+        applied = update.count > 0
+        if (!applied) return null
         await tx.tourBooking.updateMany({
           where: { id: day.tourBookingId, status: 'confirmed' },
           data: { status: 'active' },
@@ -567,15 +574,18 @@ export async function applyDriverTourAction({
           })
         }
       } else if (action === 'arrive_stop' && stop) {
-        await tx.tourStopExecution.updateMany({
+        const update = await tx.tourStopExecution.updateMany({
           where: { id: stop.id, tourBookingDayId: day.id, status: { in: ['upcoming', 'en_route'] } },
           data: { status: 'arrived', arrivedAt: now },
         })
+        applied = update.count > 0
       } else if (action === 'complete_stop' && stop) {
-        await tx.tourStopExecution.updateMany({
+        const update = await tx.tourStopExecution.updateMany({
           where: { id: stop.id, tourBookingDayId: day.id, status: 'arrived' },
           data: { status: 'completed', completedAt: now },
         })
+        applied = update.count > 0
+        if (!applied) return null
         const next = nextTourStop(day.stops, stop.id)
         if (next) {
           await tx.tourStopExecution.updateMany({
@@ -584,17 +594,21 @@ export async function applyDriverTourAction({
           })
         }
       } else if (action === 'complete_day') {
-        await tx.tourBookingDay.updateMany({
+        const update = await tx.tourBookingDay.updateMany({
           where: { id: day.id, assignedDriverId: principal.driverId, status: 'in_progress' },
           data: { status: 'completed', completedAt: now },
         })
+        applied = update.count > 0
+        if (!applied) return null
         await maybeCompleteTourBooking(tx, day.tourBookingId, now)
       }
 
+      if (!applied) return null
       return tx.tourBookingDay.findUniqueOrThrow({ where: { id: day.id }, include: tourDayInclude })
     },
     { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
   )
+  if (!result) return { ok: false as const, code: 'TOUR_ACTION_NOT_ALLOWED' as MobileErrorCode }
 
   await writeAuditLog({
     session: {

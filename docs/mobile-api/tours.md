@@ -1,5 +1,7 @@
 # Tours
 
+Frozen Tour v1 execution, payment, tracking, cancellation, and error contracts are documented in `docs/mobile-api/tour-v1-contract.md`.
+
 Implemented endpoints:
 
 - `GET /api/mobile/v1/tours`

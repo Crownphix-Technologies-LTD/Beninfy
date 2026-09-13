@@ -1,7 +1,12 @@
 import { z } from 'zod'
 import { checkRateLimit, requestIp } from '@/lib/rateLimit'
 import { requireMobilePrincipal } from '@/lib/mobile/auth'
-import { mobileError, mobileErrorFromCode, mobileValidationError } from '@/lib/mobile/errors'
+import {
+  mobileError,
+  mobileErrorFromCode,
+  mobileValidationError,
+  type MobileErrorCode,
+} from '@/lib/mobile/errors'
 import { publishTourDriverLocation } from '@/lib/mobile/tourTracking'
 
 export const runtime = 'nodejs'
@@ -47,7 +52,14 @@ export async function POST(req: Request, { params }: DriverTourLocationContext) 
     tourBookingDayId,
     input: parsed.data,
   })
-  if (!result.ok) return mobileErrorFromCode(result.code, 'message' in result ? result.message : undefined)
+  if (!result.ok) {
+    const code: MobileErrorCode =
+      'code' in result && result.code ? result.code : 'INTERNAL_ERROR'
+    return mobileErrorFromCode(
+      code,
+      'message' in result ? result.message : undefined
+    )
+  }
 
   return Response.json({
     ok: true,
