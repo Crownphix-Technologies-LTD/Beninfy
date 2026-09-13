@@ -377,6 +377,11 @@ export async function getCustomerTourTracking({
   const journeySnapshot = await getOrRefreshTourJourneyIntelligence({
     tourBookingDayId: currentDay.id,
   }).catch(() => currentDay.journeySnapshot)
+  const journeyIntelligence = toJourneyIntelligenceDto(journeySnapshot ?? null)
+  const currentDayDto = toTourBookingDayDto(
+    { ...currentDay, journeySnapshot: journeySnapshot ?? null },
+    booking.days.length
+  )
   const currentStop = currentTourStop(currentDay.stops)
   const nextStop = nextTourStop(currentDay.stops, currentStop?.id)
   const trackingStatus = tourTrackingStatusFor({
@@ -393,7 +398,13 @@ export async function getCustomerTourTracking({
       reference: booking.reference,
       status: booking.status,
       paymentStatus: booking.paymentStatus,
-      currentDay: toTourBookingDayDto(currentDay, booking.days.length),
+      currentDay: {
+        ...currentDayDto,
+        tracking: {
+          ...currentDayDto.tracking,
+          journey: journeyIntelligence,
+        },
+      },
       dayNumber: currentDay.dayNumber,
       totalDays: booking.days.length,
       currentStop: currentStop
@@ -427,7 +438,7 @@ export async function getCustomerTourTracking({
       trackingStatus,
       locationFresh: trackingStatus === 'live',
       latestLocation: toLocationDto(currentDay.latestLocation ?? null),
-      journeyIntelligence: toJourneyIntelligenceDto(journeySnapshot ?? null),
+      journeyIntelligence,
       routeTarget: tourJourneyTargetForDay(currentDay),
       updatedAt: iso(currentDay.updatedAt),
     },

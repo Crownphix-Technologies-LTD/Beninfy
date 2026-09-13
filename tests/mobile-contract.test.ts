@@ -4096,6 +4096,7 @@ test('journey intelligence DTO remains optional and marks stale cache', () => {
   assert.equal(dto?.target, 'pickup')
   assert.equal(dto?.distanceMeters, 5000)
   assert.equal(dto?.durationSeconds, 1200)
+  assert.equal(dto?.routeAvailable, true)
   assert.equal(dto?.encodedPolyline, 'poly')
   assert.equal(dto?.routePolyline, 'poly')
   assert.equal(dto?.distanceRemainingMeters, 5000)
@@ -4103,6 +4104,22 @@ test('journey intelligence DTO remains optional and marks stale cache', () => {
   assert.equal(dto?.freshness, 'stale')
   assert.equal(JSON.stringify(dto).includes('GOOGLE_ROUTES_API_KEY'), false)
   assert.equal(JSON.stringify(dto).includes('test-key'), false)
+
+  const stopDto = toJourneyIntelligenceDto({
+    target: 'stop',
+    targetStopId: 'stop1',
+    distanceMeters: 11200,
+    encodedPolyline: 'stop-poly',
+    distanceRemainingMeters: 11200,
+    estimatedArrivalAt: new Date(Date.now() + 10_000),
+    estimatedDurationSeconds: 1080,
+    calculatedAt: new Date(),
+    expiresAt: new Date(Date.now() + 60_000),
+  })
+  assert.equal(stopDto?.target, 'stop')
+  assert.equal(stopDto?.targetStopId, 'stop1')
+  assert.equal(stopDto?.routeAvailable, true)
+  assert.equal(stopDto?.routePolyline, 'stop-poly')
 })
 
 test('customer journey target follows trip lifecycle exactly', () => {
@@ -5168,6 +5185,75 @@ test('tour journey target invalidates across pickup stop progression and day com
   assert.match(tracking, /snapshot\.targetStopId/)
   assert.match(tracking, /originLatitude/)
   assert.match(tracking, /calculatedAt/)
+})
+
+test('tour journey serialization preserves pickup and stop targets consistently', () => {
+  const prePickupTarget = tourJourneyTargetForDay(tourExecutionDay({ status: 'driver_en_route' }))
+  const stopOneTarget = tourJourneyTargetForDay(
+    tourExecutionDay({
+      status: 'in_progress',
+      stops: [
+        { ...tourExecutionDay().stops[0], status: 'en_route' },
+        { ...tourExecutionDay().stops[1], status: 'upcoming' },
+      ],
+    })
+  )
+  const stopTwoTarget = tourJourneyTargetForDay(
+    tourExecutionDay({
+      status: 'in_progress',
+      stops: [
+        { ...tourExecutionDay().stops[0], status: 'completed' },
+        { ...tourExecutionDay().stops[1], status: 'en_route' },
+      ],
+    })
+  )
+
+  const prePickupJourney = toJourneyIntelligenceDto({
+    target: 'pickup',
+    distanceMeters: 5000,
+    encodedPolyline: 'pickup-poly',
+    distanceRemainingMeters: 5000,
+    estimatedArrivalAt: new Date(Date.now() + 60_000),
+    estimatedDurationSeconds: 600,
+    calculatedAt: new Date(),
+    expiresAt: new Date(Date.now() + 60_000),
+  })
+  const stopOneJourney = toJourneyIntelligenceDto({
+    target: 'stop',
+    targetStopId: 'stop1',
+    distanceMeters: 11200,
+    encodedPolyline: 'stop-one-poly',
+    distanceRemainingMeters: 11200,
+    estimatedArrivalAt: new Date(Date.now() + 60_000),
+    estimatedDurationSeconds: 1080,
+    calculatedAt: new Date(),
+    expiresAt: new Date(Date.now() + 60_000),
+  })
+  const stopTwoJourney = toJourneyIntelligenceDto({
+    target: 'stop',
+    targetStopId: 'stop2',
+    distanceMeters: 7000,
+    encodedPolyline: 'stop-two-poly',
+    distanceRemainingMeters: 7000,
+    estimatedArrivalAt: new Date(Date.now() + 60_000),
+    estimatedDurationSeconds: 720,
+    calculatedAt: new Date(),
+    expiresAt: new Date(Date.now() + 60_000),
+  })
+
+  assert.equal(prePickupTarget?.type, 'pickup')
+  assert.equal(prePickupJourney?.target, prePickupTarget?.type)
+  assert.equal(stopOneTarget?.type, 'stop')
+  assert.equal(stopOneJourney?.target, stopOneTarget?.type)
+  assert.equal(stopOneJourney?.targetStopId, stopOneTarget?.id)
+  assert.equal(stopTwoTarget?.id, 'stop2')
+  assert.equal(stopTwoJourney?.targetStopId, 'stop2')
+  assert.notEqual(stopTwoJourney?.targetStopId, stopOneJourney?.targetStopId)
+
+  const tracking = readFileSync('src/lib/mobile/tourTracking.ts', 'utf8')
+  assert.match(tracking, /const journeyIntelligence = toJourneyIntelligenceDto/)
+  assert.match(tracking, /journey:\s*journeyIntelligence/)
+  assert.match(tracking, /routeTarget:\s*tourJourneyTargetForDay\(currentDay\)/)
 })
 
 test('tour v1 contract freezes customer tracking driver detail errors pricing chat and backoffice projection', () => {
