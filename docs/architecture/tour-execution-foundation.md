@@ -75,16 +75,40 @@ Booking is allowed only when the source Tour is execution-ready. Tours without c
 
 Pricing for Phase 2 is a fixed authoritative snapshot from `Tour.startingFromNGN`. This preserves today's catalogue meaning and does not invent traveller, coupon, or vehicle-specific Tour pricing. Future Tour pricing should be modeled separately before external payment initialization is enabled.
 
-Payment is deliberately a foundation only in Phase 2. Existing `Payment` rows are owned by ride `Booking` records and current settlement code assumes ride bookings. Tour bookings therefore store payment state directly for now and do not initialize Paystack or PayOnUs.
+Phase 4 finalizes Tour payment ownership. `Payment` rows now belong to exactly one owner:
 
-Still not implemented:
+- ride `Booking` through `Payment.bookingId`
+- Tour booking through `Payment.tourBookingId`
 
-- Driver Tour assignment actions
-- Driver Tour lifecycle transitions
-- Customer Tour cancellation/refund
-- Tour coupons
-- Tour live tracking and route intelligence
-- Tour chat
+The database check constraint rejects rows that have both owners or neither owner. Shared Paystack and PayOnUs settlement code branches by this explicit owner, so a ride webhook cannot mutate a Tour booking and a Tour webhook cannot mutate a ride booking.
+
+## Frozen Tour V1 Contract
+
+Implemented:
+
+- Customer Tour booking creation and read APIs.
+- Customer Tour payment status, initialization, and verification APIs.
+- Customer unpaid Tour cancellation API.
+- Backoffice day-scoped Driver/fleet assignment and reassignment before active execution.
+- Driver Tour assignment list, detail, lifecycle action, and location publishing APIs.
+- Customer Tour live tracking with latest Driver location, freshness, current day, current stop, next stop, and optional Google Routes journey intelligence.
+- Backoffice live Tour monitoring fields for day lifecycle, stop progress, latest location freshness, and journey ETA.
+
+Frozen v1 rulings:
+
+- Tour price is a fixed package snapshot from `Tour.startingFromNGN`. It is not per traveller, not vehicle-dependent, and not multiplied by traveller count.
+- Tour coupons are unsupported in v1.
+- Tour chat is unsupported in v1. Future chat should be scoped to `TourBookingDay`, not ride `BookingLeg`.
+- `decline` does not cancel the Tour booking. It clears the day Driver, fleet vehicle, assignment timestamps, acceptance timestamp, and returns the day to `upcoming` for reassignment.
+- Reassignment is authoritative immediately. The previously assigned Driver loses detail, action, and location-publishing access because every Driver endpoint checks the current `assignedDriverId`.
+- Mobile self-cancellation is limited to unpaid `payment_pending` Tour bookings. Paid cancellation/refund requires operations review and must not invent automatic refund percentages.
+- Multi-day Tours are day-scoped, not continuously tracked overnight. Completing Day 1 does not complete the Tour when future non-cancelled days remain.
+
+Operational terminal behavior:
+
+- Cancelled Tour bookings stop Driver actions because `allowedActions` returns empty when the Tour booking or day is cancelled.
+- Cancelled/completed days stop location publishing because the Driver location endpoint accepts only `driver_en_route`, `driver_arrived`, and `in_progress`.
+- Cancelled/completed days stop active journey intelligence because no route target is produced for terminal day states.
 
 ## Phase 3 Driver Execution Foundation
 

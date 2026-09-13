@@ -178,6 +178,18 @@ export async function publishTourDriverLocation({
   const expiresAt = new Date(now.getTime() + LOCATION_EXPIRES_MS)
   const result = await prisma.$transaction(
     async (tx) => {
+      const ownedDay = await tx.tourBookingDay.findFirst({
+        where: {
+          id: day.id,
+          assignedDriverId: principal.driverId,
+          tourBooking: { status: { in: ['confirmed', 'active', 'completed'] }, paymentStatus: 'paid' },
+        },
+        select: { id: true, status: true },
+      })
+      if (!ownedDay) return { ok: false as const, code: 'TOUR_DAY_NOT_ASSIGNED' as MobileErrorCode }
+      if (!isTourTrackingEligibleStatus(ownedDay.status)) {
+        return { ok: false as const, code: 'TRACKING_NOT_ACTIVE' as MobileErrorCode }
+      }
       const existing = await tx.latestTourLocation.findUnique({
         where: { tourBookingDayId: day.id },
         select: { capturedAt: true, sequence: true },
@@ -220,6 +232,7 @@ export async function publishTourDriverLocation({
     { isolationLevel: 'Serializable' }
   )
 
+  if ('code' in result) return { ok: false as const, code: result.code }
   if (!result.ok) return { ok: false as const, code: 'LOCATION_STALE' as MobileErrorCode }
   return {
     ok: true as const,

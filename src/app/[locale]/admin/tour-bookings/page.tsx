@@ -29,6 +29,7 @@ type TourBookingDay = {
       estimatedDurationSeconds: number | null
       estimatedArrivalAt: string | null
       calculatedAt: string | null
+      routePolyline?: string | null
     } | null
   }
   stops: Array<{
@@ -320,7 +321,9 @@ export default function AdminTourBookingsPage() {
                     <p><span className="font-semibold text-gray-800">Pickup:</span> {day.pickup.address ?? day.pickup.label ?? 'Not configured'}</p>
                     <p><span className="font-semibold text-gray-800">End:</span> {day.end.address ?? day.end.label ?? 'Not configured'}</p>
                   </div>
-                  <div className="mt-4 grid gap-3 rounded-xl border border-[#ecdff0] bg-white p-3 text-xs text-gray-600 md:grid-cols-4">
+                  <div className="mt-4 rounded-xl border border-[#ecdff0] bg-white p-3 text-xs text-gray-600">
+                    <p className="mb-3 font-semibold uppercase tracking-[0.12em] text-gray-400">Live monitor</p>
+                    <div className="grid gap-3 md:grid-cols-5">
                     <div>
                       <p className="font-semibold uppercase tracking-[0.12em] text-gray-400">Live state</p>
                       <p className="mt-1 font-semibold capitalize text-gray-900">{day.status.replace(/_/g, ' ')}</p>
@@ -332,12 +335,27 @@ export default function AdminTourBookingsPage() {
                       </p>
                     </div>
                     <div>
-                      <p className="font-semibold uppercase tracking-[0.12em] text-gray-400">Location</p>
+                      <p className="font-semibold uppercase tracking-[0.12em] text-gray-400">Location freshness</p>
                       <p className="mt-1 font-semibold capitalize text-gray-900">{freshness(day.tracking?.latestLocation ?? null)}</p>
+                      {day.tracking?.latestLocation && (
+                        <p className="mt-1 text-[11px] text-gray-400">
+                          {day.tracking.latestLocation.latitude.toFixed(5)}, {day.tracking.latestLocation.longitude.toFixed(5)}
+                        </p>
+                      )}
                     </div>
                     <div>
-                      <p className="font-semibold uppercase tracking-[0.12em] text-gray-400">ETA</p>
+                      <p className="font-semibold uppercase tracking-[0.12em] text-gray-400">Journey ETA</p>
                       <p className="mt-1 font-semibold text-gray-900">{eta(day.tracking?.journey?.estimatedDurationSeconds)}</p>
+                    </div>
+                    <div>
+                      <p className="font-semibold uppercase tracking-[0.12em] text-gray-400">Journey target</p>
+                      <p className="mt-1 font-semibold capitalize text-gray-900">
+                        {day.tracking?.journey?.target?.replace(/_/g, ' ') ?? '—'}
+                      </p>
+                      <p className="mt-1 text-[11px] text-gray-400">
+                        {day.tracking?.journey?.targetStopId ? `Stop ${day.tracking.journey.targetStopId}` : 'No active route'}
+                      </p>
+                    </div>
                     </div>
                   </div>
                   <form

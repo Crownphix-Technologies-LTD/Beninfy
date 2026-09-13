@@ -5041,3 +5041,150 @@ test('tour cancellation is unpaid-customer only and keeps refund policy separate
   assert.match(service, /TOUR_ACTION_NOT_ALLOWED/)
   assert.match(docs, /refund policy/i)
 })
+
+test('tour decline releases only the day for reassignment without cancelling booking', () => {
+  const source = readFileSync('src/lib/mobile/tourExecution.ts', 'utf8')
+  const docs = readFileSync('docs/mobile-api/tour-v1-contract.md', 'utf8')
+
+  assert.match(source, /action === 'decline'/)
+  assert.match(source, /assignedDriverId:\s*null/)
+  assert.match(source, /assignedFleetVehicleId:\s*null/)
+  assert.match(source, /assignedAt:\s*null/)
+  assert.match(source, /acceptedAt:\s*null/)
+  assert.match(source, /status:\s*'upcoming'/)
+  assert.doesNotMatch(source.match(/action === 'decline'[\s\S]*?\} else if/)?.[0] ?? '', /tourBooking\.update/)
+  assert.match(docs, /does not cancel the Tour booking/)
+  assert.match(docs, /day is ready for reassignment/)
+})
+
+test('tour reassignment immediately revokes old driver detail action and location access', () => {
+  const execution = readFileSync('src/lib/mobile/tourExecution.ts', 'utf8')
+  const tracking = readFileSync('src/lib/mobile/tourTracking.ts', 'utf8')
+  const docs = readFileSync('docs/mobile-api/tour-v1-contract.md', 'utf8')
+
+  assert.match(execution, /assignedDriverId !== principal\.driverId/)
+  assert.match(execution, /where:\s*\{\s*id:\s*day\.id,\s*assignedDriverId:\s*principal\.driverId/)
+  assert.match(execution, /update\.count > 0/)
+  assert.match(execution, /if \(!result\) return \{ ok: false as const, code: 'TOUR_ACTION_NOT_ALLOWED'/)
+  assert.match(tracking, /assignedDriverId:\s*principal\.driverId/)
+  assert.match(tracking, /TOUR_DAY_NOT_ASSIGNED/)
+  assert.match(docs, /Driver A loses detail\/action\/location access/)
+})
+
+test('tour payment hardening keeps ride and tour settlement ownership isolated', () => {
+  const paystack = readFileSync('src/lib/paystack.ts', 'utf8')
+  const payonus = readFileSync('src/lib/payonus.ts', 'utf8')
+  const payaza = readFileSync('src/lib/payaza.ts', 'utf8')
+  const settlement = readFileSync('src/lib/paymentSettlement.ts', 'utf8')
+  const tourPayments = readFileSync('src/lib/mobile/tourPayments.ts', 'utf8')
+
+  assert.match(settlement, /markPaymentPaidAndConfirmTourBooking/)
+  assert.match(paystack, /payment\.tourBookingId/)
+  assert.match(paystack, /markPaymentPaidAndConfirmTourBooking/)
+  assert.match(paystack, /markPaymentPaidAndReserveBooking/)
+  assert.match(payonus, /payment\.tourBookingId/)
+  assert.match(payonus, /markPaymentPaidAndConfirmTourBooking/)
+  assert.match(payonus, /markPaymentPaidAndReserveBooking/)
+  assert.match(payaza, /if \(!payment\.bookingId\)/)
+  assert.match(tourPayments, /activePendingPayment/)
+  assert.match(tourPayments, /successfulPayment/)
+  assert.match(tourPayments, /PAYMENT_ALREADY_COMPLETED/)
+  assert.match(tourPayments, /zeroPayable:\s*true/)
+})
+
+test('tour cancellation and terminal states stop actions tracking and journey intelligence', () => {
+  const booking = readFileSync('src/lib/mobile/tourBookings.ts', 'utf8')
+  const execution = readFileSync('src/lib/mobile/tourExecution.ts', 'utf8')
+  const tracking = readFileSync('src/lib/mobile/tourTracking.ts', 'utf8')
+  const docs = readFileSync('docs/mobile-api/tour-v1-contract.md', 'utf8')
+
+  assert.deepEqual(allowedDriverTourActions(tourExecutionDay({ status: 'cancelled' })), [])
+  assert.deepEqual(
+    allowedDriverTourActions(
+      tourExecutionDay({
+        tourBooking: { ...tourExecutionDay().tourBooking, status: 'cancelled' },
+      })
+    ),
+    []
+  )
+  assert.match(booking, /status:\s*'cancelled'/)
+  assert.match(booking, /paymentStatus:\s*'failed'/)
+  assert.match(execution, /day\.status === 'cancelled' \|\| day\.tourBooking\.status === 'cancelled'/)
+  assert.match(tracking, /completed', 'cancelled/)
+  assert.match(docs, /Paid cancellation and refunds require operations review/)
+})
+
+test('tour multi-day boundary does not keep previous day tracking active overnight', () => {
+  const dayOneDone = tourExecutionDay({
+    status: 'completed',
+    stops: tourExecutionDay().stops.map((stop) => ({ ...stop, status: 'completed' })),
+    tourBooking: {
+      ...tourExecutionDay().tourBooking,
+      status: 'active',
+      days: [
+        { id: 'day1', dayNumber: 1, status: 'completed' },
+        { id: 'day2', dayNumber: 2, status: 'upcoming' },
+        { id: 'day3', dayNumber: 3, status: 'upcoming' },
+      ],
+    },
+  })
+  const dayTwo = tourExecutionDay({
+    id: 'day2',
+    dayNumber: 2,
+    status: 'upcoming',
+    tourBooking: dayOneDone.tourBooking,
+  })
+
+  assert.deepEqual(allowedDriverTourActions(dayOneDone), [])
+  assert.deepEqual(allowedDriverTourActions(dayTwo), [])
+  assert.equal(tourJourneyTargetForDay(dayOneDone), null)
+  assert.equal(tourJourneyTargetForDay(dayTwo), null)
+  assert.equal(currentTourStop(dayTwo.stops)?.id, 'stop1')
+})
+
+test('tour journey target invalidates across pickup stop progression and day completion', () => {
+  const firstStopEnRoute = tourExecutionDay({
+    status: 'in_progress',
+    stops: [
+      { ...tourExecutionDay().stops[0], status: 'en_route' },
+      { ...tourExecutionDay().stops[1], status: 'upcoming' },
+    ],
+  })
+  const secondStopEnRoute = tourExecutionDay({
+    status: 'in_progress',
+    stops: [
+      { ...tourExecutionDay().stops[0], status: 'completed' },
+      { ...tourExecutionDay().stops[1], status: 'en_route' },
+    ],
+  })
+
+  assert.equal(tourJourneyTargetForDay(tourExecutionDay({ status: 'driver_en_route' }))?.type, 'pickup')
+  assert.equal(tourJourneyTargetForDay(firstStopEnRoute)?.id, 'stop1')
+  assert.equal(tourJourneyTargetForDay(secondStopEnRoute)?.id, 'stop2')
+  assert.equal(tourJourneyTargetForDay(tourExecutionDay({ status: 'completed' })), null)
+
+  const tracking = readFileSync('src/lib/mobile/tourTracking.ts', 'utf8')
+  assert.match(tracking, /snapshot\.target !== target\.type/)
+  assert.match(tracking, /snapshot\.targetStopId/)
+  assert.match(tracking, /originLatitude/)
+  assert.match(tracking, /calculatedAt/)
+})
+
+test('tour v1 contract freezes customer tracking driver detail errors pricing chat and backoffice projection', () => {
+  const contract = readFileSync('docs/mobile-api/tour-v1-contract.md', 'utf8')
+  const architecture = readFileSync('docs/architecture/tour-execution-foundation.md', 'utf8')
+  const backoffice = readFileSync('src/app/[locale]/admin/tour-bookings/page.tsx', 'utf8')
+
+  assert.match(contract, /Tour pricing is a fixed package snapshot/)
+  assert.match(contract, /Tour chat is unsupported in v1/)
+  assert.match(contract, /Driver detail DTO/)
+  assert.match(contract, /Customer Tracking/)
+  assert.match(contract, /Error Codes/)
+  assert.match(contract, /trackingStatus/)
+  assert.match(contract, /journeyIntelligence/)
+  assert.match(contract, /allowedActions/)
+  assert.match(architecture, /Frozen Tour V1 Contract/)
+  assert.match(backoffice, /Live monitor/)
+  assert.match(backoffice, /location freshness/i)
+  assert.match(backoffice, /Journey ETA/)
+})
