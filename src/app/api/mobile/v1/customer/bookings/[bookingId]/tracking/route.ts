@@ -38,6 +38,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ bookingI
     },
     select: {
       id: true,
+      status: true,
       legs: {
         where: bookingLegId ? { id: bookingLegId } : undefined,
         orderBy: { departureDate: 'asc' },
@@ -62,6 +63,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ bookingI
   return Response.json({
     tracking: toCustomerTrackingSnapshotDto({
       bookingId: booking.id,
+      bookingStatus: booking.status,
       principalId: guard.principal.userId,
       leg: { ...leg, journeySnapshot },
     }),

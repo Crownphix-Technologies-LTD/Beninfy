@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { requireAdminPermission } from '@/lib/admin'
+import { writeAuditLog } from '@/lib/auditLog'
+import { changeDriverSearch } from '@/lib/admin/driverSearch'
+import { driverSearchStatusAfterLegUpdate } from '@/lib/driverAssignmentStatus'
 import {
   markDriverAssignmentCompleted,
   markDriverAssignmentReleased,
@@ -12,12 +15,18 @@ import { notifyBookingAssignmentChanged } from '@/lib/notifications'
 import { prisma } from '@/lib/prisma'
 import { BOOKING_LEG_STATUSES, NON_BLOCKING_LEG_STATUSES } from '@/lib/tripLifecycle'
 
-const patchSchema = z.object({
-  fleetVehicleId: z.string().nullable().optional(),
-  driverId: z.string().nullable().optional(),
-  status: z.enum(BOOKING_LEG_STATUSES).optional(),
-  notes: z.string().nullable().optional(),
-})
+const patchSchema = z
+  .object({
+    fleetVehicleId: z.string().nullable().optional(),
+    driverId: z.string().nullable().optional(),
+    status: z.enum(BOOKING_LEG_STATUSES).optional(),
+    notes: z.string().nullable().optional(),
+    searchAction: z.enum(['start', 'stop']).optional(),
+  })
+  .refine(
+    (data) => !data.searchAction || Object.keys(data).every((key) => key === 'searchAction'),
+    { message: 'Search actions must be sent separately from assignment or lifecycle changes' }
+  )
 
 function dayWindow(date: Date) {
   const startsAt = new Date(date)
@@ -38,6 +47,20 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       { error: 'Invalid input', issues: parsed.error.flatten() },
       { status: 400 }
     )
+
+  if (parsed.data.searchAction) {
+    const result = await changeDriverSearch(id, parsed.data.searchAction)
+    if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status })
+    await writeAuditLog({
+      session: guard.session,
+      req,
+      action: 'driver_search_update',
+      entityType: 'booking_leg',
+      entityId: id,
+      metadata: { searchAction: parsed.data.searchAction },
+    })
+    return NextResponse.json({ bookingLeg: result.bookingLeg })
+  }
 
   const leg = await prisma.bookingLeg.findUnique({ where: { id } })
   if (!leg) return NextResponse.json({ error: 'Booking leg not found' }, { status: 404 })
@@ -102,6 +125,10 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         fleetVehicleId: data.fleetVehicleId,
         driverId: data.driverId,
         status: nextStatus,
+        driverSearchStatus: driverSearchStatusAfterLegUpdate({
+          driverId: data.driverId,
+          status: nextStatus,
+        }),
         assignedAt:
           data.driverId || nextStatus === 'assigned' ? (leg.assignedAt ?? now) : undefined,
         completedAt: nextStatus === 'completed' ? (leg.completedAt ?? now) : undefined,

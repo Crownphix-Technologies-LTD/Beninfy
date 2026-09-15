@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import { formatNGN } from '@/lib/utils'
 import { AdminPageHeader, AdminStatusBadge } from '@/components/admin/AdminUI'
 import LiveTripMonitor from '@/components/admin/LiveTripMonitor'
+import DriverSearchControls from '@/components/admin/DriverSearchControls'
 import {
   ADMIN_LIVE_TRIP_POLL_INTERVAL_MS,
   shouldPollAdminLiveTrip,
@@ -47,6 +48,7 @@ interface TravelerRow {
 }
 
 interface BookingLegRow {
+  driverSearchStatus: 'idle' | 'searching'
   id: string
   direction: string
   from: string
@@ -142,7 +144,7 @@ export default function AdminBookingsPage() {
   }, [])
 
   const hasActiveLiveTrips = bookings.some((booking) =>
-    booking.legs.some((leg) => shouldPollAdminLiveTrip(leg.status))
+    booking.legs.some((leg) => leg.driverSearchStatus === 'searching' || shouldPollAdminLiveTrip(leg.status))
   )
 
   useEffect(() => {
@@ -174,7 +176,7 @@ export default function AdminBookingsPage() {
     } finally { setBusy(null) }
   }
 
-  const assignLeg = async (legId: string, payload: { fleetVehicleId?: string | null; driverId?: string | null }) => {
+  const assignLeg = async (legId: string, payload: { fleetVehicleId?: string | null; driverId?: string | null; searchAction?: 'start' | 'stop' }) => {
     setBusy(legId)
     try {
       const res = await fetch(`/api/admin/booking-legs/${legId}`, {
@@ -300,6 +302,12 @@ export default function AdminBookingsPage() {
                           <p className="text-xs font-semibold text-gray-900">{leg.direction}: {leg.from} → {leg.to}</p>
                           <span className="rounded-full bg-[#fbf7fc] px-2 py-1 text-[10px] font-semibold uppercase text-gray-500">{new Date(leg.departureDate).toLocaleDateString()}</span>
                         </div>
+                        <DriverSearchControls
+                          bookingStatus={b.status}
+                          leg={leg}
+                          disabled={busy !== null}
+                          onAction={(searchAction) => assignLeg(leg.id, { searchAction })}
+                        />
                         <LiveTripMonitor
                           bookingStatus={b.status}
                           paymentStatus={b.payments[0]?.status ?? null}

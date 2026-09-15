@@ -42,6 +42,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
           where: {},
           data: {
             status: legStatusForBookingStatus(parsed.data.status),
+            driverSearchStatus: 'idle',
             ...legTimestampData(parsed.data.status, now),
           },
         },

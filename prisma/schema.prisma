@@ -315,6 +315,11 @@ model VehicleBlock {
   @@index([fleetVehicleId, startsAt, endsAt])
 }
 
+enum DriverSearchStatus {
+  idle
+  searching
+}
+
 model BookingLeg {
   id                      String                        @id @default(cuid())
   bookingId               String
@@ -329,6 +334,7 @@ model BookingLeg {
   driverId                String?
   driver                  Driver?                       @relation(fields: [driverId], references: [id])
   status                  String                        @default("unassigned")
+  driverSearchStatus      DriverSearchStatus            @default(idle)
   assignedAt              DateTime?
   acceptedAt              DateTime?
   declinedAt              DateTime?
