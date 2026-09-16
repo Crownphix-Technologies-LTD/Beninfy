@@ -2,6 +2,8 @@
 
 import { useRef, useState } from 'react'
 import { Upload } from 'lucide-react'
+import Link from 'next/link'
+import { useLocale } from 'next-intl'
 import { CrudTable } from '@/components/admin/CrudTable'
 import { formatNGN } from '@/lib/utils'
 import { adminSecondaryButtonClass } from '@/components/admin/AdminUI'
@@ -79,13 +81,14 @@ function TourImageUploader({ tour, onUploaded }: { tour: Tour; onUploaded: () =>
 }
 
 export default function AdminToursPage() {
+  const locale = useLocale()
   const [reloadKey, setReloadKey] = useState(0)
 
   return (
     <CrudTable<Tour>
       key={reloadKey}
       title="Tours"
-      description="Manage tour packages. Use the Image column to upload tour photos."
+      description="Manage tour packages, images and execution-ready itineraries. Open Itinerary to configure days, stops and pickup locations."
       fetchUrl="/api/admin/tours"
       collectionKey="tours"
       itemKey="id"
@@ -97,7 +100,8 @@ export default function AdminToursPage() {
         { header: 'Title', render: (t) => <p className="font-medium text-gray-800">{t.title}</p> },
         { header: 'Country', render: (t) => t.country },
         { header: 'Days', render: (t) => t.durationDays },
-        { header: 'From', render: (t) => formatNGN(t.startingFromNGN) },
+        { header: 'Package price', render: (t) => <div>{formatNGN(t.startingFromNGN)}<p className="text-xs text-gray-500">Fixed package, not per traveller</p></div> },
+        { header: 'Itinerary', render: (t) => <Link className={adminSecondaryButtonClass} href={'/' + locale + '/admin/tours/' + encodeURIComponent(t.id) + '/itinerary'}>Manage itinerary</Link> },
         { header: 'Highlights', render: (t) => <span className="text-xs text-gray-500">{t.highlights.length}</span> },
       ]}
       fields={[

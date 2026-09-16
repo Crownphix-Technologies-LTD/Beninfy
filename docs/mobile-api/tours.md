@@ -451,3 +451,101 @@ Endpoint:
 Tour chat is unsupported in v1.
 
 Preferred future architecture is `TourBookingDay`-scoped chat because Drivers and Vehicles can differ by day. It should not pretend a Tour day is a ride `BookingLeg`, and it should be implemented only after a safe shared or Tour-specific conversation model is approved.
+
+## Backoffice itinerary editor
+
+Open **Backoffice → Tours → Manage itinerary** on an existing Tour. The editor is
+at `/{locale}/admin/tours/{id}/itinerary` and requires the existing `tours`
+permission, as do both canonical itinerary API methods.
+
+The editor manages ordered days and ordered stop cards, EN/FR titles and
+descriptions, stop duration/required flags, default pickup and optional end
+locations. Move-up/down controls renumber days/stops sequentially on save.
+Internal template IDs are never editable. Package price is displayed from
+`Tour.startingFromNGN`: the frozen price is not multiplied by traveller count.
+
+Only an empty draft offers the explicit **Use 3-day Benin itinerary (names only)** action:
+
+- **Day 1 — Cotonou City Tour:** Graffiti Wall, Amazon Statue, Art Market,
+  Abandoned Plane, Cornetto.
+- **Day 2 — Ouidah Tour:** Point of No Return, Zinsou Foundation,
+  Python Temple / Snake Temple, Casa del Papa.
+- **Day 3 — Ganvié:** Village on Water, Babs Dock.
+
+This action only fills an unsaved draft. It supplies **no addresses or
+coordinates** and requires **Save Changes** to persist. Opening Manage itinerary
+loads the saved days and never inserts or replaces them with this starter. For
+an existing itinerary, Operations would have to deliberately remove every day
+(with confirmation) before the starter action becomes available.
+
+### Select actual locations
+
+For each stop, expand **Edit stop**, search its actual location, select a Google
+result and check the map preview. Coordinates populate from that selection.
+Changing the address clears the previous coordinates. The existing Beninfy
+Google Maps/Places browser components are reused with
+`NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`; no second geocoder or new Places API endpoint
+was introduced. The key must already have Maps JavaScript/Places access and
+appropriate website referrer configuration. If search is unavailable, Operations
+may explicitly enable manual entry using a verified coordinate source. No
+coordinates are guessed. The existing preview has no draggable-marker control.
+
+Under each day's details, separately configure **Default pickup / start** with
+label, hotel/meeting address and coordinates. **Stop 1 is not pickup.** This edits
+the reusable template; new bookings copy the defaults into their day snapshots.
+It does not edit an existing customer's hotel/pickup. Leave the optional default
+end blank unless an actual end location is specified.
+
+The current Customer booking request accepts start date, traveller count and an
+optional idempotency key; it has no customer-selected pickup. Every new booking
+inherits each day's template pickup. The booking-day Admin PATCH only assigns
+driver/vehicle and cannot change pickup. A hotel-specific or individually agreed
+meeting point therefore needs a separate per-booking pickup contract before
+physical testing; do not configure an attraction as a substitute.
+
+### Save and readiness
+
+Use **Save Changes**. Stop addresses and coordinate pairs must be complete and
+valid before the canonical PUT accepts them. Incomplete stop drafts remain in
+the editor on failure; they are not silently saved with zero/guessed coordinates.
+An empty day can be saved, but the backend reports it as not ready.
+
+The prominent **Ready for booking / Not ready for booking** status always comes
+from the last saved backend response (`executionReady` and
+`executionReadinessReason`). Unsaved changes do not change that displayed truth.
+Guidance identifies missing days, days without stops and stops without valid
+coordinates. There is no manual readiness checkbox.
+
+The frozen readiness rule does **not** require default pickup coordinates. The
+editor therefore warns separately when a pickup is absent: configure it before
+physical testing even if the saved package already reports ready. No readiness
+reason, Tour lifecycle, payment, tracking or journey contract was added.
+
+The editor retains failed drafts, marks unsaved changes, confirms destructive
+removal/reload and navigation through its Back button or Admin links, and uses
+the browser's unload warning. Saving disables editing until the server returns.
+After success it replaces the draft with the authoritative response.
+
+GET and PUT responses additionally expose `updatedAt` (ISO timestamp). The
+editor submits optional `expectedUpdatedAt` on PUT. A stale version receives
+HTTP 409, retaining the local draft rather than overwriting newer work. Template
+replacement locks the Tour and returns its saved itinerary/readiness from the
+same transaction. Existing API clients omitting this optional field remain
+compatible.
+
+Template edits only replace `TourItineraryDay`/`TourItineraryStop`. Existing
+`TourBookingDay` and `TourStopExecution` snapshots remain unchanged. Newly created
+bookings receive the newly saved plan. The existing Customer catalogue exposes
+`itineraryDays` and computed readiness without Flutter changes; existing
+catalogue cache refresh behavior still applies.
+
+### Verification
+
+`tests/admin-tour-itinerary.test.ts` covers the names-only outline, ordering,
+coordinates, readiness, permissions and editor rendering.
+`tests/tour-itinerary-database.test.ts` exercises real save/reload, failed-save
+atomicity, concurrent/stale editor protection and booking snapshot isolation.
+To run its optional database suite, set `DATABASE_URL` and
+`TOUR_ITINERARY_TEST_DATABASE_URL` to the same disposable localhost database
+named `beninfy_tour_test...` or `beninfy_dispatch_test...`, with existing migrations
+applied. Never use production data. No migration is required by this editor.
