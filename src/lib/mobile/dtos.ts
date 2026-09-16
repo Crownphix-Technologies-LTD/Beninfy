@@ -27,6 +27,8 @@ import {
 } from '@/lib/mobile/journeyIntelligence'
 import { type MobileSupportConfig } from '@/lib/mobile/supportConfig'
 
+import { driverAssignmentStatus, type DriverAssignmentStatus } from '@/lib/driverAssignmentStatus'
+
 export type MobileBookingStatus = 'pending' | 'confirmed' | 'ops_review' | 'cancelled' | 'completed'
 
 export type MobileBookingLegStatus =
@@ -82,6 +84,7 @@ export type DriverProfileDto = {
 }
 
 export type BookingLegDto = {
+  driverAssignmentStatus: DriverAssignmentStatus
   id: string
   bookingId: string
   direction: string
@@ -250,6 +253,10 @@ export type TrackingSnapshotDto = {
     events: string[]
   } | null
   journeyIntelligence: JourneyIntelligenceDto
+}
+
+export type CustomerTrackingSnapshotDto = TrackingSnapshotDto & {
+  driverAssignmentStatus: DriverAssignmentStatus
 }
 
 type Dateish = Date | string
@@ -421,19 +428,25 @@ export function toPaymentDto(payment: {
   }
 }
 
-export function toBookingLegDto(leg: {
-  id: string
-  bookingId: string
-  direction: string
-  from: string
-  to: string
-  departureDate: Dateish
-  status: string
-  vehicleId: string
-  fleetVehicle: Parameters<typeof toFleetVehicleDto>[0] | null
-  driver: Parameters<typeof toDriverProfileDto>[0] | null
-}): BookingLegDto {
+export function toBookingLegDto(
+  leg: {
+    driverId: string | null
+    driverSearchStatus: string
+    id: string
+    bookingId: string
+    direction: string
+    from: string
+    to: string
+    departureDate: Dateish
+    status: string
+    vehicleId: string
+    fleetVehicle: Parameters<typeof toFleetVehicleDto>[0] | null
+    driver: Parameters<typeof toDriverProfileDto>[0] | null
+  },
+  bookingStatus: string
+): BookingLegDto {
   return {
+    driverAssignmentStatus: driverAssignmentStatus({ ...leg, bookingStatus }),
     id: leg.id,
     bookingId: leg.bookingId,
     direction: leg.direction,
@@ -509,7 +522,7 @@ export function toCustomerBookingDetailDto(
     passengerName: booking.passengerName,
     passengerEmail: booking.passengerEmail,
     passengerPhone: booking.passengerPhone,
-    legs: booking.legs.map(toBookingLegDto),
+    legs: booking.legs.map((leg) => toBookingLegDto(leg, booking.status)),
     payments: booking.payments.map(toPaymentDto),
   }
 }
@@ -664,13 +677,16 @@ export function toDriverAssignmentHistoryDto(record: {
 }
 
 export function toCustomerTrackingSnapshotDto({
+  bookingStatus,
   bookingId,
   principalId,
   leg,
 }: {
+  bookingStatus: string
   bookingId: string
   principalId: string
   leg: {
+    driverSearchStatus: string
     id: string
     bookingId: string
     status: string
@@ -680,7 +696,7 @@ export function toCustomerTrackingSnapshotDto({
     latestLocation: Parameters<typeof toLocationDto>[0] | null
     journeySnapshot?: Parameters<typeof toJourneyIntelligenceDto>[0] | null
   }
-}): TrackingSnapshotDto {
+}): CustomerTrackingSnapshotDto {
   const trackingStatus = trackingStatusFor({
     legStatus: leg.status,
     hasDriver: Boolean(leg.driverId),
@@ -702,6 +718,7 @@ export function toCustomerTrackingSnapshotDto({
   return {
     bookingId,
     bookingLegId: leg.id,
+    driverAssignmentStatus: driverAssignmentStatus({ ...leg, bookingStatus }),
     trackingStatus,
     operationalStatus: leg.status as MobileBookingLegStatus,
     customerStatus: customerLegState(leg.status),

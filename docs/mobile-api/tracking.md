@@ -141,3 +141,17 @@ If a driver declines/cancels and the leg returns to `unassigned`, publishing is 
 ## Round Trips
 
 Outbound and return legs are independent. A token or snapshot for one `BookingLeg` does not authorize the other.
+
+## Driver assignment/search signal
+
+The selected-leg snapshot includes `driverAssignmentStatus`:
+`not_searching` | `searching` | `assigned`. It uses the same server projection
+as `booking.legs[].driverAssignmentStatus` in Customer Booking Detail.
+See [the Ride assignment/search contract](./bookings.md#authoritative-driver-assignment--search-ride-v1)
+for lifecycle mapping, Operations Start/Stop commands and concurrency behavior.
+
+`driver == null != searching`. `latestLocation == null != searching`.
+An assigned Driver without location reports `assigned` independently of
+`trackingStatus = unavailable`. Idle future reservations never imply searching.
+Customer animation must consume this field from the selected leg, not infer it
+from payment, missing Driver/location, generic status, or elapsed time.

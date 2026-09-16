@@ -36,6 +36,7 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
           where: { status: { notIn: ['completed', 'cancelled'] } },
           data: {
             status: 'cancelled',
+            driverSearchStatus: 'idle',
             cancelledAt: now,
             cancelledBy: 'customer',
           },

@@ -266,10 +266,23 @@ Response envelope:
     "trackingStatus": "live",
     "locationFresh": true,
     "latestLocation": {},
-    "journeyIntelligence": {},
+    "journeyIntelligence": {
+      "target": "stop",
+      "targetStopId": "tour_stop_execution_id",
+      "routeAvailable": true,
+      "distanceMeters": 11200,
+      "durationSeconds": 1080,
+      "encodedPolyline": "encoded_polyline",
+      "routePolyline": "encoded_polyline",
+      "distanceRemainingMeters": 11200,
+      "estimatedArrivalAt": "2026-10-15T12:18:00.000Z",
+      "estimatedDurationSeconds": 1080,
+      "calculatedAt": "2026-10-15T12:00:00.000Z",
+      "freshness": "fresh"
+    },
     "routeTarget": {
-      "type": "pickup",
-      "id": "tour_booking_day_id",
+      "type": "stop",
+      "id": "tour_stop_execution_id",
       "coordinates": { "latitude": 6.3703, "longitude": 2.3912 }
     },
     "updatedAt": "2026-10-15T12:00:00.000Z"
@@ -284,6 +297,10 @@ Route target rules:
 - `in_progress`: latest Driver coordinate to current stop
 - `completed` or `cancelled`: no active route
 - between days: no active location publishing and no active route
+
+`journeyIntelligence.target` and `routeTarget.type` must match. For `stop` targets, `journeyIntelligence.targetStopId` is the authoritative `TourStopExecution.id`; Flutter must not infer the current stop from coordinates.
+
+The top-level `journeyIntelligence` object and `currentDay.tracking.journey` are the same canonical snapshot projection. They must not contradict each other in one response.
 
 Journey cache identity includes TourBookingDay, target type, target stop ID, last routed Driver coordinate, and calculation timestamp.
 
@@ -323,4 +340,3 @@ Future implementation should be `TourBookingDay`-scoped REST chat. It must autho
 | `PAYMENT_PROVIDER_UNAVAILABLE` | 503 | Customer | Payment provider is not configured or unavailable. |
 | `PAYMENT_ALREADY_COMPLETED` | 409 | Customer | Booking already has completed payment. |
 | `PAYMENT_NOT_FOUND` | 404 | Customer | No matching payment exists. |
-

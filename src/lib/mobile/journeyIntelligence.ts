@@ -4,10 +4,13 @@ import { prisma } from '@/lib/prisma'
 
 type PrismaClientLike = typeof prisma | Prisma.TransactionClient
 
-export type JourneyTarget = 'pickup' | 'destination'
+export type JourneyTarget = 'pickup' | 'destination' | 'stop'
+type RideJourneyTarget = Exclude<JourneyTarget, 'stop'>
 
 export type JourneyIntelligenceDto = {
   target: JourneyTarget
+  targetStopId?: string | null
+  routeAvailable: boolean
   distanceMeters: number | null
   durationSeconds: number | null
   encodedPolyline: string | null
@@ -50,7 +53,7 @@ function legEndpointsFromBooking(booking: {
     : { pickup, destination: dropoff }
 }
 
-export function journeyTargetForLegStatus(status: string): JourneyTarget | null {
+export function journeyTargetForLegStatus(status: string): RideJourneyTarget | null {
   switch (status) {
     case 'driver_en_route':
     case 'driver_arrived':
@@ -112,6 +115,7 @@ export function shouldRefreshJourneySnapshot({
 
 export function toJourneyIntelligenceDto(snapshot: {
   target?: string | null
+  targetStopId?: string | null
   distanceMeters: number | null
   encodedPolyline: string | null
   distanceRemainingMeters: number | null
@@ -124,7 +128,12 @@ export function toJourneyIntelligenceDto(snapshot: {
   const expiresAt = new Date(snapshot.expiresAt)
   const durationSeconds = snapshot.estimatedDurationSeconds
   return {
-    target: snapshot.target === 'destination' ? 'destination' : 'pickup',
+    target:
+      snapshot.target === 'destination' || snapshot.target === 'stop'
+        ? snapshot.target
+        : 'pickup',
+    targetStopId: snapshot.target === 'stop' ? (snapshot.targetStopId ?? null) : null,
+    routeAvailable: true,
     distanceMeters: snapshot.distanceRemainingMeters ?? snapshot.distanceMeters,
     durationSeconds,
     encodedPolyline: snapshot.encodedPolyline,

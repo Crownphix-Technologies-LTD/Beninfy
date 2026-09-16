@@ -151,6 +151,7 @@ export async function cancelCustomerBooking({
             where: { status: { notIn: ['completed', 'cancelled'] } },
             data: {
               status: 'cancelled',
+              driverSearchStatus: 'idle',
               driverId: null,
               cancelledAt: now,
               cancelledBy: 'customer',

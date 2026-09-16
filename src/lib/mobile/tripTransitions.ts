@@ -172,6 +172,8 @@ export async function applyDriverTripAction({
   const now = new Date()
   const updateData: Prisma.BookingLegUpdateManyMutationInput = {
     status: transition.nextStatus,
+    // Release returns to Operations; it does not implicitly start another search.
+    driverSearchStatus: 'idle',
     ...timestampData(transition.timestampField, now),
     ...(transition.releaseDriver
       ? {

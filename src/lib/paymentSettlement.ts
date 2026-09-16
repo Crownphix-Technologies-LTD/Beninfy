@@ -121,6 +121,7 @@ export async function markPaymentPaidAndReserveBooking({
               where: { id: bookingId },
               data: {
                 status: 'ops_review',
+                legs: { updateMany: { where: {}, data: { driverSearchStatus: 'idle' } } },
                 paymentId,
               },
             })
@@ -148,7 +149,7 @@ export async function markPaymentPaidAndReserveBooking({
             legs: {
               updateMany: {
                 where: { status: 'payment_pending' },
-                data: { status: 'reserved' },
+                data: { status: 'reserved', driverSearchStatus: 'idle' },
               },
             },
           },
@@ -179,6 +180,7 @@ export async function markPaymentPaidAndReserveBooking({
           where: { id: bookingId },
           data: {
             status: 'ops_review',
+            legs: { updateMany: { where: {}, data: { driverSearchStatus: 'idle' } } },
             paymentId,
           },
         }),
@@ -213,6 +215,7 @@ export function failBookingPayment(bookingId: string) {
       },
       data: {
         status: 'cancelled',
+        driverSearchStatus: 'idle',
         cancelledAt: now,
         cancelledBy: 'system',
       },

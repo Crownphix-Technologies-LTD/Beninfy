@@ -114,7 +114,10 @@ export type TourWithItinerary = {
 }
 
 export function validTourCoordinate(latitude: number, longitude: number) {
-  return latitude >= -90 && latitude <= 90 && longitude >= -180 && longitude <= 180
+  return (
+    Number.isFinite(latitude) && Number.isFinite(longitude) &&
+    latitude >= -90 && latitude <= 90 && longitude >= -180 && longitude <= 180
+  )
 }
 
 function hasCompleteOptionalCoordinatePair(latitude?: number | null, longitude?: number | null) {
