@@ -122,17 +122,24 @@ function shouldRefreshTourJourneySnapshot({
   snapshot: {
     target?: string | null
     targetStopId?: string | null
+    destinationLatitude: number
+    destinationLongitude: number
     originLatitude: number
     originLongitude: number
     calculatedAt: Date | string
     expiresAt: Date | string
   } | null
-  target: { type: TourJourneyTarget; id: string }
+  target: { type: TourJourneyTarget; id: string; coordinates: LatLng }
   latestLocation: LatLng & { receivedAt?: Date | string | null }
   now?: Date
 }) {
   if (!snapshot) return true
   if (snapshot.target !== target.type) return true
+  if (
+    snapshot.destinationLatitude !== target.coordinates.latitude ||
+    snapshot.destinationLongitude !== target.coordinates.longitude
+  )
+    return true
   if ((snapshot.targetStopId ?? null) !== (target.type === 'stop' ? target.id : null)) return true
   if (new Date(snapshot.expiresAt).getTime() <= now.getTime()) return true
 
@@ -257,7 +264,10 @@ export async function getOrRefreshTourJourneyIntelligence({
       tourBooking: {
         include: {
           user: { select: { id: true, name: true, email: true, phone: true } },
-          days: { select: { id: true, dayNumber: true, status: true }, orderBy: { dayNumber: 'asc' } },
+          days: {
+            select: { id: true, dayNumber: true, status: true },
+            orderBy: { dayNumber: 'asc' },
+          },
         },
       },
     },
@@ -275,7 +285,10 @@ export async function getOrRefreshTourJourneyIntelligence({
   ) {
     return day.journeySnapshot
   }
-  const origin = { latitude: day.latestLocation.latitude, longitude: day.latestLocation.longitude }
+  const origin = {
+    latitude: day.latestLocation.latitude,
+    longitude: day.latestLocation.longitude,
+  }
   const route = await computeGoogleRoute({
     origin,
     destination: target.coordinates,
@@ -284,7 +297,9 @@ export async function getOrRefreshTourJourneyIntelligence({
   if (!route.ok) {
     const existingTargetMatches =
       day.journeySnapshot?.target === target.type &&
-      (day.journeySnapshot.targetStopId ?? null) === (target.type === 'stop' ? target.id : null)
+      (day.journeySnapshot.targetStopId ?? null) === (target.type === 'stop' ? target.id : null) &&
+      day.journeySnapshot.destinationLatitude === target.coordinates.latitude &&
+      day.journeySnapshot.destinationLongitude === target.coordinates.longitude
     return existingTargetMatches ? day.journeySnapshot : null
   }
 
@@ -297,47 +312,66 @@ export async function getOrRefreshTourJourneyIntelligence({
       : new Date(calculatedAt.getTime() + estimatedDurationSeconds * 1000)
   const expiresAt = new Date(calculatedAt.getTime() + DEFAULT_CACHE_TTL_MS)
 
-  return client.tourJourneySnapshot.upsert({
-    where: { tourBookingDayId },
-    create: {
-      tourBookingDayId,
-      target: target.type,
-      targetStopId: target.type === 'stop' ? target.id : null,
-      originLatitude: origin.latitude,
-      originLongitude: origin.longitude,
-      destinationLatitude: target.coordinates.latitude,
-      destinationLongitude: target.coordinates.longitude,
-      encodedPolyline: route.route.encodedPolyline,
-      distanceMeters: route.route.distanceMeters,
-      durationSeconds: route.route.durationSeconds,
-      trafficDurationSeconds: route.route.trafficDurationSeconds,
-      distanceRemainingMeters: route.route.distanceMeters,
-      estimatedDurationSeconds,
-      estimatedArrivalAt,
-      provider: route.route.provider,
-      calculatedAt,
-      expiresAt,
-    },
-    update: {
-      target: target.type,
-      targetStopId: target.type === 'stop' ? target.id : null,
-      originLatitude: origin.latitude,
-      originLongitude: origin.longitude,
-      destinationLatitude: target.coordinates.latitude,
-      destinationLongitude: target.coordinates.longitude,
-      encodedPolyline: route.route.encodedPolyline,
-      distanceMeters: route.route.distanceMeters,
-      durationSeconds: route.route.durationSeconds,
-      trafficDurationSeconds: route.route.trafficDurationSeconds,
-      distanceRemainingMeters: route.route.distanceMeters,
-      estimatedDurationSeconds,
-      estimatedArrivalAt,
-      provider: route.route.provider,
-      providerStatus: 'ok',
-      calculatedAt,
-      expiresAt,
-    },
-  })
+  const persist = async (tx: Prisma.TransactionClient) => {
+    // A Google request can finish after Operations changes pickup. Lock and
+    // recheck the target before allowing that result back into the cache.
+    await tx.$queryRaw`SELECT id FROM "TourBookingDay" WHERE id = ${tourBookingDayId} FOR UPDATE`
+    const current = await tx.tourBookingDay.findUnique({
+      where: { id: tourBookingDayId },
+      include: tourDayInclude,
+    })
+    const currentTarget = current ? tourJourneyTargetForDay(current) : null
+    if (
+      !currentTarget ||
+      currentTarget.type !== target.type ||
+      currentTarget.id !== target.id ||
+      currentTarget.coordinates.latitude !== target.coordinates.latitude ||
+      currentTarget.coordinates.longitude !== target.coordinates.longitude
+    )
+      return null
+    return tx.tourJourneySnapshot.upsert({
+      where: { tourBookingDayId },
+      create: {
+        tourBookingDayId,
+        target: target.type,
+        targetStopId: target.type === 'stop' ? target.id : null,
+        originLatitude: origin.latitude,
+        originLongitude: origin.longitude,
+        destinationLatitude: target.coordinates.latitude,
+        destinationLongitude: target.coordinates.longitude,
+        encodedPolyline: route.route.encodedPolyline,
+        distanceMeters: route.route.distanceMeters,
+        durationSeconds: route.route.durationSeconds,
+        trafficDurationSeconds: route.route.trafficDurationSeconds,
+        distanceRemainingMeters: route.route.distanceMeters,
+        estimatedDurationSeconds,
+        estimatedArrivalAt,
+        provider: route.route.provider,
+        calculatedAt,
+        expiresAt,
+      },
+      update: {
+        target: target.type,
+        targetStopId: target.type === 'stop' ? target.id : null,
+        originLatitude: origin.latitude,
+        originLongitude: origin.longitude,
+        destinationLatitude: target.coordinates.latitude,
+        destinationLongitude: target.coordinates.longitude,
+        encodedPolyline: route.route.encodedPolyline,
+        distanceMeters: route.route.distanceMeters,
+        durationSeconds: route.route.durationSeconds,
+        trafficDurationSeconds: route.route.trafficDurationSeconds,
+        distanceRemainingMeters: route.route.distanceMeters,
+        estimatedDurationSeconds,
+        estimatedArrivalAt,
+        provider: route.route.provider,
+        providerStatus: 'ok',
+        calculatedAt,
+        expiresAt,
+      },
+    })
+  }
+  return '$transaction' in client ? client.$transaction(persist) : persist(client)
 }
 
 function selectCurrentTourDay(days: TourDayWithTracking[]) {
@@ -376,7 +410,7 @@ export async function getCustomerTourTracking({
   if (!currentDay) return { ok: false as const, code: 'TOUR_DAY_NOT_FOUND' as MobileErrorCode }
   const journeySnapshot = await getOrRefreshTourJourneyIntelligence({
     tourBookingDayId: currentDay.id,
-  }).catch(() => currentDay.journeySnapshot)
+  }).catch(() => null)
   const journeyIntelligence = toJourneyIntelligenceDto(journeySnapshot ?? null)
   const currentDayDto = toTourBookingDayDto(
     { ...currentDay, journeySnapshot: journeySnapshot ?? null },

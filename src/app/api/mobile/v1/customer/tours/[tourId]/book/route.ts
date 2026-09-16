@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { tourPickupSchema } from '@/lib/mobile/tourPickup'
 import { checkRateLimit, requestIp } from '@/lib/rateLimit'
 import { requireMobilePrincipal } from '@/lib/mobile/auth'
 import { mobileError, mobileErrorFromCode, mobileValidationError } from '@/lib/mobile/errors'
@@ -9,6 +10,7 @@ export const runtime = 'nodejs'
 
 const schema = z.object({
   startDate: z.string().trim(),
+  pickup: tourPickupSchema,
   travellers: z.number().int(),
   idempotencyKey: z.string().trim().min(8).max(120).optional(),
 })
@@ -46,6 +48,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ tourId:
     tourId,
     startDate: parsed.data.startDate,
     travellers: parsed.data.travellers,
+    pickup: parsed.data.pickup,
     idempotencyKey: parsed.data.idempotencyKey,
   })
   if (!result.ok) return mobileErrorFromCode(result.code)

@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import TourDayPickupEditor from '@/components/admin/TourDayPickupEditor'
 import { formatNGN } from '@/lib/utils'
 import { AdminModal, AdminPageHeader, AdminStatusBadge, adminSecondaryButtonClass } from '@/components/admin/AdminUI'
 
@@ -44,6 +45,7 @@ type TourBookingDay = {
 }
 
 type TourBookingRow = {
+  pickup: TourBookingDay['pickup']
   id: string
   reference: string
   status: string
@@ -193,7 +195,7 @@ export default function AdminTourBookingsPage() {
     <div>
       <AdminPageHeader
         title="Tour bookings"
-        description="Read-only tour booking visibility for itinerary snapshots, customer details, dates, travellers, and payment state."
+        description="Manage booked day assignments and pickups; view itinerary snapshots, customer details and payment state."
         icon="tour"
       />
 
@@ -306,6 +308,7 @@ export default function AdminTourBookingsPage() {
               </div>
             </div>
 
+            <p className="text-sm text-gray-600"><strong>Tour pickup:</strong> {selected.pickup?.address ?? selected.pickup?.label ?? 'Not recorded for this booking'}</p>
             <div className="space-y-4">
               {selected.days.map((day) => (
                 <section key={day.id} className="rounded-2xl border border-gray-100 p-4">
@@ -321,6 +324,15 @@ export default function AdminTourBookingsPage() {
                     <p><span className="font-semibold text-gray-800">Pickup:</span> {day.pickup.address ?? day.pickup.label ?? 'Not configured'}</p>
                     <p><span className="font-semibold text-gray-800">End:</span> {day.end.address ?? day.end.label ?? 'Not configured'}</p>
                   </div>
+                  {!['cancelled', 'completed'].includes(selected.status) && ['upcoming', 'assigned', 'driver_en_route', 'driver_arrived'].includes(day.status) && (
+                    <TourDayPickupEditor dayId={day.id} pickup={day.pickup} onSaved={async () => {
+                      const response = await fetch('/api/admin/tour-bookings/' + encodeURIComponent(selected.id), { cache: 'no-store' })
+                      if (!response.ok) throw new Error('Pickup saved, but reload failed. Reopen the booking to refresh.')
+                      const { tourBooking } = await response.json()
+                      setSelected(tourBooking)
+                      setTourBookings(current => current.map(booking => booking.id === tourBooking.id ? tourBooking : booking))
+                    }} />
+                  )}
                   <div className="mt-4 rounded-xl border border-[#ecdff0] bg-white p-3 text-xs text-gray-600">
                     <p className="mb-3 font-semibold uppercase tracking-[0.12em] text-gray-400">Live monitor</p>
                     <div className="grid gap-3 md:grid-cols-5">

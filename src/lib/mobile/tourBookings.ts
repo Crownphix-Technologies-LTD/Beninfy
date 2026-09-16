@@ -1,3 +1,4 @@
+import { tourPickupSchema, tourPickupSnapshot, type TourPickup } from '@/lib/mobile/tourPickup'
 import { randomBytes } from 'crypto'
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
@@ -35,6 +36,10 @@ export const TOUR_BOOKING_MAX_TRAVELLERS = 30
 type Dateish = Date | string
 
 type TourBookingWithDays = {
+  pickupLabel?: string | null
+  pickupAddress?: string | null
+  pickupLatitude?: number | null
+  pickupLongitude?: number | null
   id: string
   userId: string
   tourId: string
@@ -326,6 +331,14 @@ export function toTourBookingDto(booking: TourBookingWithDays) {
     startDate: iso(booking.startDate),
     endDate: iso(booking.endDate),
     travellers: booking.travellers,
+    pickup: {
+      label: booking.pickupLabel ?? null,
+      address: booking.pickupAddress ?? null,
+      coordinates:
+        typeof booking.pickupLatitude === 'number' && typeof booking.pickupLongitude === 'number'
+          ? { latitude: booking.pickupLatitude, longitude: booking.pickupLongitude }
+          : null,
+    },
     price: {
       value: booking.priceNGN,
       currency: booking.currencyCode,
@@ -377,13 +390,30 @@ async function uniqueTourReference(tx: Prisma.TransactionClient) {
   throw new Error('Unable to allocate tour booking reference')
 }
 
+function isTourBookingWriteConflict(error: unknown) {
+  if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034') return true
+  // adapter-pg can surface serialization/deadlock errors at COMMIT directly.
+  if (!(error instanceof Error) || !('cause' in error)) return false
+  const cause = error.cause
+  return (
+    typeof cause === 'object' &&
+    cause !== null &&
+    'originalCode' in cause &&
+    (cause.originalCode === '40001' || cause.originalCode === '40P01')
+  )
+}
+
 export async function createCustomerTourBooking(input: {
   principal: MobilePrincipal
   tourId: string
   startDate: string
+  pickup: TourPickup
   travellers: number
   idempotencyKey?: string | null
 }) {
+  const pickup = tourPickupSchema.safeParse(input.pickup)
+  if (!pickup.success) return { ok: false as const, code: 'VALIDATION_ERROR' as MobileErrorCode }
+  const pickupData = tourPickupSnapshot(pickup.data)
   const start = validateTourStartDate(input.startDate)
   if (!start.ok) return start
   const travellers = validateTourTravellerCount(input.travellers)
@@ -393,7 +423,10 @@ export async function createCustomerTourBooking(input: {
 
   if (idempotency.key) {
     const existing = await prisma.tourBooking.findFirst({
-      where: { userId: input.principal.userId, idempotencyKey: idempotency.key },
+      where: {
+        userId: input.principal.userId,
+        idempotencyKey: idempotency.key,
+      },
       include: tourBookingInclude,
     })
     if (existing) {
@@ -429,92 +462,110 @@ export async function createCustomerTourBooking(input: {
 
   const price = calculateTourPriceSnapshot(tour)
   const endDate = endDateFor(start.date, tour.itineraryDays.length)
-  try {
-    const created = await prisma.$transaction(
-      async (tx) => {
-        const reference = await uniqueTourReference(tx)
-        return tx.tourBooking.create({
-          data: {
-            userId: input.principal.userId,
-            tourId: tour.id,
-            reference,
-            status: price.priceNGN === 0 ? 'confirmed' : 'payment_pending',
-            paymentStatus: price.priceNGN === 0 ? 'paid' : 'pending',
-            currencyCode: price.currencyCode,
-            priceNGN: price.priceNGN,
-            amountPaidNGN: 0,
-            idempotencyKey: idempotency.key,
-            tourTitle: tour.title,
-            tourTitleFr: tour.titleFr,
-            tourDestination: tour.destination,
-            tourDestinationFr: tour.destinationFr,
-            tourCountry: tour.country,
-            tourCountryFr: tour.countryFr,
-            tourImage: tour.image,
-            startDate: start.date,
-            endDate,
-            travellers: travellers.travellers,
-            days: {
-              create: tour.itineraryDays.map((day) => ({
-                sourceItineraryDayId: day.id,
-                dayNumber: day.dayNumber,
-                scheduledDate: new Date(start.date.getTime() + (day.dayNumber - 1) * 24 * 60 * 60 * 1000),
-                status: 'upcoming',
-                title: day.title,
-                titleFr: day.titleFr,
-                description: day.description,
-                descriptionFr: day.descriptionFr,
-                pickupLabel: day.defaultStartLabel,
-                pickupAddress: day.defaultStartAddress,
-                pickupLatitude: day.defaultStartLatitude,
-                pickupLongitude: day.defaultStartLongitude,
-                endLabel: day.defaultEndLabel,
-                endAddress: day.defaultEndAddress,
-                endLatitude: day.defaultEndLatitude,
-                endLongitude: day.defaultEndLongitude,
-                stops: {
-                  create: day.stops.map((stop) => ({
-                    sourceItineraryStopId: stop.id,
-                    sortOrder: stop.sortOrder,
-                    title: stop.title,
-                    titleFr: stop.titleFr,
-                    description: stop.description,
-                    descriptionFr: stop.descriptionFr,
-                    address: stop.address,
-                    latitude: stop.latitude,
-                    longitude: stop.longitude,
-                    estimatedDurationMinutes: stop.estimatedDurationMinutes,
-                    required: stop.required,
-                    status: 'upcoming',
-                  })),
-                },
-              })),
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      const created = await prisma.$transaction(
+        async (tx) => {
+          const reference = await uniqueTourReference(tx)
+          return tx.tourBooking.create({
+            data: {
+              ...pickupData,
+              userId: input.principal.userId,
+              tourId: tour.id,
+              reference,
+              status: price.priceNGN === 0 ? 'confirmed' : 'payment_pending',
+              paymentStatus: price.priceNGN === 0 ? 'paid' : 'pending',
+              currencyCode: price.currencyCode,
+              priceNGN: price.priceNGN,
+              amountPaidNGN: 0,
+              idempotencyKey: idempotency.key,
+              tourTitle: tour.title,
+              tourTitleFr: tour.titleFr,
+              tourDestination: tour.destination,
+              tourDestinationFr: tour.destinationFr,
+              tourCountry: tour.country,
+              tourCountryFr: tour.countryFr,
+              tourImage: tour.image,
+              startDate: start.date,
+              endDate,
+              travellers: travellers.travellers,
+              days: {
+                create: tour.itineraryDays.map((day) => ({
+                  sourceItineraryDayId: day.id,
+                  dayNumber: day.dayNumber,
+                  scheduledDate: new Date(
+                    start.date.getTime() + (day.dayNumber - 1) * 24 * 60 * 60 * 1000
+                  ),
+                  status: 'upcoming',
+                  title: day.title,
+                  titleFr: day.titleFr,
+                  description: day.description,
+                  descriptionFr: day.descriptionFr,
+                  ...pickupData,
+                  endLabel: day.defaultEndLabel,
+                  endAddress: day.defaultEndAddress,
+                  endLatitude: day.defaultEndLatitude,
+                  endLongitude: day.defaultEndLongitude,
+                  stops: {
+                    create: day.stops.map((stop) => ({
+                      sourceItineraryStopId: stop.id,
+                      sortOrder: stop.sortOrder,
+                      title: stop.title,
+                      titleFr: stop.titleFr,
+                      description: stop.description,
+                      descriptionFr: stop.descriptionFr,
+                      address: stop.address,
+                      latitude: stop.latitude,
+                      longitude: stop.longitude,
+                      estimatedDurationMinutes: stop.estimatedDurationMinutes,
+                      required: stop.required,
+                      status: 'upcoming',
+                    })),
+                  },
+                })),
+              },
             },
+            include: tourBookingInclude,
+          })
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+      )
+
+      return {
+        ok: true as const,
+        booking: created,
+        dto: toTourBookingDto(created),
+        pricingBasis: price.pricingBasis,
+      }
+    } catch (error) {
+      const retryable = isTourBookingWriteConflict(error)
+      if (
+        idempotency.key &&
+        (retryable ||
+          (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002'))
+      ) {
+        const existing = await prisma.tourBooking.findFirst({
+          where: {
+            userId: input.principal.userId,
+            idempotencyKey: idempotency.key,
           },
           include: tourBookingInclude,
         })
-      },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
-    )
-
-    return { ok: true as const, booking: created, dto: toTourBookingDto(created), pricingBasis: price.pricingBasis }
-  } catch (error) {
-    if (idempotency.key && error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-      const existing = await prisma.tourBooking.findFirst({
-        where: { userId: input.principal.userId, idempotencyKey: idempotency.key },
-        include: tourBookingInclude,
-      })
-      if (existing) {
-        return {
-          ok: true as const,
-          booking: existing,
-          dto: toTourBookingDto(existing),
-          pricingBasis: 'existing-idempotency-key',
-          idempotent: true,
+        if (existing) {
+          return {
+            ok: true as const,
+            booking: existing,
+            dto: toTourBookingDto(existing),
+            pricingBasis: 'existing-idempotency-key',
+            idempotent: true,
+          }
         }
       }
+      // Serializable booking creation can conflict with simultaneous bookings.
+      // Retry the rolled-back transaction without changing the customer intent/key.
+      if (retryable && attempt < 2) continue
+      throw error
     }
-    throw error
   }
 }
 

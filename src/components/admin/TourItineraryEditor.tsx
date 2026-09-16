@@ -459,10 +459,9 @@ export default function TourItineraryEditor({ tour, initial, locale }: Props) {
                   />
                 </div>
                 <p className="text-sm text-gray-600">
-                  Default pickup is separate from Stop 1. Configure the actual hotel or meeting
-                  point for new bookings. This edits the template, not an individual customer
-                  booking. End location is optional; leave it empty unless the itinerary specifies
-                  it.
+                  Default pickup is separate from Stop 1. Keep a package meeting point here when
+                  applicable. Customer-selected pickup takes precedence for new private Tour bookings.
+                  End location is optional; leave it empty unless the itinerary specifies it.
                 </p>
                 <div className="grid gap-4 xl:grid-cols-2">
                   <TourLocationEditor
@@ -482,8 +481,8 @@ export default function TourItineraryEditor({ tour, initial, locale }: Props) {
             </details>
             {!locationHasCoordinates(day.start) && (
               <p className="mb-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
-                Default pickup is not configured. Set it before physical testing; the current
-                booking readiness check does not require pickup coordinates.
+                Template default pickup is not configured. Customers select their pickup at booking;
+                template readiness depends on itinerary days and stops.
               </p>
             )}
             {day.stops.length === 0 && (

@@ -1,3 +1,4 @@
+import { tourPickupSchema, tourPickupSnapshot, type TourPickup } from '@/lib/mobile/tourPickup'
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { writeAuditLog } from '@/lib/auditLog'
@@ -381,88 +382,149 @@ export async function assignTourBookingDay({
   tourBookingDayId,
   driverId,
   fleetVehicleId,
+  pickup,
 }: {
   tourBookingDayId: string
   driverId?: string | null
   fleetVehicleId?: string | null
+  pickup?: TourPickup
 }) {
-  const day = await prisma.tourBookingDay.findUnique({
-    where: { id: tourBookingDayId },
-    include: tourDayInclude,
-  })
-  if (!day) return { ok: false as const, code: 'TOUR_DAY_NOT_FOUND' as MobileErrorCode }
-  if (['driver_en_route', 'driver_arrived', 'in_progress', 'completed', 'cancelled'].includes(day.status)) {
-    return { ok: false as const, code: 'TOUR_ACTION_NOT_ALLOWED' as MobileErrorCode }
-  }
-  if (day.tourBooking.status === 'cancelled') {
-    return { ok: false as const, code: 'TOUR_ACTION_NOT_ALLOWED' as MobileErrorCode }
-  }
-
-  const nextDriverId = driverId === undefined ? day.assignedDriverId : driverId
-  const nextFleetVehicleId = fleetVehicleId === undefined ? day.assignedFleetVehicleId : fleetVehicleId
-  const { startsAt, endsAt } = dayWindow(day.scheduledDate)
-
-  if (nextDriverId && nextDriverId !== day.assignedDriverId) {
-    const driver = await prisma.driver.findUnique({ where: { id: nextDriverId } })
-    if (!driver || !canDriverReceiveNewAssignment(driver.status)) {
-      return { ok: false as const, code: 'DRIVER_INACTIVE' as MobileErrorCode }
+  const parsedPickup = pickup === undefined ? null : tourPickupSchema.safeParse(pickup)
+  if (parsedPickup && !parsedPickup.success)
+    return { ok: false as const, code: 'VALIDATION_ERROR' as MobileErrorCode }
+  const pickupData = parsedPickup?.success ? tourPickupSnapshot(parsedPickup.data) : undefined
+  const changesAssignment = driverId !== undefined || fleetVehicleId !== undefined || !pickupData
+  return prisma.$transaction(async (tx) => {
+    // Serialize pickup edits against lifecycle updates and route-cache writes.
+    await tx.$queryRaw`SELECT id FROM "TourBookingDay" WHERE id = ${tourBookingDayId} FOR UPDATE`
+    const day = await tx.tourBookingDay.findUnique({
+      where: { id: tourBookingDayId },
+      include: tourDayInclude,
+    })
+    if (!day)
+      return {
+        ok: false as const,
+        code: 'TOUR_DAY_NOT_FOUND' as MobileErrorCode,
+      }
+    if (
+      ['in_progress', 'completed', 'cancelled'].includes(day.status) ||
+      (changesAssignment && ['driver_en_route', 'driver_arrived'].includes(day.status))
+    ) {
+      return {
+        ok: false as const,
+        code: 'TOUR_ACTION_NOT_ALLOWED' as MobileErrorCode,
+      }
     }
-    const conflict = await prisma.tourBookingDay.findFirst({
-      where: {
-        id: { not: tourBookingDayId },
-        assignedDriverId: nextDriverId,
-        scheduledDate: { gte: startsAt, lte: endsAt },
-        status: { notIn: ['completed', 'cancelled'] },
-      },
-    })
-    if (conflict) return { ok: false as const, code: 'TOUR_ACTION_NOT_ALLOWED' as MobileErrorCode }
-    const rideConflict = await prisma.bookingLeg.findFirst({
-      where: {
-        driverId: nextDriverId,
-        departureDate: { gte: startsAt, lte: endsAt },
-        status: { notIn: NON_BLOCKING_LEG_STATUSES },
-      },
-    })
-    if (rideConflict) return { ok: false as const, code: 'TOUR_ACTION_NOT_ALLOWED' as MobileErrorCode }
-  }
-
-  if (nextFleetVehicleId && nextFleetVehicleId !== day.assignedFleetVehicleId) {
-    const vehicle = await prisma.fleetVehicle.findUnique({ where: { id: nextFleetVehicleId } })
-    if (!vehicle || vehicle.status !== 'available') {
-      return { ok: false as const, code: 'TOUR_DAY_NOT_READY' as MobileErrorCode }
+    if (['cancelled', 'completed'].includes(day.tourBooking.status)) {
+      return {
+        ok: false as const,
+        code: 'TOUR_ACTION_NOT_ALLOWED' as MobileErrorCode,
+      }
     }
-    const conflict = await prisma.tourBookingDay.findFirst({
-      where: {
-        id: { not: tourBookingDayId },
-        assignedFleetVehicleId: nextFleetVehicleId,
-        scheduledDate: { gte: startsAt, lte: endsAt },
-        status: { notIn: ['completed', 'cancelled'] },
-      },
-    })
-    if (conflict) return { ok: false as const, code: 'TOUR_ACTION_NOT_ALLOWED' as MobileErrorCode }
-    const rideConflict = await prisma.bookingLeg.findFirst({
-      where: {
-        fleetVehicleId: nextFleetVehicleId,
-        departureDate: { gte: startsAt, lte: endsAt },
-        status: { notIn: NON_BLOCKING_LEG_STATUSES },
-      },
-    })
-    if (rideConflict) return { ok: false as const, code: 'TOUR_ACTION_NOT_ALLOWED' as MobileErrorCode }
-  }
 
-  const now = new Date()
-  const updated = await prisma.tourBookingDay.update({
-    where: { id: tourBookingDayId },
-    data: {
-      assignedDriverId: nextDriverId,
-      assignedFleetVehicleId: nextFleetVehicleId,
-      assignedAt: nextDriverId || nextFleetVehicleId ? (day.assignedAt ?? now) : null,
-      acceptedAt: nextDriverId !== day.assignedDriverId ? null : day.acceptedAt,
-      status: nextDriverId && nextFleetVehicleId ? 'assigned' : 'upcoming',
-    },
-    include: tourDayInclude,
+    const nextDriverId = driverId === undefined ? day.assignedDriverId : driverId
+    const nextFleetVehicleId =
+      fleetVehicleId === undefined ? day.assignedFleetVehicleId : fleetVehicleId
+    const { startsAt, endsAt } = dayWindow(day.scheduledDate)
+
+    if (nextDriverId && nextDriverId !== day.assignedDriverId) {
+      const driver = await tx.driver.findUnique({
+        where: { id: nextDriverId },
+      })
+      if (!driver || !canDriverReceiveNewAssignment(driver.status)) {
+        return {
+          ok: false as const,
+          code: 'DRIVER_INACTIVE' as MobileErrorCode,
+        }
+      }
+      const conflict = await tx.tourBookingDay.findFirst({
+        where: {
+          id: { not: tourBookingDayId },
+          assignedDriverId: nextDriverId,
+          scheduledDate: { gte: startsAt, lte: endsAt },
+          status: { notIn: ['completed', 'cancelled'] },
+        },
+      })
+      if (conflict)
+        return {
+          ok: false as const,
+          code: 'TOUR_ACTION_NOT_ALLOWED' as MobileErrorCode,
+        }
+      const rideConflict = await tx.bookingLeg.findFirst({
+        where: {
+          driverId: nextDriverId,
+          departureDate: { gte: startsAt, lte: endsAt },
+          status: { notIn: NON_BLOCKING_LEG_STATUSES },
+        },
+      })
+      if (rideConflict)
+        return {
+          ok: false as const,
+          code: 'TOUR_ACTION_NOT_ALLOWED' as MobileErrorCode,
+        }
+    }
+
+    if (nextFleetVehicleId && nextFleetVehicleId !== day.assignedFleetVehicleId) {
+      const vehicle = await tx.fleetVehicle.findUnique({
+        where: { id: nextFleetVehicleId },
+      })
+      if (!vehicle || vehicle.status !== 'available') {
+        return {
+          ok: false as const,
+          code: 'TOUR_DAY_NOT_READY' as MobileErrorCode,
+        }
+      }
+      const conflict = await tx.tourBookingDay.findFirst({
+        where: {
+          id: { not: tourBookingDayId },
+          assignedFleetVehicleId: nextFleetVehicleId,
+          scheduledDate: { gte: startsAt, lte: endsAt },
+          status: { notIn: ['completed', 'cancelled'] },
+        },
+      })
+      if (conflict)
+        return {
+          ok: false as const,
+          code: 'TOUR_ACTION_NOT_ALLOWED' as MobileErrorCode,
+        }
+      const rideConflict = await tx.bookingLeg.findFirst({
+        where: {
+          fleetVehicleId: nextFleetVehicleId,
+          departureDate: { gte: startsAt, lte: endsAt },
+          status: { notIn: NON_BLOCKING_LEG_STATUSES },
+        },
+      })
+      if (rideConflict)
+        return {
+          ok: false as const,
+          code: 'TOUR_ACTION_NOT_ALLOWED' as MobileErrorCode,
+        }
+    }
+
+    const now = new Date()
+    const updated = await tx.tourBookingDay.update({
+      where: { id: tourBookingDayId },
+      data: {
+        ...pickupData,
+        ...(changesAssignment
+          ? {
+              assignedDriverId: nextDriverId,
+              assignedFleetVehicleId: nextFleetVehicleId,
+              assignedAt: nextDriverId || nextFleetVehicleId ? (day.assignedAt ?? now) : null,
+              acceptedAt: nextDriverId !== day.assignedDriverId ? null : day.acceptedAt,
+              status: nextDriverId && nextFleetVehicleId ? 'assigned' : 'upcoming',
+            }
+          : {}),
+      },
+      include: tourDayInclude,
+    })
+    if (pickupData) await tx.tourJourneySnapshot.deleteMany({ where: { tourBookingDayId } })
+    return {
+      ok: true as const,
+      day: updated,
+      dto: toDriverTourDayDto(updated),
+    }
   })
-  return { ok: true as const, day: updated, dto: toDriverTourDayDto(updated) }
 }
 
 function ensureActionAllowed(day: TourDayForDto, action: DriverTourAction) {

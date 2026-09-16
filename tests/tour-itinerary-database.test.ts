@@ -150,6 +150,11 @@ test(
             principal,
             tourId: id,
             startDate,
+            pickup: {
+              label: 'Customer hotel',
+              address: 'Synthetic address',
+              coordinates: { latitude: 2, longitude: 3 },
+            },
             travellers: 3,
           })
           assert.equal(original.ok, true)
@@ -183,12 +188,17 @@ test(
             principal,
             tourId: id,
             startDate,
+            pickup: {
+              label: 'Customer hotel',
+              address: 'Synthetic address',
+              coordinates: { latitude: 2, longitude: 3 },
+            },
             travellers: 5,
           })
           assert.equal(next.ok, true)
           if (!next.ok) return
           assert.match(next.booking.days[0].title, /updated/)
-          assert.equal(next.booking.days[0].pickupLabel, 'New fixture pickup')
+          assert.equal(next.booking.days[0].pickupLabel, 'Customer hotel')
           assert.notEqual(
             next.booking.days[0].sourceItineraryDayId,
             original.booking.days[0].sourceItineraryDayId
