@@ -8,6 +8,8 @@ import {
   saveAdminTourItinerary,
 } from '../src/lib/admin/tourItinerary'
 import { createCustomerTourBooking } from '../src/lib/mobile/tourBookings'
+import { CANONICAL_TOUR_IDS } from '../src/lib/tourCommercial'
+import { configureCommercialTours, mockCotonouGeocoding } from './helpers/tourCommercialDatabase'
 
 const url = process.env.TOUR_ITINERARY_TEST_DATABASE_URL
 
@@ -19,6 +21,7 @@ test(
     const target = new URL(url!)
     assert.ok(['localhost', '127.0.0.1'].includes(target.hostname))
     assert.ok(/^\/beninfy_(dispatch|tour)_test/.test(target.pathname))
+    mockCotonouGeocoding(t)
     const id = 'itinerary-test-' + randomUUID()
     const user = await prisma.user.create({ data: { name: 'Itinerary fixture customer' } })
     await prisma.tour.create({
@@ -146,10 +149,18 @@ test(
             sessionId: 'test',
           }
           const startDate = new Date(Date.now() + 10 * 86400000).toISOString().slice(0, 10)
+          await configureCommercialTours([...days].sort((a, b) => a.dayNumber - b.dayNumber))
           const original = await createCustomerTourBooking({
             principal,
-            tourId: id,
+            tourId: CANONICAL_TOUR_IDS[0],
+            tourIds: [...CANONICAL_TOUR_IDS],
+            vehicleCategoryId: 'tour-test-sedan',
             startDate,
+            pickup: {
+              label: 'Customer hotel',
+              address: 'Synthetic address',
+              coordinates: { latitude: 2, longitude: 3 },
+            },
             travellers: 3,
           })
           assert.equal(original.ok, true)
@@ -168,33 +179,39 @@ test(
             ...day,
             title: day.title + ' updated',
             defaultStartLabel: 'New fixture pickup',
-            stops: [...day.stops]
-              .reverse()
-              .map((stop, index) => ({
-                ...stop,
-                sortOrder: index + 1,
-                title: stop.title + ' updated',
-              })),
+            stops: [...day.stops].reverse().map((stop, index) => ({
+              ...stop,
+              sortOrder: index + 1,
+              title: stop.title + ' updated',
+            })),
           }))
           const result = await saveAdminTourItinerary(id, { days: edited })
           assert.equal(result.ok, true)
           assert.deepEqual(await prisma.tourBooking.findUniqueOrThrow(query), snapshotBefore)
+          await configureCommercialTours([...edited].sort((a, b) => a.dayNumber - b.dayNumber))
           const next = await createCustomerTourBooking({
             principal,
-            tourId: id,
+            tourId: CANONICAL_TOUR_IDS[0],
+            tourIds: [...CANONICAL_TOUR_IDS],
+            vehicleCategoryId: 'tour-test-sedan',
             startDate,
+            pickup: {
+              label: 'Customer hotel',
+              address: 'Synthetic address',
+              coordinates: { latitude: 2, longitude: 3 },
+            },
             travellers: 5,
           })
           assert.equal(next.ok, true)
           if (!next.ok) return
           assert.match(next.booking.days[0].title, /updated/)
-          assert.equal(next.booking.days[0].pickupLabel, 'New fixture pickup')
+          assert.equal(next.booking.days[0].pickupLabel, 'Customer hotel')
           assert.notEqual(
             next.booking.days[0].sourceItineraryDayId,
             original.booking.days[0].sourceItineraryDayId
           )
-          assert.equal(original.booking.priceNGN, 120000)
-          assert.equal(next.booking.priceNGN, 120000)
+          assert.equal(original.booking.priceNGN, 300000)
+          assert.equal(next.booking.priceNGN, 300000)
           assert.equal(next.booking.days[0].stops[0].title, 'Fixture stop 1 updated')
         }
       )

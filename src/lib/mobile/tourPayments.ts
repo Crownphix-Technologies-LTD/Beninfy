@@ -168,8 +168,8 @@ function payOnUsTourCheckoutConfig({
   }
 }
 
-async function ownedTourBooking(tourBookingId: string, principal: MobilePrincipal) {
-  return prisma.tourBooking.findFirst({
+async function ownedTourBooking(tourBookingId: string, principal: MobilePrincipal, client = prisma) {
+  return client.tourBooking.findFirst({
     where: { id: tourBookingId, userId: principal.userId },
     include: {
       user: { select: { id: true, name: true, email: true, phone: true } },
@@ -210,11 +210,13 @@ export async function initiateMobileTourBookingPayment({
   provider: TourPaymentProvider
   locale: 'en' | 'fr'
   origin: string
-}) {
-  const booking = await ownedTourBooking(tourBookingId, principal)
+}, client = prisma) {
+  const booking = await ownedTourBooking(tourBookingId, principal, client)
   if (!booking) return { ok: false as const, code: 'TOUR_BOOKING_NOT_FOUND' as const }
 
   const paid = successfulPayment(booking.payments)
+  if (booking.quoteStatus === 'pending' || booking.status === 'quote_pending')
+    return { ok: false as const, code: 'TOUR_QUOTE_REQUIRED' as const }
   if (paid || booking.status === 'confirmed' || booking.status === 'active' || booking.status === 'completed') {
     return {
       ok: false as const,

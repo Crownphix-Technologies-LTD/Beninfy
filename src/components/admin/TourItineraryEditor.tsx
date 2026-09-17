@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { formatNGN } from '@/lib/utils'
+import { CANONICAL_TOUR_IDS } from '@/lib/tourCommercial'
 import {
   AdminPageHeader,
   adminInputClass,
@@ -27,6 +28,7 @@ import {
 } from '@/lib/admin/tourItineraryForm'
 
 type Props = {
+  operationsQuote?: { request: string; pending: boolean }
   tour: { id: string; title: string; durationDays: number; startingFromNGN: number }
   initial: ItineraryResponse
   locale: string
@@ -165,6 +167,14 @@ function StopCard({
           />
           <div className="flex flex-wrap items-center gap-4">
             <label className={adminLabelClass}>
+              Add-on
+              <select className={adminInputClass} value={stop.addonCode ?? ''}
+                onChange={(e) => onChange({ ...stop, addonCode: e.target.value || null })}>
+                <option value="">Standard itinerary</option>
+                <option value="gogotinkpo">Gogotinkpo</option>
+              </select>
+            </label>
+            <label className={adminLabelClass}>
               Estimated duration (minutes, optional)
               <input
                 className={adminInputClass}
@@ -191,9 +201,16 @@ function StopCard({
   )
 }
 
-export default function TourItineraryEditor({ tour, initial, locale }: Props) {
+export default function TourItineraryEditor({ tour, initial, locale, operationsQuote }: Props) {
   const router = useRouter()
   const [saved, setSaved] = useState(initial)
+  const [quotePrice, setQuotePrice] = useState('')
+  const [quoteApproved, setQuoteApproved] = useState(operationsQuote ? !operationsQuote.pending : false)
+  const endpoint = operationsQuote
+    ? '/api/admin/tour-bookings/' + encodeURIComponent(tour.id) + '/quote'
+    : '/api/admin/tours/' + encodeURIComponent(tour.id) + '/itinerary'
+  const canonicalIndex = CANONICAL_TOUR_IDS.indexOf(tour.id as typeof CANONICAL_TOUR_IDS[number])
+  const maximumDays = operationsQuote ? tour.durationDays : canonicalIndex >= 0 ? 1 : 30
   const [days, setDays] = useState(() => itineraryDraftFromDto(initial.itineraryDays))
   const [baseline, setBaseline] = useState(() =>
     JSON.stringify(itineraryDraftPayload(itineraryDraftFromDto(initial.itineraryDays)))
@@ -248,7 +265,7 @@ export default function TourItineraryEditor({ tour, initial, locale }: Props) {
     setErrors([])
     setNotice('')
     try {
-      const res = await fetch('/api/admin/tours/' + encodeURIComponent(tour.id) + '/itinerary', {
+      const res = await fetch(endpoint, {
         cache: 'no-store',
       })
       const response = await res.json()
@@ -267,17 +284,21 @@ export default function TourItineraryEditor({ tour, initial, locale }: Props) {
     if (validation.length) return
     setBusy(true)
     try {
-      const res = await fetch('/api/admin/tours/' + encodeURIComponent(tour.id) + '/itinerary', {
+      if (operationsQuote && (!Number.isInteger(Number(quotePrice)) || Number(quotePrice) <= 0))
+        throw new Error('Enter the full booking quote in NGN')
+      const res = await fetch(endpoint, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...itineraryDraftPayload(days),
           expectedUpdatedAt: saved.updatedAt,
+          ...(operationsQuote ? { priceNGN: Number(quotePrice) } : {}),
         }),
       })
       const response = await res.json()
       if (!res.ok) throw new Error(response.error || 'Save failed. Your draft is kept.')
       applySaved(response)
+      if (operationsQuote) setQuoteApproved(true)
       setNotice('Changes saved. Readiness and ordering below are from the backend.')
     } catch (error) {
       setErrors([error instanceof Error ? error.message : 'Save failed. Your draft is kept.'])
@@ -290,7 +311,7 @@ export default function TourItineraryEditor({ tour, initial, locale }: Props) {
     <div>
       <AdminPageHeader
         title={tour.title + ' — Itinerary'}
-        description="Configure the reusable day-by-day plan. Changes apply to new bookings only; existing booking snapshots stay unchanged."
+        description={operationsQuote ? 'Review the requested itinerary and approve the booking quote.' : 'Configure the reusable day-by-day plan. Changes apply to new bookings only; existing booking snapshots stay unchanged.'}
         icon="route"
         actions={
           <button
@@ -299,18 +320,29 @@ export default function TourItineraryEditor({ tour, initial, locale }: Props) {
             disabled={busy}
             onClick={() => {
               if (!dirty || confirm('Discard unsaved itinerary changes and return to Tours?'))
-                router.push('/' + locale + '/admin/tours')
+                router.push('/' + locale + '/admin/' + (operationsQuote ? 'tour-bookings' : 'tours'))
             }}
           >
-            Back to Tours
+            {operationsQuote ? 'Back to bookings' : 'Back to Tours'}
           </button>
         }
       />
+      {operationsQuote && (
+        <section className="mb-5 border-b border-gray-200 py-5">
+          <p className="mb-3 whitespace-pre-wrap text-sm text-gray-700">{operationsQuote.request}</p>
+          <label className={adminLabelClass}>
+            Full booking quote (NGN)
+            <input type="number" min={1} max={20000000} step={1} className={adminInputClass}
+              value={quotePrice} disabled={quoteApproved} onChange={(event) => setQuotePrice(event.target.value)} />
+          </label>
+          {quoteApproved && <p role="status" className="mt-3 text-sm text-emerald-700">Quote approved</p>}
+        </section>
+      )}
       <section className="mb-5 grid gap-4 rounded-2xl bg-white p-5 shadow-sm md:grid-cols-2">
         <div>
-          <p className="text-xs font-semibold text-gray-500 uppercase">Fixed package price</p>
+          <p className="text-xs font-semibold text-gray-500 uppercase">{operationsQuote ? 'Booking price' : 'Starting price per Tour'}</p>
           <p className="mt-1 text-2xl font-bold text-[#3e004c]">
-            {formatNGN(tour.startingFromNGN)}
+            {operationsQuote?.pending ? 'Awaiting quote' : formatNGN(tour.startingFromNGN)}
           </p>
           <p className="mt-1 text-sm text-gray-600">
             Not multiplied by traveller count. Catalogue duration: {tour.durationDays} days.
@@ -349,10 +381,10 @@ export default function TourItineraryEditor({ tour, initial, locale }: Props) {
           <button
             type="button"
             className={adminPrimaryButtonClass}
-            disabled={busy || !dirty}
+            disabled={busy || (operationsQuote ? quoteApproved : !dirty)}
             onClick={() => void save()}
           >
-            {busy ? 'Please wait…' : 'Save Changes'}
+            {busy ? 'Please wait…' : operationsQuote ? 'Approve quote and itinerary' : 'Save Changes'}
           </button>
         </div>
       </div>
@@ -377,7 +409,7 @@ export default function TourItineraryEditor({ tour, initial, locale }: Props) {
           Review the package duration in Tour details if needed.
         </p>
       )}
-      <fieldset disabled={busy} className="space-y-5 disabled:opacity-70">
+      <fieldset disabled={busy || (Boolean(operationsQuote) && quoteApproved)} className="space-y-5 disabled:opacity-70">
         {days.map((day, d) => (
           <section
             key={day.key}
@@ -393,7 +425,7 @@ export default function TourItineraryEditor({ tour, initial, locale }: Props) {
               <div className="flex gap-3 text-xs">
                 <button
                   type="button"
-                  disabled={d === 0}
+                  disabled={Boolean(operationsQuote) || d === 0}
                   className="disabled:opacity-30"
                   onClick={() => setDays(moveItem(days, d, -1))}
                 >
@@ -401,7 +433,7 @@ export default function TourItineraryEditor({ tour, initial, locale }: Props) {
                 </button>
                 <button
                   type="button"
-                  disabled={d === days.length - 1}
+                  disabled={Boolean(operationsQuote) || d === days.length - 1}
                   className="disabled:opacity-30"
                   onClick={() => setDays(moveItem(days, d, 1))}
                 >
@@ -410,6 +442,7 @@ export default function TourItineraryEditor({ tour, initial, locale }: Props) {
                 <button
                   type="button"
                   className="text-red-700"
+                  disabled={Boolean(operationsQuote)}
                   onClick={() => {
                     if (
                       confirm(
@@ -459,10 +492,9 @@ export default function TourItineraryEditor({ tour, initial, locale }: Props) {
                   />
                 </div>
                 <p className="text-sm text-gray-600">
-                  Default pickup is separate from Stop 1. Configure the actual hotel or meeting
-                  point for new bookings. This edits the template, not an individual customer
-                  booking. End location is optional; leave it empty unless the itinerary specifies
-                  it.
+                  Default pickup is separate from Stop 1. Keep a package meeting point here when
+                  applicable. Customer-selected pickup takes precedence for new private Tour bookings.
+                  End location is optional; leave it empty unless the itinerary specifies it.
                 </p>
                 <div className="grid gap-4 xl:grid-cols-2">
                   <TourLocationEditor
@@ -482,8 +514,8 @@ export default function TourItineraryEditor({ tour, initial, locale }: Props) {
             </details>
             {!locationHasCoordinates(day.start) && (
               <p className="mb-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
-                Default pickup is not configured. Set it before physical testing; the current
-                booking readiness check does not require pickup coordinates.
+                Template default pickup is not configured. Customers select their pickup at booking;
+                template readiness depends on itinerary days and stops.
               </p>
             )}
             {day.stops.length === 0 && (
@@ -540,16 +572,16 @@ export default function TourItineraryEditor({ tour, initial, locale }: Props) {
             <button
               type="button"
               className={adminSecondaryButtonClass}
-              onClick={() => setDays(beninThreeDayDraft())}
+              onClick={() => setDays(canonicalIndex >= 0 ? [beninThreeDayDraft()[canonicalIndex]] : beninThreeDayDraft())}
             >
-              Use 3-day Benin itinerary (names only)
+              {canonicalIndex >= 0 ? 'Use Tour outline (names only)' : 'Use 3-day Benin itinerary (names only)'}
             </button>
           </div>
         )}
         <button
           type="button"
           className={adminSecondaryButtonClass}
-          disabled={days.length >= 30}
+          disabled={days.length >= maximumDays}
           onClick={() => setDays([...days, newDay()])}
         >
           Add Day

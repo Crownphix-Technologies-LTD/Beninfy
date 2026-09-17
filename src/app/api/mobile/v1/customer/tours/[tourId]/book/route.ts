@@ -1,14 +1,22 @@
 import { z } from 'zod'
+import { tourPickupSchema } from '@/lib/mobile/tourPickup'
 import { checkRateLimit, requestIp } from '@/lib/rateLimit'
 import { requireMobilePrincipal } from '@/lib/mobile/auth'
 import { mobileError, mobileErrorFromCode, mobileValidationError } from '@/lib/mobile/errors'
 import { requireCompletedCustomerOnboarding } from '@/lib/mobile/onboarding'
 import { createCustomerTourBooking } from '@/lib/mobile/tourBookings'
+import { CANONICAL_TOUR_IDS } from '@/lib/tourCommercial'
 
 export const runtime = 'nodejs'
 
 const schema = z.object({
+  tourIds: z.array(z.enum(CANONICAL_TOUR_IDS)).min(1).max(3).optional(),
+  vehicleCategoryId: z.string().trim().min(1).max(80),
+  gogotinkpo: z.boolean().optional(),
+  itineraryMode: z.enum(['standard', 'custom']).optional(),
+  customItinerary: z.string().trim().min(10).max(4000).optional(),
   startDate: z.string().trim(),
+  pickup: tourPickupSchema,
   travellers: z.number().int(),
   idempotencyKey: z.string().trim().min(8).max(120).optional(),
 })
@@ -43,9 +51,15 @@ export async function POST(req: Request, { params }: { params: Promise<{ tourId:
 
   const result = await createCustomerTourBooking({
     principal: guard.principal,
+    tourIds: parsed.data.tourIds,
+    vehicleCategoryId: parsed.data.vehicleCategoryId,
+    gogotinkpo: parsed.data.gogotinkpo,
+    itineraryMode: parsed.data.itineraryMode,
+    customItinerary: parsed.data.customItinerary,
     tourId,
     startDate: parsed.data.startDate,
     travellers: parsed.data.travellers,
+    pickup: parsed.data.pickup,
     idempotencyKey: parsed.data.idempotencyKey,
   })
   if (!result.ok) return mobileErrorFromCode(result.code)

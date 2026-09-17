@@ -2,6 +2,10 @@
 
 Frozen Tour v1 execution, payment, tracking, cancellation, and error contracts are documented in `docs/mobile-api/tour-v1-contract.md`.
 
+The [Tour commercial model](./tour-commercial-model.md) supersedes the historical
+single-package booking/pricing examples below. New checkout requests require
+`vehicleCategoryId`; combination checkout uses one booking and ordered product Days.
+
 Implemented endpoints:
 
 - `GET /api/mobile/v1/tours`
@@ -85,9 +89,16 @@ Create request:
 {
   "startDate": "2026-10-15",
   "travellers": 2,
-  "idempotencyKey": "customer-generated-request-id"
+  "idempotencyKey": "customer-generated-request-id",
+  "pickup": {
+    "label": "Hotel A",
+    "address": "Synthetic test address A",
+    "coordinates": { "latitude": 1, "longitude": 2 }
+  }
 }
 ```
+
+Pickup is required; the example above uses synthetic coordinates, not a real hotel. See [the exact pickup contract](./tour-v1-contract.md#customer-selected-tour-pickup) for validation, DTOs and Operations overrides.
 
 `idempotencyKey` is optional but recommended for mobile double-tap protection. It must be 8 to 120 characters using letters, numbers, `.`, `_`, `:`, or `-`. Reusing the same key for the same authenticated customer returns the existing Tour booking with HTTP `200`; a fresh create returns HTTP `201`.
 
@@ -97,6 +108,11 @@ Create success response:
 {
   "tourBooking": {
     "id": "tour_booking_id",
+    "pickup": {
+      "label": "Hotel A",
+      "address": "Synthetic test address A",
+      "coordinates": { "latitude": 1, "longitude": 2 }
+    },
     "reference": "BFYT-0123ABCD45",
     "tourId": "ganvie-day-tour",
     "status": "payment_pending",
@@ -161,10 +177,11 @@ Launch limitations:
 - Driver Tour execution, Customer live Tour tracking, and Tour journey intelligence are implemented for paid Tour bookings.
 - Tour chat is not supported in v1.
 
-Backoffice read-only visibility:
+Backoffice booking visibility and day operations:
 
 - `GET /api/admin/tour-bookings`
 - `GET /api/admin/tour-bookings/:id`
+- `PATCH /api/admin/tour-bookings/days/:dayId` (assignment and explicit pickup override)
 - `/:locale/admin/tour-bookings`
 
 Admin access requires the existing `tours` permission.
@@ -359,11 +376,16 @@ The backend remains authoritative for:
 - `TourBooking.status`
 - `TourBooking.paymentStatus`
 
-Tour price v1 uses `Tour.startingFromNGN` as the actual payable package price snapshot. It is not multiplied by traveller count. Traveller count is operational manifest data unless a later Tour pricing model explicitly introduces per-person or vehicle-specific Tour pricing.
+Tour pricing now follows [the commercial model](./tour-commercial-model.md):
+Vehicle category rate per selected Tour, optional Cotonou-only Gogotinkpo addon,
+one booking for a combination of products, and an Operations quote gate for
+custom itineraries. Traveller count is capacity/operations data, not a multiplier.
 
 Tour coupons are unsupported in v1. Ride coupons must not be silently applied to Tour bookings.
 
-If the authoritative Tour price is zero, the backend confirms the Tour booking without initializing an external provider.
+Pending custom quotes cannot initialize payment; zero in the legacy amount
+column is not a free booking. Existing historical free-booking behavior remains
+behind the established payment path for non-quote bookings.
 
 ## Tour Live Tracking V1
 
@@ -462,7 +484,8 @@ The editor manages ordered days and ordered stop cards, EN/FR titles and
 descriptions, stop duration/required flags, default pickup and optional end
 locations. Move-up/down controls renumber days/stops sequentially on save.
 Internal template IDs are never editable. Package price is displayed from
-`Tour.startingFromNGN`: the frozen price is not multiplied by traveller count.
+`Tour.startingFromNGN` for display. Effective booking prices are frozen from
+Tour vehicle rates or an approved Operations quote, not multiplied by travellers.
 
 Only an empty draft offers the explicit **Use 3-day Benin itinerary (names only)** action:
 
@@ -490,18 +513,14 @@ appropriate website referrer configuration. If search is unavailable, Operations
 may explicitly enable manual entry using a verified coordinate source. No
 coordinates are guessed. The existing preview has no draggable-marker control.
 
-Under each day's details, separately configure **Default pickup / start** with
-label, hotel/meeting address and coordinates. **Stop 1 is not pickup.** This edits
-the reusable template; new bookings copy the defaults into their day snapshots.
-It does not edit an existing customer's hotel/pickup. Leave the optional default
-end blank unless an actual end location is specified.
+Under each day's details, optionally configure **Default pickup / start** for a
+package meeting point. **Stop 1 is not pickup.** New private Tour bookings require
+one Customer-selected pickup, which overrides template defaultStart on all booked
+days. Keep optional end blank unless an actual end location is specified.
 
-The current Customer booking request accepts start date, traveller count and an
-optional idempotency key; it has no customer-selected pickup. Every new booking
-inherits each day's template pickup. The booking-day Admin PATCH only assigns
-driver/vehicle and cannot change pickup. A hotel-specific or individually agreed
-meeting point therefore needs a separate per-booking pickup contract before
-physical testing; do not configure an attraction as a substitute.
+Operations can change a booked day's pickup through Tour bookings, without
+changing the original booking-level pickup, sibling days or source template.
+See [the frozen pickup contract](./tour-v1-contract.md#customer-selected-tour-pickup).
 
 ### Save and readiness
 
@@ -517,9 +536,8 @@ Guidance identifies missing days, days without stops and stops without valid
 coordinates. There is no manual readiness checkbox.
 
 The frozen readiness rule does **not** require default pickup coordinates. The
-editor therefore warns separately when a pickup is absent: configure it before
-physical testing even if the saved package already reports ready. No readiness
-reason, Tour lifecycle, payment, tracking or journey contract was added.
+editor explains that Customer pickup is required at checkout instead. No template
+readiness reason or Tour lifecycle/payment state is added.
 
 The editor retains failed drafts, marks unsaved changes, confirms destructive
 removal/reload and navigation through its Back button or Admin links, and uses

@@ -3,6 +3,7 @@ import type { Prisma } from '@prisma/client'
 type Dateish = Date | string
 
 export type TourItineraryStopInput = {
+  addonCode?: string | null
   id?: string
   sortOrder: number
   title: string
@@ -35,6 +36,7 @@ export type TourItineraryDayInput = {
 }
 
 export type TourItineraryStopDto = {
+  addonCode?: string | null
   id: string
   sortOrder: number
   title: string
@@ -72,7 +74,7 @@ export type TourItineraryDayDto = {
 
 export type TourExecutionReadiness = {
   executionReady: boolean
-  reason: 'ready' | 'no_itinerary_days' | 'missing_day_stop' | 'missing_stop_coordinates'
+  reason: 'ready' | 'no_itinerary_days' | 'missing_day_stop' | 'missing_stop_coordinates' | 'invalid_canonical_day_count'
 }
 
 export type TourWithItinerary = {
@@ -95,6 +97,7 @@ export type TourWithItinerary = {
       createdAt?: Dateish
       updatedAt?: Dateish
       stops: Array<{
+        addonCode?: string | null
         id: string
         sortOrder: number
         title: string
@@ -233,6 +236,7 @@ export function toTourItineraryDto(tour: TourWithItinerary): TourItineraryDayDto
         .sort((left, right) => left.sortOrder - right.sortOrder)
         .map((stop) => ({
           id: stop.id,
+          addonCode: stop.addonCode ?? null,
           sortOrder: stop.sortOrder,
           title: stop.title,
           titleFr: stop.titleFr,
@@ -266,6 +270,7 @@ export function tourItineraryCreateData(days: TourItineraryDayInput[]): Prisma.T
     defaultEndLongitude: day.defaultEndLongitude ?? null,
     stops: {
       create: day.stops.map((stop) => ({
+        addonCode: stop.addonCode ?? null,
         sortOrder: stop.sortOrder,
         title: stop.title,
         titleFr: stop.titleFr,

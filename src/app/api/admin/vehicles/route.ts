@@ -6,8 +6,10 @@ import { writeAuditLog } from '@/lib/auditLog'
 import { notifyBackofficeRecordChanged } from '@/lib/notifications'
 import { prisma } from '@/lib/prisma'
 import { ensureDefaultVehicles } from '@/lib/vehicleCatalog'
+import { TOUR_PRICING_CATEGORIES } from '@/lib/tourCommercial'
 
 const schema = z.object({
+  tourPricingCategory: z.union([z.enum(TOUR_PRICING_CATEGORIES), z.literal('')]).nullable().optional().transform((value) => value === '' ? null : value),
   id: z.string().min(1).max(60),
   name: z.string().min(1).max(120),
   nameFr: z.string().nullable().optional(),
