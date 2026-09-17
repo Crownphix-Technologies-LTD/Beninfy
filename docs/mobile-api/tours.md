@@ -2,6 +2,10 @@
 
 Frozen Tour v1 execution, payment, tracking, cancellation, and error contracts are documented in `docs/mobile-api/tour-v1-contract.md`.
 
+The [Tour commercial model](./tour-commercial-model.md) supersedes the historical
+single-package booking/pricing examples below. New checkout requests require
+`vehicleCategoryId`; combination checkout uses one booking and ordered product Days.
+
 Implemented endpoints:
 
 - `GET /api/mobile/v1/tours`
@@ -372,11 +376,16 @@ The backend remains authoritative for:
 - `TourBooking.status`
 - `TourBooking.paymentStatus`
 
-Tour price v1 uses `Tour.startingFromNGN` as the actual payable package price snapshot. It is not multiplied by traveller count. Traveller count is operational manifest data unless a later Tour pricing model explicitly introduces per-person or vehicle-specific Tour pricing.
+Tour pricing now follows [the commercial model](./tour-commercial-model.md):
+Vehicle category rate per selected Tour, optional Cotonou-only Gogotinkpo addon,
+one booking for a combination of products, and an Operations quote gate for
+custom itineraries. Traveller count is capacity/operations data, not a multiplier.
 
 Tour coupons are unsupported in v1. Ride coupons must not be silently applied to Tour bookings.
 
-If the authoritative Tour price is zero, the backend confirms the Tour booking without initializing an external provider.
+Pending custom quotes cannot initialize payment; zero in the legacy amount
+column is not a free booking. Existing historical free-booking behavior remains
+behind the established payment path for non-quote bookings.
 
 ## Tour Live Tracking V1
 
@@ -475,7 +484,8 @@ The editor manages ordered days and ordered stop cards, EN/FR titles and
 descriptions, stop duration/required flags, default pickup and optional end
 locations. Move-up/down controls renumber days/stops sequentially on save.
 Internal template IDs are never editable. Package price is displayed from
-`Tour.startingFromNGN`: the frozen price is not multiplied by traveller count.
+`Tour.startingFromNGN` for display. Effective booking prices are frozen from
+Tour vehicle rates or an approved Operations quote, not multiplied by travellers.
 
 Only an empty draft offers the explicit **Use 3-day Benin itinerary (names only)** action:
 

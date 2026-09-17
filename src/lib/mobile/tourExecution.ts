@@ -11,6 +11,8 @@ import {
   type DriverTripView,
 } from '@/lib/mobile/driverOperations'
 import { NON_BLOCKING_LEG_STATUSES } from '@/lib/tripLifecycle'
+import { validateCotonouTourPickup } from '@/lib/mobile/tourPickupTerritory'
+import { tourVehicleQualifies } from '@/lib/tourCommercial'
 
 export const DRIVER_TOUR_ACTIONS = [
   'accept',
@@ -46,6 +48,10 @@ export const TOUR_STOP_EXECUTION_STATUSES = [
 type Dateish = Date | string
 
 export type TourDayForDto = {
+  sourceTourId?: string | null
+  sourceTourTitle?: string | null
+  transportationOnly?: boolean
+  gogotinkpo?: boolean
   id: string
   tourBookingId: string
   sourceItineraryDayId: string | null
@@ -283,6 +289,10 @@ export function toDriverTourDayDto(day: TourDayForDto) {
     },
     day: {
       id: day.id,
+      sourceTourId: day.sourceTourId ?? null,
+      sourceTourTitle: day.sourceTourTitle ?? null,
+      transportationOnly: day.transportationOnly ?? false,
+      gogotinkpo: day.gogotinkpo ?? false,
       dayNumber: day.dayNumber,
       totalDays,
       label: `Day ${day.dayNumber} of ${totalDays}`,
@@ -393,6 +403,10 @@ export async function assignTourBookingDay({
   if (parsedPickup && !parsedPickup.success)
     return { ok: false as const, code: 'VALIDATION_ERROR' as MobileErrorCode }
   const pickupData = parsedPickup?.success ? tourPickupSnapshot(parsedPickup.data) : undefined
+  if (parsedPickup?.success) {
+    const territory = await validateCotonouTourPickup(parsedPickup.data)
+    if (!territory.ok) return territory
+  }
   const changesAssignment = driverId !== undefined || fleetVehicleId !== undefined || !pickupData
   return prisma.$transaction(async (tx) => {
     // Serialize pickup edits against lifecycle updates and route-cache writes.
@@ -406,6 +420,8 @@ export async function assignTourBookingDay({
         ok: false as const,
         code: 'TOUR_DAY_NOT_FOUND' as MobileErrorCode,
       }
+    if (day.tourBooking.quoteStatus === 'pending')
+      return { ok: false as const, code: 'TOUR_QUOTE_REQUIRED' as MobileErrorCode }
     if (
       ['in_progress', 'completed', 'cancelled'].includes(day.status) ||
       (changesAssignment && ['driver_en_route', 'driver_arrived'].includes(day.status))
@@ -473,6 +489,15 @@ export async function assignTourBookingDay({
           ok: false as const,
           code: 'TOUR_DAY_NOT_READY' as MobileErrorCode,
         }
+      }
+      if (day.tourBooking.vehicleCategoryId) {
+        const category = await tx.vehicle.findUnique({ where: { id: vehicle.vehicleId } })
+        const snapshot = day.tourBooking.commercialSnapshot
+        const pricingCategory = snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot) && typeof snapshot.pricingCategory === 'string'
+          ? snapshot.pricingCategory : null
+        if (!tourVehicleQualifies({ vehicle: category, selectedCategoryId: day.tourBooking.vehicleCategoryId,
+          selectedPricingCategory: pricingCategory, travellers: day.tourBooking.travellers }))
+          return { ok: false as const, code: 'TOUR_DAY_NOT_READY' as MobileErrorCode }
       }
       const conflict = await tx.tourBookingDay.findFirst({
         where: {

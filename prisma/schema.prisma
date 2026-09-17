@@ -238,6 +238,7 @@ model Booking {
 }
 
 model Vehicle {
+  tourPricingCategory String?
   id              String         @id
   name            String
   nameFr          String?
@@ -667,6 +668,8 @@ model Coupon {
 }
 
 model Tour {
+  active          Boolean            @default(false)
+  transportationOnly Boolean         @default(false)
   id              String             @id
   title           String
   titleFr         String?
@@ -713,6 +716,7 @@ model TourItineraryDay {
 }
 
 model TourItineraryStop {
+  addonCode                String?
   id                       String           @id @default(cuid())
   itineraryDayId           String
   itineraryDay             TourItineraryDay @relation(fields: [itineraryDayId], references: [id], onDelete: Cascade)
@@ -734,6 +738,15 @@ model TourItineraryStop {
 }
 
 model TourBooking {
+  selectedTourIds   String[]         @default([])
+  vehicleCategoryId String?
+  vehicleCategoryName String?
+  vehicleCapacity   Int?
+  itineraryMode     String           @default("standard")
+  customItinerary   String?
+  quoteStatus       String           @default("not_required")
+  quotedAt          DateTime?
+  commercialSnapshot Json?
   pickupLabel       String?
   pickupAddress     String?
   pickupLatitude    Float?
@@ -777,6 +790,11 @@ model TourBooking {
 }
 
 model TourBookingDay {
+  sourceTourId           String?
+  sourceTourTitle        String?
+  transportationOnly    Boolean             @default(false)
+  componentPriceMinor   Int?
+  gogotinkpo             Boolean             @default(false)
   id                     String              @id @default(cuid())
   tourBookingId          String
   tourBooking            TourBooking         @relation(fields: [tourBookingId], references: [id], onDelete: Cascade)
@@ -818,6 +836,13 @@ model TourBookingDay {
   @@index([assignedDriverId, scheduledDate])
   @@index([assignedFleetVehicleId, scheduledDate])
   @@index([status, scheduledDate])
+}
+
+model TourCommercialRate {
+  id String @id
+  priceMinor Int
+  active Boolean @default(true)
+  updatedAt DateTime @default(now()) @updatedAt
 }
 
 model TourStopExecution {

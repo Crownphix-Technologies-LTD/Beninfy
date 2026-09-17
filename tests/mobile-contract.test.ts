@@ -151,7 +151,6 @@ import {
   TOUR_BOOKING_MIN_TRAVELLERS,
   TOUR_BOOKING_STATUSES,
   TOUR_STOP_EXECUTION_STATUSES,
-  calculateTourPriceSnapshot,
   generateTourBookingReference,
   normalizeTourBookingIdempotencyKey,
   toTourBookingDto,
@@ -4537,6 +4536,7 @@ test('tour booking idempotency key is optional and constrained for mobile retrie
 
 test('tour booking lifecycle constants expose the phase 2 source of truth', () => {
   assert.deepEqual(TOUR_BOOKING_STATUSES, [
+    'quote_pending',
     'payment_pending',
     'confirmed',
     'active',
@@ -4565,12 +4565,11 @@ test('tour booking references are customer-safe and human-readable', () => {
   assert.match(generateTourBookingReference(), /^BFYT-[0-9A-F]{10}$/)
 })
 
-test('tour booking price snapshot uses the existing catalogue source only', () => {
-  assert.deepEqual(calculateTourPriceSnapshot({ startingFromNGN: 185000 }), {
-    currencyCode: 'NGN',
-    priceNGN: 185000,
-    pricingBasis: 'tour.startingFromNGN',
-  })
+test('tour booking price authority comes from commercial rates rather than catalogue display prices', () => {
+  const source = readFileSync('src/lib/mobile/tourBookings.ts', 'utf8')
+  assert.match(source, /tourCommercialRate\.findUnique/)
+  assert.match(source, /priceMinor: rate\.priceMinor/)
+  assert.doesNotMatch(source, /priceNGN: tour\.startingFromNGN/)
 })
 
 test('tour booking dto exposes snapshot days, stops, payment state and progress', () => {
@@ -4710,11 +4709,11 @@ test('tour booking endpoints require customer ownership and do not expose provid
 test('tour booking source snapshots itinerary and rejects unready catalogue tours', () => {
   const source = readFileSync('src/lib/mobile/tourBookings.ts', 'utf8')
 
-  assert.match(source, /tourExecutionReadiness\(tour\)/)
+  assert.match(source, /orderedTours\.map\(canonicalTourExecutionReadiness\)/)
   assert.match(source, /code:\s*'TOUR_NOT_EXECUTION_READY'/)
   assert.match(source, /sourceItineraryDayId:\s*day\.id/)
   assert.match(source, /sourceItineraryStopId:\s*stop\.id/)
-  assert.match(source, /tourTitle:\s*tour\.title/)
+  assert.match(source, /tourTitle:\s*orderedTours\.map/)
   assert.match(source, /tourImage:\s*tour\.image/)
 })
 
@@ -5053,7 +5052,7 @@ test('tour cancellation is unpaid-customer only and keeps refund policy separate
 
   assert.match(route, /requireMobilePrincipal\(req,\s*'CUSTOMER'\)/)
   assert.match(route, /mobile-tour-cancel/)
-  assert.match(service, /status !== 'payment_pending'/)
+  assert.match(service, /\['payment_pending', 'quote_pending'\]\.includes\(booking\.status\)/)
   assert.match(service, /paymentStatus !== 'pending'/)
   assert.match(service, /TOUR_ACTION_NOT_ALLOWED/)
   assert.match(docs, /refund policy/i)
@@ -5261,7 +5260,7 @@ test('tour v1 contract freezes customer tracking driver detail errors pricing ch
   const architecture = readFileSync('docs/architecture/tour-execution-foundation.md', 'utf8')
   const backoffice = readFileSync('src/app/[locale]/admin/tour-bookings/page.tsx', 'utf8')
 
-  assert.match(contract, /Tour pricing is a fixed package snapshot/)
+  assert.match(contract, /Tour pricing uses the selected Vehicle category/)
   assert.match(contract, /Tour chat is unsupported in v1/)
   assert.match(contract, /Driver detail DTO/)
   assert.match(contract, /Customer Tracking/)

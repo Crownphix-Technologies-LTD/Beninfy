@@ -5,6 +5,7 @@ import { Upload } from 'lucide-react'
 import { CrudTable } from '@/components/admin/CrudTable'
 import { formatNGN } from '@/lib/utils'
 import { adminSecondaryButtonClass } from '@/components/admin/AdminUI'
+import { TOUR_PRICING_CATEGORIES } from '@/lib/tourCommercial'
 
 interface Vehicle {
   id: string
@@ -108,6 +109,9 @@ export default function AdminVehiclesPage() {
         { name: 'id', label: 'Category slug', type: 'text', required: true, createOnly: true, placeholder: 'e.g. suv, saloon, executive-suv, minibus' },
         { name: 'name', label: 'Category name', type: 'text', required: true },
         { name: 'nameFr', label: 'Category name (FR)', type: 'text' },
+        { name: 'tourPricingCategory', label: 'Tour pricing category', type: 'select', options: [
+          { value: '', label: 'Not offered for Tours' }, ...TOUR_PRICING_CATEGORIES.map((value) => ({ value, label: value })),
+        ] },
         { name: 'capacity', label: 'Capacity', type: 'number', required: true },
         { name: 'luggageCapacity', label: 'Luggage capacity', type: 'number' },
         { name: 'available', label: 'Available for booking', type: 'boolean' },

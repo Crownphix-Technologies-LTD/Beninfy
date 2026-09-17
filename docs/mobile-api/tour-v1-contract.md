@@ -2,6 +2,10 @@
 
 Tour v1 is backend-authoritative. Flutter must not derive Tour status, payment state, route targets, allowed actions, or pricing locally.
 
+The [commercial-model contract](./tour-commercial-model.md) defines the canonical
+catalogue, combination checkout and custom quote gate. The execution wire fields
+below retain compatibility; new checkout requests also require `vehicleCategoryId`.
+
 ## Customer-selected Tour pickup
 
 POST `/api/mobile/v1/customer/tours/:tourId/book` now requires one primary pickup.
@@ -13,6 +17,7 @@ is exposed. This example uses **synthetic test coordinates, not a real hotel**:
 {
   "startDate": "2026-10-15",
   "travellers": 3,
+  "vehicleCategoryId": "saloon",
   "idempotencyKey": "customer-generated-request-id",
   "pickup": {
     "label": "Hotel A",
@@ -27,6 +32,8 @@ trimmed, nonempty and at most 300 characters. Latitude/longitude must be finite
 JSON numbers within [-90, 90] / [-180, 180]. Missing pickup, text-only pickup,
 null/partial coordinates and numeric strings return HTTP 400 VALIDATION_ERROR.
 No server geocoding or template fallback supplies a missing Customer pickup.
+Valid coordinates are reverse-geocoded server-side to validate Cotonou territory.
+The synthetic example coordinates are outside Cotonou and are not bookable.
 
 The response retains the existing `{ tourBooking, pricingBasis }` envelope.
 `tourBooking.pickup` is added with exactly this shape:
@@ -110,13 +117,17 @@ addition before physical Tour acceptance; no Flutter files are changed here.
 
 ## Pricing
 
-Tour pricing is a fixed package snapshot from `Tour.startingFromNGN`.
+Tour pricing uses the selected Vehicle category's `TourCommercialRate` per
+selected canonical Tour. See [the commercial contract](./tour-commercial-model.md)
+for the exact bundle, addon, custom-quote and migration shapes.
 
 - Not per traveller.
 - Not multiplied by traveller count.
-- Not vehicle-dependent.
+- Vehicle category determines the per-Tour component price.
 - Traveller count is operational manifest data only.
-- `pricingBasis` remains `tour.startingFromNGN` for catalogue compatibility.
+- `pricingBasis` is `vehicle_per_selected_tour` or `operations_quote_required`.
+- Gogotinkpo adds 20% to Cotonou's component only.
+- Ganvie is transportation only. One bundle owns one booking/reference/payment.
 
 ## Payment Ownership
 

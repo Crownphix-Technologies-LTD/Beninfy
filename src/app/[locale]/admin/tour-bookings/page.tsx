@@ -1,6 +1,8 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import Link from 'next/link'
+import { useLocale } from 'next-intl'
 import TourDayPickupEditor from '@/components/admin/TourDayPickupEditor'
 import { formatNGN } from '@/lib/utils'
 import { AdminModal, AdminPageHeader, AdminStatusBadge, adminSecondaryButtonClass } from '@/components/admin/AdminUI'
@@ -45,6 +47,9 @@ type TourBookingDay = {
 }
 
 type TourBookingRow = {
+  itineraryMode: string
+  quoteStatus: string
+  customItinerary: string | null
   pickup: TourBookingDay['pickup']
   id: string
   reference: string
@@ -100,6 +105,7 @@ function eta(seconds: number | null | undefined) {
 }
 
 export default function AdminTourBookingsPage() {
+  const locale = useLocale()
   const [tourBookings, setTourBookings] = useState<TourBookingRow[]>([])
   const [selected, setSelected] = useState<TourBookingRow | null>(null)
   const [drivers, setDrivers] = useState<DriverOption[]>([])
@@ -260,7 +266,7 @@ export default function AdminTourBookingsPage() {
                   </td>
                   <td className="px-5 py-4 text-gray-700">{formatDate(booking.startDate)} - {formatDate(booking.endDate)}</td>
                   <td className="px-5 py-4 text-gray-700">{booking.travellers}</td>
-                  <td className="px-5 py-4 font-semibold text-gray-900">{formatNGN(booking.price.value)}</td>
+                  <td className="px-5 py-4 font-semibold text-gray-900">{booking.quoteStatus === 'pending' ? 'Awaiting quote' : formatNGN(booking.price.value)}</td>
                   <td className="px-5 py-4">
                     <div className="space-y-2">
                       <AdminStatusBadge status={booking.status} />
@@ -271,6 +277,12 @@ export default function AdminTourBookingsPage() {
                     <button type="button" className={`${adminSecondaryButtonClass} !px-3 !py-2 !text-xs`} onClick={() => setSelected(booking)}>
                       Details
                     </button>
+                    {booking.quoteStatus === 'pending' && booking.status === 'quote_pending' && (
+                      <Link className={`${adminSecondaryButtonClass} mt-2 !px-3 !py-2 !text-xs`}
+                        href={'/' + locale + '/admin/tour-bookings/' + encodeURIComponent(booking.id) + '/quote'}>
+                        Quote itinerary
+                      </Link>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -300,7 +312,7 @@ export default function AdminTourBookingsPage() {
               </div>
               <div className="rounded-xl border border-gray-100 bg-[#fbf7fc] p-3">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-400">Price</p>
-                <p className="mt-1 text-sm font-semibold text-gray-900">{formatNGN(selected.price.value)}</p>
+                <p className="mt-1 text-sm font-semibold text-gray-900">{selected.quoteStatus === 'pending' ? 'Awaiting quote' : formatNGN(selected.price.value)}</p>
               </div>
               <div className="rounded-xl border border-gray-100 bg-[#fbf7fc] p-3">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-400">Payment</p>

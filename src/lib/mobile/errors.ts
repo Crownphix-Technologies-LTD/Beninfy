@@ -97,6 +97,8 @@ export type MobileErrorCode =
   | 'AVATAR_STORAGE_UNAVAILABLE'
   | 'ACCOUNT_DELETE_CONFIRMATION_INVALID'
   | 'TOUR_NOT_FOUND'
+  | 'TOUR_PICKUP_OUTSIDE_COTONOU'
+  | 'TOUR_QUOTE_REQUIRED'
   | 'TOUR_NOT_EXECUTION_READY'
   | 'TOUR_BOOKING_NOT_FOUND'
   | 'TOUR_BOOKING_DATE_INVALID'
@@ -340,6 +342,10 @@ export function mobileErrorFromCode(code: MobileErrorCode, message?: string) {
       return mobileError(code, message ?? 'Account deletion confirmation is invalid', 400)
     case 'TOUR_NOT_FOUND':
       return mobileError(code, message ?? 'Tour not found', 404)
+    case 'TOUR_PICKUP_OUTSIDE_COTONOU':
+      return mobileError(code, message ?? 'Tour pickup must be within Cotonou. Book a ride to Cotonou.', 400)
+    case 'TOUR_QUOTE_REQUIRED':
+      return mobileError(code, message ?? 'An Operations quote is required before payment', 409)
     case 'TOUR_NOT_EXECUTION_READY':
       return mobileError(code, message ?? 'This tour is not ready for booking', 409)
     case 'TOUR_BOOKING_NOT_FOUND':

@@ -7,6 +7,7 @@ import {
 } from '@/lib/tourItinerary'
 
 const stopSchema = z.object({
+  addonCode: z.enum(['gogotinkpo']).nullable().optional(),
   sortOrder: z.number().int().positive(),
   title: z.string().trim().min(1).max(160),
   titleFr: z.string().trim().max(160).nullable().optional(),
@@ -56,6 +57,7 @@ export type ItineraryResponse = {
 }
 export type LocationDraft = { label: string; address: string; latitude: string; longitude: string }
 export type StopDraft = {
+  addonCode?: string | null
   key: string
   title: string
   titleFr: string
@@ -165,6 +167,7 @@ export function itineraryDraftFromDto(days: TourItineraryDayDto[]): DayDraft[] {
           descriptionFr: stop.descriptionFr ?? '',
           location: locationFromDto(stop),
           required: stop.required,
+          addonCode: stop.addonCode ?? null,
           estimatedDurationMinutes:
             stop.estimatedDurationMinutes == null ? '' : String(stop.estimatedDurationMinutes),
         })),
@@ -208,6 +211,7 @@ export function itineraryDraftPayload(days: DayDraft[]) {
         longitude: optionalNumber(stop.location.longitude),
         estimatedDurationMinutes: optionalNumber(stop.estimatedDurationMinutes),
         required: stop.required,
+        addonCode: stop.addonCode || null,
       })),
     })),
   }
@@ -259,6 +263,8 @@ export function itineraryDraftErrors(days: DayDraft[]) {
 
 export function readinessGuidance(response: ItineraryResponse) {
   switch (response.executionReadinessReason) {
+    case 'invalid_canonical_day_count':
+      return 'This Tour must have exactly one itinerary day.'
     case 'ready':
       return 'The saved itinerary meets the booking requirements.'
     case 'no_itinerary_days':

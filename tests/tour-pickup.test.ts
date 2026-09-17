@@ -12,6 +12,11 @@ import {
 } from '../src/lib/mobile/tourTracking'
 import { findAdminTourItinerary, saveAdminTourItinerary } from '../src/lib/admin/tourItinerary'
 import { adminRoleCan } from '../src/lib/roles'
+import { CANONICAL_TOUR_IDS } from '../src/lib/tourCommercial'
+import {
+  configureCommercialTours,
+  cotonouGeocodingResponse,
+} from './helpers/tourCommercialDatabase'
 
 // Synthetic fixtures only; these are not real hotel coordinates.
 const hotelA: TourPickup = {
@@ -118,6 +123,8 @@ test(
     }
     const startDate = new Date(Date.now() + 10 * 86400000).toISOString().slice(0, 10)
     const originalKey = process.env.GOOGLE_ROUTES_API_KEY
+    const originalPlacesKey = process.env.GOOGLE_PLACES_API_KEY
+    process.env.GOOGLE_PLACES_API_KEY = 'fixture-only-key'
     process.env.GOOGLE_ROUTES_API_KEY = 'fixture-only-key'
     const routeResponse = () =>
       Response.json({
@@ -136,6 +143,7 @@ test(
       globalThis,
       'fetch',
       async (_url: unknown, init?: RequestInit) => {
+        if (!init?.body) return cotonouGeocodingResponse()
         requests.push(JSON.parse(String(init?.body)))
         return routeResponse()
       }
@@ -169,10 +177,13 @@ test(
     }))
     try {
       assert.equal((await saveAdminTourItinerary(id, { days })).ok, true)
+      await configureCommercialTours(days)
       const templateBefore = await findAdminTourItinerary(id)
       const input = {
         principal,
-        tourId: id,
+        tourId: CANONICAL_TOUR_IDS[0],
+        tourIds: [...CANONICAL_TOUR_IDS],
+        vehicleCategoryId: 'tour-test-sedan',
         startDate,
         travellers: 3,
         pickup: hotelA,
@@ -182,6 +193,15 @@ test(
       assert.ok(created.ok)
       const bookingId = created.booking.id
       const day2 = created.booking.days[1].id
+      // Settlement is not under test here; tracking requires a confirmed booking.
+      await prisma.tourBooking.update({
+        where: { id: bookingId },
+        data: {
+          status: 'confirmed',
+          paymentStatus: 'paid',
+          amountPaidNGN: created.booking.priceNGN,
+        },
+      })
       const detail = () => getCustomerTourBooking({ principal, tourBookingId: bookingId })
       await t.test(
         'Hotel A is stored on the booking and all three days; template Meeting Point B is untouched',
@@ -213,7 +233,7 @@ test(
             assert.deepEqual(retry.dto.pickup, hotelA)
             assert.equal('idempotent' in retry && retry.idempotent, true)
           }
-          assert.equal(await prisma.tourBooking.count({ where: { tourId: id } }), 1)
+          assert.equal(await prisma.tourBooking.count({ where: { userId: user.id } }), 1)
           const fresh = await createCustomerTourBooking({
             ...input,
             pickup: hotelC,
@@ -528,6 +548,8 @@ test(
       fetchMock.mock.restore()
       if (originalKey === undefined) delete process.env.GOOGLE_ROUTES_API_KEY
       else process.env.GOOGLE_ROUTES_API_KEY = originalKey
+      if (originalPlacesKey === undefined) delete process.env.GOOGLE_PLACES_API_KEY
+      else process.env.GOOGLE_PLACES_API_KEY = originalPlacesKey
       await prisma.tourBooking.deleteMany({ where: { tourId: id } })
       await prisma.tour.delete({ where: { id } })
       await prisma.driver.delete({ where: { id: driver.id } })

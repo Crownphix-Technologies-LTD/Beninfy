@@ -45,7 +45,7 @@ function TourImageUploader({ tour, onUploaded }: { tour: Tour; onUploaded: () =>
   }
 
   return (
-    <div className="flex min-w-[260px] items-center gap-3">
+      <div className="flex min-w-[260px] items-center gap-3">
       <div className="h-16 w-24 shrink-0 overflow-hidden rounded-xl border border-[#eaddec] bg-[#fbf7fc] shadow-sm">
         {tour.image ? (
           // eslint-disable-next-line @next/next/no-img-element
@@ -85,7 +85,9 @@ export default function AdminToursPage() {
   const [reloadKey, setReloadKey] = useState(0)
 
   return (
+    <div className="space-y-8">
     <CrudTable<Tour>
+      canCreate={false}
       key={reloadKey}
       title="Tours"
       description="Manage tour packages, images and execution-ready itineraries. Open Itinerary to configure days, stops and pickup locations."
@@ -100,7 +102,9 @@ export default function AdminToursPage() {
         { header: 'Title', render: (t) => <p className="font-medium text-gray-800">{t.title}</p> },
         { header: 'Country', render: (t) => t.country },
         { header: 'Days', render: (t) => t.durationDays },
-        { header: 'Package price', render: (t) => <div>{formatNGN(t.startingFromNGN)}<p className="text-xs text-gray-500">Fixed package, not per traveller</p></div> },
+        { header: 'Starting price', render: (t) => <div>{formatNGN(t.startingFromNGN)}</div> },
+        { header: 'Catalogue', render: (t) => t.active ? 'Active' : 'Archived' },
+        { header: 'Service', render: (t) => t.transportationOnly ? 'Transportation only' : 'Tour' },
         { header: 'Itinerary', render: (t) => <Link className={adminSecondaryButtonClass} href={'/' + locale + '/admin/tours/' + encodeURIComponent(t.id) + '/itinerary'}>Manage itinerary</Link> },
         { header: 'Highlights', render: (t) => <span className="text-xs text-gray-500">{t.highlights.length}</span> },
       ]}
@@ -113,7 +117,8 @@ export default function AdminToursPage() {
         { name: 'country', label: 'Country', type: 'text', required: true },
         { name: 'countryFr', label: 'Country (FR)', type: 'text' },
         { name: 'durationDays', label: 'Duration (days)', type: 'number', required: true },
-        { name: 'startingFromNGN', label: 'Starting price (NGN)', type: 'number', required: true },
+        { name: 'startingFromNGN', label: 'Starting price (NGN)', type: 'number', required: true, createOnly: true },
+        { name: 'active', label: 'Active in catalogue', type: 'boolean' },
         { name: 'image', label: 'Image URL', type: 'text' },
         { name: 'description', label: 'Description', type: 'textarea', required: true },
         { name: 'descriptionFr', label: 'Description (FR)', type: 'textarea' },
@@ -121,5 +126,19 @@ export default function AdminToursPage() {
         { name: 'highlightsFr', label: 'Highlights (FR)', type: 'array' },
       ]}
     />
+    <CrudTable<{ id: string; priceNGN: number; active: boolean; [key: string]: unknown }>
+      title="Tour vehicle rates" fetchUrl="/api/admin/tour-rates" collectionKey="rates" itemKey="id"
+      itemUrl={(id) => '/api/admin/tour-rates/' + encodeURIComponent(id)} canCreate={false} canDelete={false}
+      columns={[
+        { header: 'Vehicle', render: (rate) => rate.id },
+        { header: 'Per Tour', render: (rate) => formatNGN(rate.priceNGN) },
+        { header: 'Status', render: (rate) => rate.active ? 'Active' : 'Disabled' },
+      ]}
+      fields={[
+        { name: 'priceNGN', label: 'Price per selected Tour (NGN)', type: 'number', required: true },
+        { name: 'active', label: 'Available for Tour bookings', type: 'boolean' },
+      ]}
+    />
+    </div>
   )
 }

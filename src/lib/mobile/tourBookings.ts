@@ -4,9 +4,11 @@ import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import type { MobilePrincipal } from '@/lib/mobile/auth'
 import type { MobileErrorCode } from '@/lib/mobile/errors'
-import { tourExecutionReadiness } from '@/lib/tourItinerary'
+import { validateCotonouTourPickup } from '@/lib/mobile/tourPickupTerritory'
+import { tourCommercialSelectionSchema, orderedTourIds, calculateTourCommercialSnapshot, canonicalTourExecutionReadiness, type TourCommercialSelection } from '@/lib/tourCommercial'
 
 export const TOUR_BOOKING_STATUSES = [
+  'quote_pending',
   'payment_pending',
   'confirmed',
   'active',
@@ -36,6 +38,14 @@ export const TOUR_BOOKING_MAX_TRAVELLERS = 30
 type Dateish = Date | string
 
 type TourBookingWithDays = {
+  selectedTourIds?: string[]
+  vehicleCategoryId?: string | null
+  vehicleCategoryName?: string | null
+  vehicleCapacity?: number | null
+  itineraryMode?: string
+  customItinerary?: string | null
+  quoteStatus?: string
+  commercialSnapshot?: unknown
   pickupLabel?: string | null
   pickupAddress?: string | null
   pickupLatitude?: number | null
@@ -70,6 +80,11 @@ type TourBookingWithDays = {
 }
 
 type TourBookingDayWithStops = {
+  sourceTourId?: string | null
+  sourceTourTitle?: string | null
+  transportationOnly?: boolean
+  componentPriceMinor?: number | null
+  gogotinkpo?: boolean
   id: string
   tourBookingId: string
   sourceItineraryDayId: string | null
@@ -178,14 +193,6 @@ export function validateTourTravellerCount(value: number) {
   return { ok: true as const, travellers: value }
 }
 
-export function calculateTourPriceSnapshot(tour: { startingFromNGN: number }) {
-  return {
-    currencyCode: 'NGN',
-    priceNGN: tour.startingFromNGN,
-    pricingBasis: 'tour.startingFromNGN',
-  }
-}
-
 export function normalizeTourBookingIdempotencyKey(value: unknown) {
   if (value === undefined || value === null || value === '') return { ok: true as const, key: null }
   if (typeof value !== 'string') {
@@ -252,6 +259,11 @@ export function toTourBookingDayDto(day: TourBookingDayWithStops, totalDays: num
   return {
     id: day.id,
     sourceItineraryDayId: day.sourceItineraryDayId,
+    sourceTourId: day.sourceTourId ?? null,
+    sourceTourTitle: day.sourceTourTitle ?? null,
+    transportationOnly: day.transportationOnly ?? false,
+    componentPriceMinor: day.componentPriceMinor ?? null,
+    gogotinkpo: day.gogotinkpo ?? false,
     dayNumber: day.dayNumber,
     totalDays,
     label: `Day ${day.dayNumber} of ${totalDays}`,
@@ -327,6 +339,12 @@ export function toTourBookingDto(booking: TourBookingWithDays) {
     id: booking.id,
     reference: booking.reference,
     tourId: booking.tourId,
+    selectedTourIds: booking.selectedTourIds?.length ? booking.selectedTourIds : [booking.tourId],
+    vehicleCategory: booking.vehicleCategoryId ? { id: booking.vehicleCategoryId, name: booking.vehicleCategoryName, capacity: booking.vehicleCapacity } : null,
+    itineraryMode: booking.itineraryMode ?? 'standard',
+    customItinerary: booking.customItinerary ?? null,
+    quoteStatus: booking.quoteStatus ?? 'not_required',
+    commercial: booking.commercialSnapshot ?? null,
     status: booking.status,
     startDate: iso(booking.startDate),
     endDate: iso(booking.endDate),
@@ -403,14 +421,69 @@ function isTourBookingWriteConflict(error: unknown) {
   )
 }
 
+async function prepareTourCommercialPlan(selection: TourCommercialSelection, pickup: TourPickup, travellers: number, client = prisma) {
+  const pickupTerritory = await validateCotonouTourPickup(pickup)
+  if (!pickupTerritory.ok) return pickupTerritory
+  const ids = orderedTourIds(selection.tourIds)
+  const tours = await client.tour.findMany({
+    where: { id: { in: ids }, active: true },
+    include: { itineraryDays: { orderBy: { dayNumber: 'asc' }, include: { stops: { orderBy: { sortOrder: 'asc' } } } } },
+  })
+  if (tours.length !== ids.length) return { ok: false as const, code: 'TOUR_NOT_FOUND' as MobileErrorCode }
+  const orderedTours = ids.map((id) => tours.find((tour) => tour.id === id)!)
+  const vehicle = await client.vehicle.findUnique({ where: { id: selection.vehicleCategoryId } })
+  if (!vehicle?.available || !vehicle.tourPricingCategory) return { ok: false as const, code: 'VEHICLE_NOT_AVAILABLE' as MobileErrorCode }
+  if (travellers > vehicle.capacity) return { ok: false as const, code: 'TOUR_TRAVELLER_COUNT_INVALID' as MobileErrorCode }
+  const rate = await client.tourCommercialRate.findUnique({ where: { id: vehicle.tourPricingCategory } })
+  if (!rate?.active) return { ok: false as const, code: 'QUOTE_UNAVAILABLE' as MobileErrorCode }
+  const readiness = orderedTours.map(canonicalTourExecutionReadiness).find((value) => !value.executionReady)
+  if (selection.itineraryMode === 'standard' && readiness)
+    return { ok: false as const, code: 'TOUR_NOT_EXECUTION_READY' as MobileErrorCode, readiness }
+  if (selection.itineraryMode === 'standard' && selection.gogotinkpo && !orderedTours[0].itineraryDays[0].stops.some((stop) => stop.addonCode === 'gogotinkpo'))
+    return { ok: false as const, code: 'TOUR_NOT_EXECUTION_READY' as MobileErrorCode }
+  const commercial = calculateTourCommercialSnapshot({ tourIds: ids, priceMinor: rate.priceMinor, gogotinkpo: selection.gogotinkpo })
+  return { ok: true as const, ids, orderedTours, vehicle, rate, commercial }
+}
+
+export async function quoteCustomerTourSelection(input: {
+  tourIds: string[]; vehicleCategoryId: string; gogotinkpo?: boolean;
+  itineraryMode?: 'standard' | 'custom'; customItinerary?: string;
+  pickup: TourPickup; travellers: number; startDate: string;
+}, client = prisma) {
+  const selection = tourCommercialSelectionSchema.safeParse(input)
+  const pickup = tourPickupSchema.safeParse(input.pickup)
+  if (!selection.success || !pickup.success) return { ok: false as const, code: 'VALIDATION_ERROR' as MobileErrorCode }
+  const start = validateTourStartDate(input.startDate)
+  if (!start.ok) return start
+  const travellers = validateTourTravellerCount(input.travellers)
+  if (!travellers.ok) return travellers
+  const plan = await prepareTourCommercialPlan(selection.data, pickup.data, travellers.travellers, client)
+  if (!plan.ok) return plan
+  const custom = selection.data.itineraryMode === 'custom'
+  return { ok: true as const, dto: {
+    selectedTourIds: plan.ids, totalDays: plan.ids.length, itineraryMode: selection.data.itineraryMode,
+    quoteRequired: custom, payable: !custom,
+    vehicleCategory: { id: plan.vehicle.id, name: plan.vehicle.name, capacity: plan.vehicle.capacity },
+    pricing: custom ? null : plan.commercial,
+    standardEstimate: custom ? plan.commercial : null,
+    pickupServiceArea: { city: 'Cotonou', countryCode: 'BJ' },
+    // Quotes are previews; booking creation recalculates from current authoritative configuration.
+  } }
+}
+
 export async function createCustomerTourBooking(input: {
   principal: MobilePrincipal
   tourId: string
+  tourIds?: string[]
+  vehicleCategoryId?: string
+  gogotinkpo?: boolean
+  itineraryMode?: 'standard' | 'custom'
+  customItinerary?: string
   startDate: string
   pickup: TourPickup
   travellers: number
   idempotencyKey?: string | null
-}) {
+}, client = prisma) {
   const pickup = tourPickupSchema.safeParse(input.pickup)
   if (!pickup.success) return { ok: false as const, code: 'VALIDATION_ERROR' as MobileErrorCode }
   const pickupData = tourPickupSnapshot(pickup.data)
@@ -421,8 +494,14 @@ export async function createCustomerTourBooking(input: {
   const idempotency = normalizeTourBookingIdempotencyKey(input.idempotencyKey)
   if (!idempotency.ok) return idempotency
 
+  const selection = tourCommercialSelectionSchema.safeParse({
+    tourIds: input.tourIds ?? [input.tourId], vehicleCategoryId: input.vehicleCategoryId,
+    gogotinkpo: input.gogotinkpo, itineraryMode: input.itineraryMode, customItinerary: input.customItinerary,
+  })
+  if (!selection.success) return { ok: false as const, code: 'VALIDATION_ERROR' as MobileErrorCode }
+
   if (idempotency.key) {
-    const existing = await prisma.tourBooking.findFirst({
+    const existing = await client.tourBooking.findFirst({
       where: {
         userId: input.principal.userId,
         idempotencyKey: idempotency.key,
@@ -440,31 +519,16 @@ export async function createCustomerTourBooking(input: {
     }
   }
 
-  const tour = await prisma.tour.findUnique({
-    where: { id: input.tourId },
-    include: {
-      itineraryDays: {
-        orderBy: { dayNumber: 'asc' },
-        include: { stops: { orderBy: { sortOrder: 'asc' } } },
-      },
-    },
-  })
-  if (!tour) return { ok: false as const, code: 'TOUR_NOT_FOUND' as MobileErrorCode }
-
-  const readiness = tourExecutionReadiness(tour)
-  if (!readiness.executionReady) {
-    return {
-      ok: false as const,
-      code: 'TOUR_NOT_EXECUTION_READY' as MobileErrorCode,
-      readiness,
-    }
-  }
-
-  const price = calculateTourPriceSnapshot(tour)
-  const endDate = endDateFor(start.date, tour.itineraryDays.length)
+  const plan = await prepareTourCommercialPlan(selection.data, pickup.data, travellers.travellers, client)
+  if (!plan.ok) return plan
+  const { ids, orderedTours, vehicle, rate, commercial } = plan
+  const tour = orderedTours[0]
+  const custom = selection.data.itineraryMode === 'custom'
+  const price = { currencyCode: 'NGN', priceNGN: custom ? 0 : commercial.priceNGN, pricingBasis: custom ? 'operations_quote_required' : commercial.pricingBasis }
+  const endDate = endDateFor(start.date, orderedTours.length)
   for (let attempt = 0; ; attempt += 1) {
     try {
-      const created = await prisma.$transaction(
+      const created = await client.$transaction(
         async (tx) => {
           const reference = await uniqueTourReference(tx)
           return tx.tourBooking.create({
@@ -472,17 +536,27 @@ export async function createCustomerTourBooking(input: {
               ...pickupData,
               userId: input.principal.userId,
               tourId: tour.id,
+              selectedTourIds: ids,
+              vehicleCategoryId: vehicle.id,
+              vehicleCategoryName: vehicle.name,
+              vehicleCapacity: vehicle.capacity,
+              itineraryMode: selection.data.itineraryMode,
+              customItinerary: selection.data.customItinerary ?? null,
+              quoteStatus: custom ? 'pending' : 'not_required',
+              commercialSnapshot: custom
+                ? { version: 1, currency: 'NGN', pricingBasis: 'operations_quote_required', standardEstimate: commercial, totalMinor: null, vehicleCategoryId: vehicle.id, pricingCategory: rate.id, quoteRequired: true }
+                : { ...commercial, vehicleCategoryId: vehicle.id, pricingCategory: rate.id, quoteRequired: false },
               reference,
-              status: price.priceNGN === 0 ? 'confirmed' : 'payment_pending',
-              paymentStatus: price.priceNGN === 0 ? 'paid' : 'pending',
+              status: custom ? 'quote_pending' : 'payment_pending',
+              paymentStatus: 'pending',
               currencyCode: price.currencyCode,
               priceNGN: price.priceNGN,
               amountPaidNGN: 0,
               idempotencyKey: idempotency.key,
-              tourTitle: tour.title,
-              tourTitleFr: tour.titleFr,
-              tourDestination: tour.destination,
-              tourDestinationFr: tour.destinationFr,
+              tourTitle: orderedTours.map((value) => value.title).join(' + '),
+              tourTitleFr: orderedTours.map((value) => value.titleFr ?? value.title).join(' + '),
+              tourDestination: orderedTours.map((value) => value.destination ?? value.title).join(' + '),
+              tourDestinationFr: orderedTours.map((value) => value.destinationFr ?? value.destination ?? value.title).join(' + '),
               tourCountry: tour.country,
               tourCountryFr: tour.countryFr,
               tourImage: tour.image,
@@ -490,11 +564,23 @@ export async function createCustomerTourBooking(input: {
               endDate,
               travellers: travellers.travellers,
               days: {
-                create: tour.itineraryDays.map((day) => ({
+                create: orderedTours.map((sourceTour, index) => {
+                  const day = sourceTour.itineraryDays[0] ?? {
+                    id: null, title: sourceTour.title, titleFr: sourceTour.titleFr,
+                    description: sourceTour.description, descriptionFr: sourceTour.descriptionFr,
+                    defaultEndLabel: null, defaultEndAddress: null, defaultEndLatitude: null, defaultEndLongitude: null,
+                    stops: [],
+                  }
+                  return {
+                  sourceTourId: sourceTour.id,
+                  sourceTourTitle: sourceTour.title,
+                  transportationOnly: sourceTour.id === 'ganvie-tour',
+                  componentPriceMinor: custom ? null : commercial.components[index].totalMinor,
+                  gogotinkpo: commercial.components[index].gogotinkpo,
                   sourceItineraryDayId: day.id,
-                  dayNumber: day.dayNumber,
+                  dayNumber: index + 1,
                   scheduledDate: new Date(
-                    start.date.getTime() + (day.dayNumber - 1) * 24 * 60 * 60 * 1000
+                    start.date.getTime() + index * 24 * 60 * 60 * 1000
                   ),
                   status: 'upcoming',
                   title: day.title,
@@ -507,7 +593,7 @@ export async function createCustomerTourBooking(input: {
                   endLatitude: day.defaultEndLatitude,
                   endLongitude: day.defaultEndLongitude,
                   stops: {
-                    create: day.stops.map((stop) => ({
+                    create: day.stops.filter((stop) => !stop.addonCode || (commercial.components[index].gogotinkpo && stop.addonCode === 'gogotinkpo')).map((stop) => ({
                       sourceItineraryStopId: stop.id,
                       sortOrder: stop.sortOrder,
                       title: stop.title,
@@ -522,7 +608,7 @@ export async function createCustomerTourBooking(input: {
                       status: 'upcoming',
                     })),
                   },
-                })),
+                }}),
               },
             },
             include: tourBookingInclude,
@@ -544,7 +630,7 @@ export async function createCustomerTourBooking(input: {
         (retryable ||
           (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002'))
       ) {
-        const existing = await prisma.tourBooking.findFirst({
+        const existing = await client.tourBooking.findFirst({
           where: {
             userId: input.principal.userId,
             idempotencyKey: idempotency.key,
@@ -603,7 +689,7 @@ export async function cancelCustomerTourBooking(input: {
   if (booking.status === 'cancelled') {
     return { ok: true as const, booking, dto: toTourBookingDto(booking), idempotent: true }
   }
-  if (booking.status !== 'payment_pending' || booking.paymentStatus !== 'pending') {
+  if (!['payment_pending', 'quote_pending'].includes(booking.status) || booking.paymentStatus !== 'pending') {
     return { ok: false as const, code: 'TOUR_ACTION_NOT_ALLOWED' as MobileErrorCode }
   }
   const now = new Date()

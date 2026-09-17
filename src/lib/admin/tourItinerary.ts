@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma'
+import { CANONICAL_TOUR_IDS, canonicalTourExecutionReadiness } from '@/lib/tourCommercial'
 import { tourItinerarySchema, type ItineraryResponse } from '@/lib/admin/tourItineraryForm'
 import {
   toTourItineraryDto,
@@ -22,7 +23,8 @@ export function findAdminTourItinerary(id: string) {
 export function adminTourItineraryResponse(
   tour: TourWithItinerary & { id: string; updatedAt: Date }
 ): ItineraryResponse {
-  const readiness = tourExecutionReadiness(tour)
+  const readiness = CANONICAL_TOUR_IDS.includes(tour.id as typeof CANONICAL_TOUR_IDS[number])
+    ? canonicalTourExecutionReadiness(tour) : tourExecutionReadiness(tour)
   return {
     tourId: tour.id,
     updatedAt: tour.updatedAt.toISOString(),
@@ -41,6 +43,10 @@ export async function saveAdminTourItinerary(id: string, body: unknown) {
       error: 'Invalid input',
       issues: parsed.error.flatten(),
     }
+  if (CANONICAL_TOUR_IDS.includes(id as typeof CANONICAL_TOUR_IDS[number]) && parsed.data.days.length !== 1)
+    return { ok: false as const, status: 400, error: 'Canonical Tours require exactly one itinerary day' }
+  if (id !== 'cotonou-city-tour' && parsed.data.days.some((day) => day.stops.some((stop) => stop.addonCode)))
+    return { ok: false as const, status: 400, error: 'Gogotinkpo is only available for Cotonou City Tour' }
   const validated = validateTourItineraryTemplate(parsed.data.days)
   if (!validated.ok)
     return { ok: false as const, status: 400, error: 'Invalid itinerary', code: validated.code }
