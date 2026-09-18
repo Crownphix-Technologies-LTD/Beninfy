@@ -6,6 +6,14 @@ The [commercial-model contract](./tour-commercial-model.md) defines the canonica
 catalogue, combination checkout and custom quote gate. The execution wire fields
 below retain compatibility; new checkout requests also require `vehicleCategoryId`.
 
+Catalogue/detail **template** stop `address`, `latitude` and `longitude` may now
+all be null for persisted incomplete itinerary drafts. Names/order/descriptions
+remain visible. The backend reports `missing_stop_coordinates` and rejects
+standard booking until locations are complete. Operational booked stop DTOs and
+Driver routing retain non-null executable points; no draft location is promoted
+to an execution snapshot. See the draft-location migration and validation rules
+in [Tour configuration](./tours.md#save-and-readiness).
+
 ## Customer-selected Tour pickup
 
 POST `/api/mobile/v1/customer/tours/:tourId/book` now requires one primary pickup.

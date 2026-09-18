@@ -569,13 +569,15 @@ export default function TourItineraryEditor({ tour, initial, locale, operationsQ
               Add days manually or start with the requested Cotonou, Ouidah and Ganvié names. Every
               location must still be selected.
             </p>
-            <button
-              type="button"
-              className={adminSecondaryButtonClass}
-              onClick={() => setDays(canonicalIndex >= 0 ? [beninThreeDayDraft()[canonicalIndex]] : beninThreeDayDraft())}
-            >
-              {canonicalIndex >= 0 ? 'Use Tour outline (names only)' : 'Use 3-day Benin itinerary (names only)'}
-            </button>
+            {saved.itineraryDays.length === 0 && (
+              <button
+                type="button"
+                className={adminSecondaryButtonClass}
+                onClick={() => setDays(canonicalIndex >= 0 ? [beninThreeDayDraft()[canonicalIndex]] : beninThreeDayDraft())}
+              >
+                {canonicalIndex >= 0 ? 'Use Tour outline (names only)' : 'Use 3-day Benin itinerary (names only)'}
+              </button>
+            )}
           </div>
         )}
         <button

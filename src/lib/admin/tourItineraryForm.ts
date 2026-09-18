@@ -1,6 +1,8 @@
 import { z } from 'zod'
 import {
   validTourCoordinate,
+  hasCompleteTourStopLocation,
+  validTourTemplateStopLocation,
   validateTourItineraryTemplate,
   type TourItineraryDayDto,
   type TourExecutionReadiness,
@@ -13,9 +15,9 @@ const stopSchema = z.object({
   titleFr: z.string().trim().max(160).nullable().optional(),
   description: z.string().trim().max(1200).nullable().optional(),
   descriptionFr: z.string().trim().max(1200).nullable().optional(),
-  address: z.string().trim().min(1).max(300),
-  latitude: z.number().min(-90).max(90),
-  longitude: z.number().min(-180).max(180),
+  address: z.string().trim().max(300).nullable().optional(),
+  latitude: z.number().min(-90).max(90).nullable().optional(),
+  longitude: z.number().min(-180).max(180).nullable().optional(),
   estimatedDurationMinutes: z
     .number()
     .int()
@@ -24,6 +26,13 @@ const stopSchema = z.object({
     .nullable()
     .optional(),
   required: z.boolean().optional(),
+}).superRefine((stop, ctx) => {
+  if (!validTourTemplateStopLocation(stop))
+    ctx.addIssue({
+      code: 'custom',
+      path: ['address'],
+      message: 'Select a complete address and coordinate pair, or clear the location to save a draft.',
+    })
 })
 
 const daySchema = z.object({
@@ -116,11 +125,11 @@ export function beninThreeDayDraft(): DayDraft[] {
       stops: [
         'Point of No Return',
         'Zinsou Foundation',
-        'Python Temple / Snake Temple',
+        'Snake Temple',
         'Casa del Papa',
       ],
     },
-    { title: 'Ganvié', stops: ['Village on Water', 'Babs Dock'] },
+    { title: 'Ganvié Tour', stops: ['Village on Water', 'Babs Dock'] },
   ].map(({ title, stops }) => ({ ...newDay(title), stops: stops.map(newStop) }))
 }
 
@@ -239,9 +248,13 @@ export function itineraryDraftErrors(days: DayDraft[]) {
       }
     }
     day.stops.forEach((stop, s) => {
-      if (!locationHasCoordinates(stop.location))
+      if (!validTourTemplateStopLocation({
+        address: stop.location.address,
+        latitude: optionalNumber(stop.location.latitude),
+        longitude: optionalNumber(stop.location.longitude),
+      }))
         errors.push(
-          'Day ' + (d + 1) + ', Stop ' + (s + 1) + ': select a location with valid coordinates.'
+          'Day ' + (d + 1) + ', Stop ' + (s + 1) + ': select a complete location or clear it to save a draft.'
         )
     })
   })
@@ -274,14 +287,11 @@ export function readinessGuidance(response: ItineraryResponse) {
       return 'Day ' + (day?.dayNumber ?? '') + ' has no stops. Add a stop with its actual location.'
     }
     case 'missing_stop_coordinates': {
-      const day = response.itineraryDays.find((day) =>
-        day.stops.some((stop) => !validTourCoordinate(stop.latitude, stop.longitude))
+      const count = response.itineraryDays.reduce(
+        (total, day) => total + day.stops.filter((stop) => !hasCompleteTourStopLocation(stop)).length,
+        0
       )
-      return (
-        'Day ' +
-        (day?.dayNumber ?? '') +
-        ' contains a stop without valid coordinates. Select its actual location.'
-      )
+      return count + (count === 1 ? ' stop still needs a location.' : ' stops still need locations.')
     }
   }
 }

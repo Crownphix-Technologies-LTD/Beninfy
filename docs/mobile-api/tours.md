@@ -492,14 +492,14 @@ Only an empty draft offers the explicit **Use 3-day Benin itinerary (names only)
 - **Day 1 — Cotonou City Tour:** Graffiti Wall, Amazon Statue, Art Market,
   Abandoned Plane, Cornetto.
 - **Day 2 — Ouidah Tour:** Point of No Return, Zinsou Foundation,
-  Python Temple / Snake Temple, Casa del Papa.
-- **Day 3 — Ganvié:** Village on Water, Babs Dock.
+  Snake Temple, Casa del Papa.
+- **Day 3 — Ganvié Tour:** Village on Water, Babs Dock.
 
 This action only fills an unsaved draft. It supplies **no addresses or
 coordinates** and requires **Save Changes** to persist. Opening Manage itinerary
 loads the saved days and never inserts or replaces them with this starter. For
-an existing itinerary, Operations would have to deliberately remove every day
-(with confirmation) before the starter action becomes available.
+an existing saved itinerary, the starter remains unavailable even if its days
+are removed from the unsaved editor draft.
 
 ### Select actual locations
 
@@ -524,10 +524,22 @@ See [the frozen pickup contract](./tour-v1-contract.md#customer-selected-tour-pi
 
 ### Save and readiness
 
-Use **Save Changes**. Stop addresses and coordinate pairs must be complete and
-valid before the canonical PUT accepts them. Incomplete stop drafts remain in
-the editor on failure; they are not silently saved with zero/guessed coordinates.
-An empty day can be saved, but the backend reports it as not ready.
+Use **Save Changes**. Named stops can be saved with no location. Their address,
+latitude and longitude persist as null and the catalogue still exposes their
+names/order/descriptions. A location must be either wholly absent or contain a
+nonempty address and valid latitude/longitude; partial states are rejected.
+An empty day can be saved, but the backend reports it as not ready. Names-only
+stops report `missing_stop_coordinates`, with a count of stops needing locations.
+Operations can configure and save one complete location at a time.
+
+`20260918120000_tour_itinerary_draft_locations` makes only template stop address/
+latitude/longitude nullable and enforces all-or-none location integrity. Existing
+configured stops and operational booking snapshots are not rewritten.
+Standard booking creation and quote preview revalidate readiness on the server.
+Incomplete templates return `TOUR_NOT_EXECUTION_READY` (409); Operations quote
+approval also requires complete stops. `TourStopExecution` still requires an
+address and non-null coordinates. Custom review requests never copy incomplete
+template points into execution snapshots.
 
 The prominent **Ready for booking / Not ready for booking** status always comes
 from the last saved backend response (`executionReady` and
@@ -566,4 +578,4 @@ atomicity, concurrent/stale editor protection and booking snapshot isolation.
 To run its optional database suite, set `DATABASE_URL` and
 `TOUR_ITINERARY_TEST_DATABASE_URL` to the same disposable localhost database
 named `beninfy_tour_test...` or `beninfy_dispatch_test...`, with existing migrations
-applied. Never use production data. No migration is required by this editor.
+applied, including the draft-location migration. Never use production data.

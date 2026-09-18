@@ -725,9 +725,9 @@ model TourItineraryStop {
   titleFr                  String?
   description              String?
   descriptionFr            String?
-  address                  String
-  latitude                 Float
-  longitude                Float
+  address                  String?
+  latitude                 Float?
+  longitude                Float?
   estimatedDurationMinutes Int?
   required                 Boolean          @default(true)
   createdAt                DateTime         @default(now())

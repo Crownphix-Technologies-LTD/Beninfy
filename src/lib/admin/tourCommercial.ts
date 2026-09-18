@@ -6,6 +6,7 @@ import {
   toTourItineraryDto,
   tourExecutionReadiness,
   validateTourItineraryTemplate,
+  hasCompleteTourStopLocation,
 } from '@/lib/tourItinerary'
 import { validateCotonouTourPickup } from '@/lib/mobile/tourPickupTerritory'
 import { CANONICAL_TOUR_IDS } from '@/lib/tourCommercial'
@@ -84,7 +85,9 @@ export async function approveTourOperationsQuote(id: string, body: unknown, clie
   if (
     !validated.ok ||
     !parsed.data.days.length ||
-    parsed.data.days.some((day) => !day.stops.length)
+    parsed.data.days.some(
+      (day) => !day.stops.length || day.stops.some((stop) => !hasCompleteTourStopLocation(stop))
+    )
   )
     return {
       ok: false as const,
@@ -162,7 +165,7 @@ export async function approveTourOperationsQuote(id: string, body: unknown, clie
             endLatitude: day.defaultEndLatitude,
             endLongitude: day.defaultEndLongitude,
             stops: {
-              create: day.stops.map((stop) => ({
+              create: day.stops.filter(hasCompleteTourStopLocation).map((stop) => ({
                 sortOrder: stop.sortOrder,
                 title: stop.title,
                 titleFr: stop.titleFr,
