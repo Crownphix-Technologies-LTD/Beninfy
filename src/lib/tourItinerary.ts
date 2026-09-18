@@ -10,9 +10,9 @@ export type TourItineraryStopInput = {
   titleFr?: string | null
   description?: string | null
   descriptionFr?: string | null
-  address: string
-  latitude: number
-  longitude: number
+  address?: string | null
+  latitude?: number | null
+  longitude?: number | null
   estimatedDurationMinutes?: number | null
   required?: boolean
 }
@@ -43,9 +43,9 @@ export type TourItineraryStopDto = {
   titleFr: string | null
   description: string | null
   descriptionFr: string | null
-  address: string
-  latitude: number
-  longitude: number
+  address: string | null
+  latitude: number | null
+  longitude: number | null
   estimatedDurationMinutes: number | null
   required: boolean
 }
@@ -104,9 +104,9 @@ export type TourWithItinerary = {
         titleFr: string | null
         description: string | null
         descriptionFr: string | null
-        address: string
-        latitude: number
-        longitude: number
+        address: string | null
+        latitude: number | null
+        longitude: number | null
         estimatedDurationMinutes: number | null
         required: boolean
         createdAt?: Dateish
@@ -116,11 +116,35 @@ export type TourWithItinerary = {
   >
 }
 
-export function validTourCoordinate(latitude: number, longitude: number) {
+export function validTourCoordinate(
+  latitude: number | null | undefined,
+  longitude: number | null | undefined
+) {
   return (
+    typeof latitude === 'number' && typeof longitude === 'number' &&
     Number.isFinite(latitude) && Number.isFinite(longitude) &&
     latitude >= -90 && latitude <= 90 && longitude >= -180 && longitude <= 180
   )
+}
+
+type TourStopLocation = {
+  address?: string | null
+  latitude?: number | null
+  longitude?: number | null
+}
+
+export function hasCompleteTourStopLocation<T extends TourStopLocation>(
+  stop: T
+): stop is T & { address: string; latitude: number; longitude: number } {
+  return (
+    typeof stop.address === 'string' && stop.address.trim().length > 0 &&
+    validTourCoordinate(stop.latitude, stop.longitude)
+  )
+}
+
+export function validTourTemplateStopLocation(stop: TourStopLocation) {
+  const empty = !stop.address?.trim() && stop.latitude == null && stop.longitude == null
+  return empty || hasCompleteTourStopLocation(stop)
 }
 
 function hasCompleteOptionalCoordinatePair(latitude?: number | null, longitude?: number | null) {
@@ -150,7 +174,9 @@ export function normalizeTourItineraryInput(days: TourItineraryDayInput[]) {
           titleFr: stop.titleFr?.trim() || null,
           description: stop.description?.trim() || null,
           descriptionFr: stop.descriptionFr?.trim() || null,
-          address: stop.address.trim(),
+          address: stop.address?.trim() || null,
+          latitude: stop.latitude ?? null,
+          longitude: stop.longitude ?? null,
           required: stop.required ?? true,
         })),
     }))
@@ -184,8 +210,7 @@ export function validateTourItineraryTemplate(days: TourItineraryDayInput[]) {
       }
       seenStops.add(stop.sortOrder)
       if (!stop.title.trim()) return { ok: false as const, code: 'STOP_TITLE_REQUIRED' as const }
-      if (!stop.address.trim()) return { ok: false as const, code: 'STOP_ADDRESS_REQUIRED' as const }
-      if (!validTourCoordinate(stop.latitude, stop.longitude)) {
+      if (!validTourTemplateStopLocation(stop)) {
         return { ok: false as const, code: 'INVALID_STOP_COORDINATES' as const }
       }
     }
@@ -202,7 +227,7 @@ export function tourExecutionReadiness(tour: TourWithItinerary): TourExecutionRe
     return { executionReady: false, reason: 'missing_day_stop' }
   }
   const missingCoordinates = tour.itineraryDays.some((day) =>
-    day.stops.some((stop) => !validTourCoordinate(stop.latitude, stop.longitude))
+    day.stops.some((stop) => !hasCompleteTourStopLocation(stop))
   )
   if (missingCoordinates) {
     return { executionReady: false, reason: 'missing_stop_coordinates' }

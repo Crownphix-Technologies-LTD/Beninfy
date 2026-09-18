@@ -265,6 +265,52 @@ function setup(t: TestContext, city = 'Cotonou') {
   return { tours, client, captured: () => captured }
 }
 
+test('incomplete template blocks standard booking and quote; custom requests never snapshot draft coordinates', async (t) => {
+  const fixture = setup(t)
+  Object.assign(fixture.tours[0].itineraryDays[0].stops[0], {
+    address: null,
+    latitude: null,
+    longitude: null,
+  })
+  const notReady = {
+    ok: false,
+    code: 'TOUR_NOT_EXECUTION_READY',
+    readiness: { executionReady: false, reason: 'missing_stop_coordinates' },
+  }
+  assert.deepEqual(await createCustomerTourBooking(baseInput, fixture.client), notReady)
+  assert.deepEqual(await quoteCustomerTourSelection(baseInput, fixture.client), notReady)
+  assert.equal(fixture.captured(), undefined)
+  const custom = await createCustomerTourBooking(
+    {
+      ...baseInput,
+      itineraryMode: 'custom',
+      customItinerary: 'Review this custom itinerary before execution.',
+    },
+    fixture.client
+  )
+  assert.ok(custom.ok)
+  assert.equal(custom.booking.status, 'quote_pending')
+  assert.equal(custom.booking.days[0].stops.length, 0)
+  assert.ok(
+    custom.booking.days
+      .flatMap((day) => day.stops)
+      .every(
+        (stop) =>
+          stop.address && typeof stop.latitude === 'number' && typeof stop.longitude === 'number'
+      )
+  )
+})
+
+test('Operations quote rejects names-only execution stops before any operational writes', async () => {
+  const approved = await approveTourOperationsQuote('unused', {
+    priceNGN: 100000,
+    expectedUpdatedAt: new Date().toISOString(),
+    days: [{ dayNumber: 1, title: 'Draft day', stops: [{ sortOrder: 1, title: 'Draft stop' }] }],
+  })
+  assert.equal(approved.ok, false)
+  if (!approved.ok) assert.equal(approved.status, 400)
+})
+
 test('combined selection creates one booking with canonical Day identities, shared pickup and fixed total', async (t) => {
   const fixture = setup(t)
   const result = await createCustomerTourBooking(

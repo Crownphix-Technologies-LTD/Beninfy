@@ -20,14 +20,21 @@ An addon is available only after Operations configures its actual stop location.
 The Backoffice **Use Tour outline (names only)** action supplies these editable
 standard stop names, without fabricated addresses or coordinates:
 
-| Product           | Standard stops                                                                     | Optional stop                       |
-| ----------------- | ---------------------------------------------------------------------------------- | ----------------------------------- |
-| Cotonou City Tour | Graffiti Wall; Amazon Statue; Art Market; Abandoned Plane; Cornetto                | Gogotinkpo (+20% of this component) |
-| Ouidah Tour       | Point of No Return; Zinsou Foundation; Python Temple / Snake Temple; Casa del Papa | None                                |
-| Ganvie Tour       | Village on Water; Babs Dock                                                        | None; transportation only           |
+| Product           | Standard stops                                                      | Optional stop                       |
+| ----------------- | ------------------------------------------------------------------- | ----------------------------------- |
+| Cotonou City Tour | Graffiti Wall; Amazon Statue; Art Market; Abandoned Plane; Cornetto | Gogotinkpo (+20% of this component) |
+| Ouidah Tour       | Point of No Return; Zinsou Foundation; Snake Temple; Casa del Papa  | None                                |
+| Ganvie Tour       | Village on Water; Babs Dock                                         | None; transportation only           |
 
-Operations must select actual addresses/coordinates and save one complete Day per
-product. The optional Gogotinkpo stop is added separately with
+Operations may first save names-only Day/stop drafts and return later to select
+actual addresses/coordinates. `TourItineraryStop.address`, `latitude` and
+`longitude` are nullable together; a partial location is rejected. Catalogue
+draft stops expose null location fields, never guessed values. Named stops with
+no location report `missing_stop_coordinates` and block standard booking at the
+backend. Operations quote approval still requires fully executable stops.
+`20260918120000_tour_itinerary_draft_locations` changes template fields only;
+operational `TourStopExecution` coordinates/address remain non-null.
+The optional Gogotinkpo stop is added separately with
 `addonCode = gogotinkpo`. Missing stop configuration returns
 `executionReady = false`; a standard booking cannot bypass that gate.
 
@@ -410,9 +417,9 @@ Database suites require explicitly configured disposable localhost databases;
 they must be run serially when sharing canonical fixture products.
 
 For migration/history coverage, use a **fresh** disposable database named
-`beninfy_dispatch_test...`. Deploy the first 37 migrations using a temporary
-migration directory/config that excludes the commercial migration; load
-`tests/fixtures/tour-commercial-history.sql`; then deploy the complete 38-migration
+`beninfy_dispatch_test...`. Deploy all migrations preceding the commercial model
+using a temporary migration directory/config; load
+`tests/fixtures/tour-commercial-history.sql`; then deploy the complete migration
 chain normally. Set `DATABASE_URL`, `DIRECT_URL`, `PRISMA_MIGRATE_URL`,
 `TOUR_ITINERARY_TEST_DATABASE_URL` and `DRIVER_SEARCH_TEST_DATABASE_URL` to this
 same localhost database and run:

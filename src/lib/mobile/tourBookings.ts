@@ -2,6 +2,7 @@ import { tourPickupSchema, tourPickupSnapshot, type TourPickup } from '@/lib/mob
 import { randomBytes } from 'crypto'
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
+import { hasCompleteTourStopLocation } from '@/lib/tourItinerary'
 import type { MobilePrincipal } from '@/lib/mobile/auth'
 import type { MobileErrorCode } from '@/lib/mobile/errors'
 import { validateCotonouTourPickup } from '@/lib/mobile/tourPickupTerritory'
@@ -593,7 +594,7 @@ export async function createCustomerTourBooking(input: {
                   endLatitude: day.defaultEndLatitude,
                   endLongitude: day.defaultEndLongitude,
                   stops: {
-                    create: day.stops.filter((stop) => !stop.addonCode || (commercial.components[index].gogotinkpo && stop.addonCode === 'gogotinkpo')).map((stop) => ({
+                    create: day.stops.filter(hasCompleteTourStopLocation).filter((stop) => !stop.addonCode || (commercial.components[index].gogotinkpo && stop.addonCode === 'gogotinkpo')).map((stop) => ({
                       sourceItineraryStopId: stop.id,
                       sortOrder: stop.sortOrder,
                       title: stop.title,

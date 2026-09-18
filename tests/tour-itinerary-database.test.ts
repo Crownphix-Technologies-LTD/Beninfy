@@ -10,6 +10,8 @@ import {
 import { createCustomerTourBooking } from '../src/lib/mobile/tourBookings'
 import { CANONICAL_TOUR_IDS } from '../src/lib/tourCommercial'
 import { configureCommercialTours, mockCotonouGeocoding } from './helpers/tourCommercialDatabase'
+import { beninThreeDayDraft, itineraryDraftPayload } from '../src/lib/admin/tourItineraryForm'
+import { GET as catalogueGET } from '../src/app/api/mobile/v1/tours/route'
 
 const url = process.env.TOUR_ITINERARY_TEST_DATABASE_URL
 
@@ -213,6 +215,163 @@ test(
           assert.equal(original.booking.priceNGN, 300000)
           assert.equal(next.booking.priceNGN, 300000)
           assert.equal(next.booking.days[0].stops[0].title, 'Fixture stop 1 updated')
+        }
+      )
+      await t.test(
+        'names-only canonical draft persists, rejects partial locations and becomes ready progressively without changing snapshots',
+        async () => {
+          const principal = {
+            type: 'CUSTOMER' as const,
+            userId: user.id,
+            role: 'user',
+            email: '',
+            sessionId: 'test',
+          }
+          const bookingInput = {
+            principal,
+            tourId: CANONICAL_TOUR_IDS[0],
+            vehicleCategoryId: 'tour-test-sedan',
+            startDate: '2099-01-01',
+            travellers: 2,
+            pickup: {
+              label: 'Synthetic pickup',
+              address: 'Synthetic address',
+              coordinates: { latitude: 1, longitude: 2 },
+            },
+          }
+          const existing = await createCustomerTourBooking(bookingInput)
+          assert.ok(existing.ok)
+          const snapshotQuery = {
+            where: { id: existing.booking.id },
+            include: { days: { include: { stops: true } } },
+          }
+          const before = await prisma.tourBooking.findUniqueOrThrow(snapshotQuery)
+          const draft = itineraryDraftPayload([beninThreeDayDraft()[0]])
+          let saved = await saveAdminTourItinerary(CANONICAL_TOUR_IDS[0], draft)
+          assert.ok(saved.ok)
+          assert.equal(saved.response.executionReadinessReason, 'missing_stop_coordinates')
+          assert.equal(saved.response.executionReady, false)
+          const reload = await findAdminTourItinerary(CANONICAL_TOUR_IDS[0])
+          assert.ok(reload)
+          assert.deepEqual(
+            reload.itineraryDays[0].stops.map((stop) => stop.title),
+            draft.days[0].stops.map((stop) => stop.title)
+          )
+          assert.ok(
+            reload.itineraryDays[0].stops.every(
+              (stop) => stop.latitude === null && stop.longitude === null && stop.address === null
+            )
+          )
+          const outlines = beninThreeDayDraft()
+          for (const index of [1, 2]) {
+            const other = await saveAdminTourItinerary(
+              CANONICAL_TOUR_IDS[index],
+              itineraryDraftPayload([outlines[index]])
+            )
+            assert.ok(other.ok)
+            assert.equal(other.response.executionReadinessReason, 'missing_stop_coordinates')
+            assert.deepEqual(
+              other.response.itineraryDays[0].stops.map((stop) => stop.title),
+              outlines[index].stops.map((stop) => stop.title)
+            )
+          }
+          const catalogue = await (await catalogueGET()).json()
+          for (const id of CANONICAL_TOUR_IDS) {
+            const draftProduct = catalogue.tours.find((tour: { id: string }) => tour.id === id)
+            assert.equal(draftProduct.executionReady, false)
+            assert.equal(draftProduct.executionReadinessReason, 'missing_stop_coordinates')
+          }
+          assert.equal(
+            catalogue.tours.find((tour: { id: string }) => tour.id === 'ganvie-tour')
+              .transportationOnly,
+            true
+          )
+          const product = catalogue.tours.find(
+            (tour: { id: string }) => tour.id === CANONICAL_TOUR_IDS[0]
+          )
+          assert.equal(product.executionReady, false)
+          assert.equal(product.executionReadinessReason, 'missing_stop_coordinates')
+          assert.equal(product.itineraryDays[0].stops.length, 5)
+          assert.ok(
+            product.itineraryDays[0].stops.every(
+              (stop: {
+                latitude: number | null
+                longitude: number | null
+                address: string | null
+              }) => stop.latitude === null && stop.longitude === null && stop.address === null
+            )
+          )
+          const notReady = {
+            ok: false,
+            code: 'TOUR_NOT_EXECUTION_READY',
+            readiness: { executionReady: false, reason: 'missing_stop_coordinates' },
+          }
+          assert.deepEqual(await createCustomerTourBooking(bookingInput), notReady)
+          for (const partial of [
+            { latitude: 1 },
+            { longitude: 2 },
+            { address: 'Synthetic address' },
+            { latitude: 1, longitude: 2 },
+          ]) {
+            const invalid = structuredClone(draft)
+            Object.assign(invalid.days[0].stops[0], partial)
+            assert.equal((await saveAdminTourItinerary(CANONICAL_TOUR_IDS[0], invalid)).ok, false)
+            await assert.rejects(
+              prisma.tourItineraryStop.update({
+                where: { id: reload.itineraryDays[0].stops[0].id },
+                data: partial,
+              })
+            )
+          }
+          for (let index = 0; index < draft.days[0].stops.length; index++) {
+            Object.assign(draft.days[0].stops[index], {
+              address: 'Synthetic address',
+              latitude: 1,
+              longitude: 2,
+            })
+            assert.ok(saved.ok)
+            saved = await saveAdminTourItinerary(CANONICAL_TOUR_IDS[0], {
+              ...draft,
+              expectedUpdatedAt: saved.response.updatedAt,
+            })
+            assert.ok(saved.ok)
+            const complete = index === draft.days[0].stops.length - 1
+            assert.equal(saved.response.executionReady, complete)
+            assert.equal(
+              saved.response.executionReadinessReason,
+              complete ? 'ready' : 'missing_stop_coordinates'
+            )
+            if (!complete) assert.deepEqual(await createCustomerTourBooking(bookingInput), notReady)
+          }
+          const complete = await createCustomerTourBooking(bookingInput)
+          assert.ok(complete.ok)
+          assert.ok(
+            complete.booking.days[0].stops.every(
+              (stop) =>
+                typeof stop.latitude === 'number' &&
+                typeof stop.longitude === 'number' &&
+                stop.address
+            )
+          )
+          assert.deepEqual(await prisma.tourBooking.findUniqueOrThrow(snapshotQuery), before)
+          await assert.rejects(
+            prisma.tourStopExecution.create({
+              data: {
+                tourBookingDayId: complete.booking.days[0].id,
+                sortOrder: 99,
+                title: 'Invalid draft execution',
+                address: null as unknown as string,
+                latitude: null as unknown as number,
+                longitude: null as unknown as number,
+              },
+            })
+          )
+          const finalCatalogue = await (await catalogueGET()).json()
+          assert.equal(
+            finalCatalogue.tours.find((tour: { id: string }) => tour.id === CANONICAL_TOUR_IDS[0])
+              .executionReady,
+            true
+          )
         }
       )
     } finally {
