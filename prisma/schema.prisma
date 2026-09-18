@@ -33,6 +33,7 @@ model User {
   bookings            Booking[]
   tourBookings        TourBooking[]
   tourCouponUses      TourCouponUse[]
+  tourFeedback        TourFeedback[]
   savedPlaces         SavedPlace[]
   travelPreference    CustomerTravelPreference?
   tripReviews         TripReview[]
@@ -292,6 +293,7 @@ model Driver {
   notes             String?
   bookingLegs       BookingLeg[]
   tourBookingDays   TourBookingDay[]
+  tourFeedback      TourDriverFeedback[]
   assignmentHistory DriverTripAssignmentHistory[]
   tripReviews       TripReview[]
   presence          DriverPresence?
@@ -765,6 +767,7 @@ model TourBooking {
   discountNGN       Int              @default(0)
   couponSnapshot    Json?
   couponUse         TourCouponUse?
+  feedback          TourFeedback?
   selectedTourIds   String[]         @default([])
   vehicleCategoryId String?
   vehicleCategoryName String?
@@ -857,12 +860,65 @@ model TourBookingDay {
   stops                  TourStopExecution[]
   latestLocation         LatestTourLocation?
   journeySnapshot        TourJourneySnapshot?
+  feedbackAttributions   TourFeedbackDay[]
 
   @@unique([tourBookingId, dayNumber])
   @@index([tourBookingId, scheduledDate])
   @@index([assignedDriverId, scheduledDate])
   @@index([assignedFleetVehicleId, scheduledDate])
   @@index([status, scheduledDate])
+}
+
+model TourFeedback {
+  id            String      @id @default(cuid())
+  tourBookingId String      @unique
+  tourBooking   TourBooking @relation(fields: [tourBookingId], references: [id], onDelete: Restrict)
+  customerId    String
+  customer      User        @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  overallRating Int
+  comment       String?
+  riskFlags     String[]    @default([])
+  submittedAt   DateTime    @default(now())
+  drivers       TourDriverFeedback[]
+
+  @@index([submittedAt, id])
+  @@index([riskFlags], type: Gin)
+}
+
+model TourDriverFeedback {
+  id                           String       @id @default(cuid())
+  tourFeedbackId               String
+  tourFeedback                 TourFeedback @relation(fields: [tourFeedbackId], references: [id], onDelete: Restrict)
+  driverId                     String
+  driver                       Driver       @relation(fields: [driverId], references: [id], onDelete: Restrict)
+  driverName                   String
+  professionalRespectful       Boolean
+  feltSafe                     Boolean
+  followedAgreedService         String
+  uncomfortablePersonalQuestions Boolean
+  offPlatformSolicitation      Boolean
+  unauthorizedPaymentRequest   Boolean
+  comment                      String?
+  riskFlags                    String[]     @default([])
+  days                         TourFeedbackDay[]
+
+  @@unique([tourFeedbackId, driverId])
+  @@index([driverId])
+}
+
+model TourFeedbackDay {
+  id                   String             @id @default(cuid())
+  tourDriverFeedbackId String
+  tourDriverFeedback   TourDriverFeedback @relation(fields: [tourDriverFeedbackId], references: [id], onDelete: Restrict)
+  tourBookingDayId      String
+  tourBookingDay        TourBookingDay     @relation(fields: [tourBookingDayId], references: [id], onDelete: Restrict)
+  sourceTourId          String?
+  tourTitle             String
+  dayNumber             Int
+  scheduledDate         DateTime
+
+  @@unique([tourDriverFeedbackId, tourBookingDayId])
+  @@index([tourBookingDayId])
 }
 
 model TourCommercialRate {

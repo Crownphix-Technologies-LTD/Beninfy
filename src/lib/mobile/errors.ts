@@ -100,6 +100,9 @@ export type MobileErrorCode =
   | 'TOUR_PICKUP_OUTSIDE_COTONOU'
   | 'TOUR_QUOTE_REQUIRED'
   | 'TOUR_PRICING_LOCKED'
+  | 'TOUR_FEEDBACK_NOT_ALLOWED'
+  | 'TOUR_FEEDBACK_ALREADY_SUBMITTED'
+  | 'TOUR_FEEDBACK_TARGET_INVALID'
   | 'TOUR_NOT_EXECUTION_READY'
   | 'TOUR_BOOKING_NOT_FOUND'
   | 'TOUR_BOOKING_DATE_INVALID'
@@ -349,6 +352,12 @@ export function mobileErrorFromCode(code: MobileErrorCode, message?: string) {
       return mobileError(code, message ?? 'An Operations quote is required before payment', 409)
     case 'TOUR_PRICING_LOCKED':
       return mobileError(code, message ?? 'Pricing cannot change while checkout is pending verification', 409)
+    case 'TOUR_FEEDBACK_NOT_ALLOWED':
+      return mobileError(code, message ?? 'Feedback requires a completed paid Tour', 409)
+    case 'TOUR_FEEDBACK_ALREADY_SUBMITTED':
+      return mobileError(code, message ?? 'Feedback has already been submitted', 409)
+    case 'TOUR_FEEDBACK_TARGET_INVALID':
+      return mobileError(code, message ?? 'Feedback targets must match the completed Tour assignments', 400)
     case 'TOUR_NOT_EXECUTION_READY':
       return mobileError(code, message ?? 'This tour is not ready for booking', 409)
     case 'TOUR_BOOKING_NOT_FOUND':

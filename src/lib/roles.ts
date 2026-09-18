@@ -22,6 +22,7 @@ export type AdminPermission =
   | 'drivers'
   | 'routes'
   | 'tours'
+  | 'tour_feedback'
   | 'border_fees'
   | 'audit'
   | 'settings'
@@ -38,6 +39,7 @@ const ALL_PERMISSIONS: AdminPermission[] = [
   'drivers',
   'routes',
   'tours',
+  'tour_feedback',
   'border_fees',
   'audit',
   'settings',
@@ -46,7 +48,7 @@ const ALL_PERMISSIONS: AdminPermission[] = [
 const ROLE_PERMISSIONS: Record<Exclude<AppRole, 'user' | 'driver'>, AdminPermission[]> = {
   super_admin: ALL_PERMISSIONS,
   admin: ALL_PERMISSIONS,
-  operations_admin: ['overview', 'bookings', 'vehicles', 'fleet', 'drivers', 'routes', 'tours', 'border_fees', 'settings'],
+  operations_admin: ['overview', 'bookings', 'vehicles', 'fleet', 'drivers', 'routes', 'tours', 'tour_feedback', 'border_fees', 'settings'],
   finance_admin: ['overview', 'bookings', 'payments', 'coupons', 'pricing', 'audit', 'settings'],
   fleet_admin: ['overview', 'bookings', 'vehicles', 'fleet', 'drivers', 'routes', 'settings'],
   pricing_admin: ['overview', 'coupons', 'pricing', 'routes', 'border_fees', 'settings'],
