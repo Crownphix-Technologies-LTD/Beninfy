@@ -351,7 +351,7 @@ New initialization returns 201; reuse returns 200:
     "paidAt": null,
     "canRetry": false,
     "failureCode": null,
-    "couponsSupported": false,
+    "couponsSupported": true,
     "updatedAt": "<ISO timestamp>"
   },
   "reused": false,

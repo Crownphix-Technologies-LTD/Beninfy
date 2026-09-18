@@ -28,6 +28,9 @@ const patchSchema = z.object({
   expiresAt: optionalDate,
   minSpendNGN: z.number().int().nonnegative().nullable().optional(),
   maxRedemptions: z.number().int().positive().nullable().optional(),
+  applicability: z.enum(['ride', 'tour', 'both']).optional(),
+  maxDiscountNGN: z.number().int().positive().nullable().optional(),
+  maxPerCustomer: z.number().int().positive().nullable().optional(),
 }).superRefine((data, ctx) => {
   if (data.discountType === 'fixed' && !data.amountNGN) {
     ctx.addIssue({ code: 'custom', path: ['amountNGN'], message: 'Fixed coupons require amountNGN' })
@@ -94,7 +97,8 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
   if (!guard.ok) return guard.response
   const { id } = await params
   const bookings = await prisma.booking.count({ where: { couponId: id } })
-  if (bookings > 0) {
+  const tours = await prisma.tourCouponUse.count({ where: { couponId: id } })
+  if (bookings > 0 || tours > 0) {
     return NextResponse.json({ error: 'Cannot delete: this coupon has already been used. Deactivate it instead.' }, { status: 409 })
   }
   const coupon = await prisma.coupon.findUnique({ where: { id } })

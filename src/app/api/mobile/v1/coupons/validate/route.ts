@@ -18,7 +18,7 @@ export async function POST(req: Request) {
   if (!body || typeof body !== 'object') return mobileValidationError('Invalid coupon request')
   if (!('couponCode' in body)) return mobileValidationError('Coupon code is required')
 
-  const result = await calculateMobileQuote(body)
+  const result = await calculateMobileQuote(body, undefined, { userId: guard.principal.userId })
   if (!result.ok) return mobileErrorFromCode(result.code as MobileErrorCode, result.message)
   const coupon = result.data.quote.coupon
 

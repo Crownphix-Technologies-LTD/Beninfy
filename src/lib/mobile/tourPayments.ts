@@ -1,4 +1,5 @@
 import { randomBytes } from 'crypto'
+import type { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import type { MobilePrincipal } from '@/lib/mobile/auth'
 import {
@@ -24,10 +25,17 @@ import {
   type MobileLaunchPaymentProvider,
 } from '@/lib/mobile/paymentPolicy'
 import { toTourBookingDto } from '@/lib/mobile/tourBookings'
+import {
+  freezeTourCoupon,
+  redeemTourCoupon,
+  tourPricingDto,
+  expireFailedTourCoupon,
+} from '@/lib/mobile/tourCoupons'
 
 export type TourPaymentProvider = MobileLaunchPaymentProvider
 
 type TourPaymentForDto = {
+  tourPricingSnapshot?: Prisma.JsonValue | null
   id: string
   bookingId: string | null
   tourBookingId: string | null
@@ -69,7 +77,10 @@ function paymentExpiresAt() {
 }
 
 function activePendingPayment(payments: TourPaymentForDto[], provider: TourPaymentProvider) {
-  return payments.find((payment) => payment.provider === provider && payment.status === 'pending') ?? null
+  return (
+    payments.find((payment) => payment.provider === provider && payment.status === 'pending') ??
+    null
+  )
 }
 
 function successfulPayment(payments: TourPaymentForDto[]) {
@@ -83,12 +94,20 @@ export function tourPaymentState(input: { bookingStatus: string; paymentStatus: 
   return 'pending'
 }
 
-export function tourBookingPayable(booking: { status: string; paymentStatus: string; priceNGN: number }) {
-  return booking.priceNGN > 0 && booking.status === 'payment_pending' && booking.paymentStatus === 'pending'
+export function tourBookingPayable(booking: {
+  status: string
+  paymentStatus: string
+  priceNGN: number
+}) {
+  return (
+    booking.priceNGN > 0 &&
+    booking.status === 'payment_pending' &&
+    ['pending', 'failed'].includes(booking.paymentStatus)
+  )
 }
 
 export function tourCouponsSupported() {
-  return false
+  return true
 }
 
 export function normalizeTourPaymentProvider(value: unknown): TourPaymentProvider {
@@ -99,7 +118,17 @@ export function toTourPaymentDto({
   booking,
   payment,
 }: {
-  booking: { id: string; reference: string; status: string; paymentStatus: string; priceNGN: number }
+  booking: {
+    id: string
+    reference: string
+    status: string
+    paymentStatus: string
+    priceNGN: number
+    subtotalNGN?: number | null
+    discountNGN?: number
+    couponSnapshot?: Prisma.JsonValue | null
+    commercialSnapshot?: Prisma.JsonValue | null
+  }
   payment: TourPaymentForDto | null
 }) {
   const status =
@@ -135,6 +164,15 @@ export function toTourPaymentDto({
       (status === 'failed' || status === 'amount_mismatch' || !payment),
     failureCode: payment?.failureCode ?? null,
     couponsSupported: tourCouponsSupported(),
+    pricing:
+      payment?.tourPricingSnapshot ??
+      tourPricingDto({
+        priceNGN: booking.priceNGN,
+        subtotalNGN: booking.subtotalNGN ?? null,
+        discountNGN: booking.discountNGN ?? 0,
+        couponSnapshot: booking.couponSnapshot ?? null,
+        commercialSnapshot: booking.commercialSnapshot ?? null,
+      }),
     updatedAt: payment?.updatedAt.toISOString() ?? null,
   }
 }
@@ -168,13 +206,20 @@ function payOnUsTourCheckoutConfig({
   }
 }
 
-async function ownedTourBooking(tourBookingId: string, principal: MobilePrincipal, client = prisma) {
+async function ownedTourBooking(
+  tourBookingId: string,
+  principal: MobilePrincipal,
+  client = prisma
+) {
   return client.tourBooking.findFirst({
     where: { id: tourBookingId, userId: principal.userId },
     include: {
       user: { select: { id: true, name: true, email: true, phone: true } },
       payments: { orderBy: { createdAt: 'desc' } },
-      days: { orderBy: { dayNumber: 'asc' }, include: { stops: { orderBy: { sortOrder: 'asc' } } } },
+      days: {
+        orderBy: { dayNumber: 'asc' },
+        include: { stops: { orderBy: { sortOrder: 'asc' } } },
+      },
     },
   })
 }
@@ -198,37 +243,60 @@ export async function getMobileTourBookingPayment({
   }
 }
 
-export async function initiateMobileTourBookingPayment({
-  tourBookingId,
-  principal,
-  provider,
-  locale,
-  origin,
-}: {
-  tourBookingId: string
-  principal: MobilePrincipal
-  provider: TourPaymentProvider
-  locale: 'en' | 'fr'
-  origin: string
-}, client = prisma) {
+export async function initiateMobileTourBookingPayment(
+  {
+    tourBookingId,
+    principal,
+    provider,
+    locale,
+    origin,
+  }: {
+    tourBookingId: string
+    principal: MobilePrincipal
+    provider: TourPaymentProvider
+    locale: 'en' | 'fr'
+    origin: string
+  },
+  client = prisma
+) {
   const booking = await ownedTourBooking(tourBookingId, principal, client)
   if (!booking) return { ok: false as const, code: 'TOUR_BOOKING_NOT_FOUND' as const }
 
   const paid = successfulPayment(booking.payments)
   if (booking.quoteStatus === 'pending' || booking.status === 'quote_pending')
     return { ok: false as const, code: 'TOUR_QUOTE_REQUIRED' as const }
-  if (paid || booking.status === 'confirmed' || booking.status === 'active' || booking.status === 'completed') {
+  if (
+    paid ||
+    booking.status === 'confirmed' ||
+    booking.status === 'active' ||
+    booking.status === 'completed'
+  ) {
     return {
       ok: false as const,
       code: 'PAYMENT_ALREADY_COMPLETED' as const,
       dto: toTourPaymentDto({ booking, payment: paid ?? booking.payments[0] ?? null }),
     }
   }
+  const currency = assertMobileLaunchCurrency(booking.currencyCode)
+  if (!currency.ok) return { ok: false as const, code: currency.code, message: currency.message }
   if (booking.priceNGN === 0) {
-    await prisma.tourBooking.update({
-      where: { id: booking.id },
-      data: { status: 'confirmed', paymentStatus: 'paid', amountPaidNGN: 0 },
+    if (booking.status !== 'payment_pending' || !['pending', 'failed'].includes(booking.paymentStatus))
+      return { ok: false as const, code: 'TOUR_BOOKING_NOT_PAYABLE' as const }
+    const settled = await client.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "TourBooking" WHERE "id" = ${booking.id} FOR UPDATE`
+      const current = await tx.tourBooking.findUniqueOrThrow({ where: { id: booking.id } })
+      if (current.priceNGN !== 0 || current.status !== 'payment_pending')
+        return { ok: false as const, code: 'TOUR_PRICING_LOCKED' as const }
+      const frozen = await freezeTourCoupon(current, tx)
+      if (!frozen.ok) return frozen
+      await redeemTourCoupon(current.id, tx)
+      await tx.tourBooking.update({
+        where: { id: current.id },
+        data: { status: 'confirmed', paymentStatus: 'paid', amountPaidNGN: 0 },
+      })
+      return { ok: true as const }
     })
+    if (!settled.ok) return settled
     return {
       ok: true as const,
       booking,
@@ -248,11 +316,11 @@ export async function initiateMobileTourBookingPayment({
       dto: toTourPaymentDto({ booking, payment: booking.payments[0] ?? null }),
     }
   }
-  const currency = assertMobileLaunchCurrency(booking.currencyCode)
-  if (!currency.ok) return { ok: false as const, code: currency.code, message: currency.message }
 
   const existing = activePendingPayment(booking.payments, provider)
   if (existing && existing.expiresAt && existing.expiresAt > new Date()) {
+    if (provider === 'paystack' && !existing.providerAccessCode)
+      return { ok: false as const, code: 'TOUR_PRICING_LOCKED' as const }
     return {
       ok: true as const,
       booking,
@@ -270,29 +338,81 @@ export async function initiateMobileTourBookingPayment({
 
   const reference = `BFYT-P-${booking.id.slice(-6).toUpperCase()}-${randomBytes(3).toString('hex').toUpperCase()}`
 
+  const configurationError =
+    provider === 'paystack' ? getPaystackConfigurationError() : getPaymentConfigurationError()
+  if (configurationError)
+    return {
+      ok: false as const,
+      code: 'PAYMENT_PROVIDER_UNAVAILABLE' as const,
+      message: configurationError,
+    }
+  const prepared = await client.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "TourBooking" WHERE "id" = ${booking.id} FOR UPDATE`
+    const current = await ownedTourBooking(booking.id, principal, tx as typeof prisma)
+    if (!current || !tourBookingPayable(current))
+      return { ok: false as const, code: 'TOUR_BOOKING_NOT_PAYABLE' as const }
+    const pending = current.payments.find((p) => p.status === 'pending')
+    if (pending) {
+      if (pending.provider !== provider)
+        return { ok: false as const, code: 'TOUR_PRICING_LOCKED' as const }
+      if (
+        (provider === 'paystack' && !pending.providerAccessCode) ||
+        (pending.expiresAt && pending.expiresAt <= new Date())
+      )
+        return { ok: false as const, code: 'TOUR_PRICING_LOCKED' as const }
+      return { ok: true as const, booking: current, payment: pending, reused: true }
+    }
+    const frozen = await freezeTourCoupon(current, tx)
+    if (!frozen.ok) return frozen
+    await tx.tourBooking.update({ where: { id: current.id }, data: { paymentStatus: 'pending' } })
+    const payment = await tx.payment.create({
+      data: {
+        tourBookingId: current.id,
+        amountNGN: current.priceNGN,
+        status: 'pending',
+        reference,
+        provider,
+        currencyCode: MOBILE_LAUNCH_CURRENCY,
+        checkoutAmount: current.priceNGN,
+        expiresAt: paymentExpiresAt(),
+        tourPricingSnapshot: tourPricingDto(current),
+      },
+    })
+    return { ok: true as const, booking: current, payment, reused: false }
+  })
+  if (!prepared.ok) return prepared
+  if (prepared.reused)
+    return {
+      ok: true as const,
+      booking: prepared.booking,
+      payment: prepared.payment,
+      reused: true,
+      dto: {
+        ...toTourPaymentDto(prepared),
+        checkoutConfig:
+          provider === 'payonus'
+            ? payOnUsTourCheckoutConfig({ origin, locale, ...prepared })
+            : null,
+      },
+    }
+  const checkoutBooking = prepared.booking
+  const payment = prepared.payment
+
   if (provider === 'paystack') {
     const configurationError = getPaystackConfigurationError()
     const secret = getPaystackSecret()
     if (configurationError || !secret) {
-      return { ok: false as const, code: 'PAYMENT_PROVIDER_UNAVAILABLE' as const, message: configurationError }
+      return {
+        ok: false as const,
+        code: 'PAYMENT_PROVIDER_UNAVAILABLE' as const,
+        message: configurationError,
+      }
     }
-    const payment = await prisma.payment.create({
-      data: {
-        tourBookingId: booking.id,
-        amountNGN: booking.priceNGN,
-        status: 'pending',
-        reference,
-        provider: 'paystack',
-        currencyCode: MOBILE_LAUNCH_CURRENCY,
-        checkoutAmount: booking.priceNGN,
-        expiresAt: paymentExpiresAt(),
-      },
-    })
     try {
       const paystack = await initializePaystackTransaction({
         secret,
         email: booking.user.email || principal.email || `tour-${booking.id}@beninfy.com`,
-        amountNGN: booking.priceNGN,
+        amountNGN: payment.amountNGN,
         reference,
         callbackUrl: `${origin}/${locale}/dashboard`,
         metadata: {
@@ -303,7 +423,7 @@ export async function initiateMobileTourBookingPayment({
           product: 'tour',
         },
       })
-      const updated = await prisma.payment.update({
+      const updated = await client.payment.update({
         where: { id: payment.id },
         data: {
           providerReference: paystack.reference,
@@ -311,12 +431,19 @@ export async function initiateMobileTourBookingPayment({
           providerAccessCode: paystack.accessCode,
         },
       })
-      return { ok: true as const, booking, payment: updated, dto: toTourPaymentDto({ booking, payment: updated }), reused: false }
+      return {
+        ok: true as const,
+        booking: checkoutBooking,
+        payment: updated,
+        dto: toTourPaymentDto({ booking: checkoutBooking, payment: updated }),
+        reused: false,
+      }
     } catch (error) {
-      await prisma.payment.update({
+      await client.payment.update({
         where: { id: payment.id },
         data: { status: 'failed', failureCode: 'PAYMENT_PROVIDER_UNAVAILABLE' },
       })
+      await expireFailedTourCoupon(booking.id, client)
       return {
         ok: false as const,
         code: 'PAYMENT_PROVIDER_UNAVAILABLE' as const,
@@ -325,29 +452,18 @@ export async function initiateMobileTourBookingPayment({
     }
   }
 
-  const configurationError = getPaymentConfigurationError()
-  if (configurationError) {
-    return { ok: false as const, code: 'PAYMENT_PROVIDER_UNAVAILABLE' as const, message: configurationError }
-  }
-  const payment = await prisma.payment.create({
-    data: {
-      tourBookingId: booking.id,
-      amountNGN: booking.priceNGN,
-      status: 'pending',
-      reference,
-      provider: 'payonus',
-      currencyCode: MOBILE_LAUNCH_CURRENCY,
-      checkoutAmount: booking.priceNGN,
-      expiresAt: paymentExpiresAt(),
-    },
-  })
   return {
     ok: true as const,
-    booking,
+    booking: checkoutBooking,
     payment,
     dto: {
-      ...toTourPaymentDto({ booking, payment }),
-      checkoutConfig: payOnUsTourCheckoutConfig({ origin, locale, booking, payment }),
+      ...toTourPaymentDto({ booking: checkoutBooking, payment }),
+      checkoutConfig: payOnUsTourCheckoutConfig({
+        origin,
+        locale,
+        booking: checkoutBooking,
+        payment,
+      }),
     },
     reused: false,
   }
@@ -385,7 +501,8 @@ export async function verifyMobileTourBookingPayment({
       await settlePaymentFromPaystack(payment.reference, verified)
     } else if (payment.provider === 'payonus') {
       const onusReference = providerReference || payment.providerReference
-      if (!onusReference) return { ok: false as const, code: 'PAYMENT_PROVIDER_UNAVAILABLE' as const }
+      if (!onusReference)
+        return { ok: false as const, code: 'PAYMENT_PROVIDER_UNAVAILABLE' as const }
       const verified = await verifyPayOnUsPayment(onusReference)
       await settlePaymentFromPayOnUs(payment.reference, onusReference, verified)
     } else {

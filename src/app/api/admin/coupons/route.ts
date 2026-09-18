@@ -28,6 +28,9 @@ const schema = z.object({
   expiresAt: optionalDate,
   minSpendNGN: z.number().int().nonnegative().nullable().optional(),
   maxRedemptions: z.number().int().positive().nullable().optional(),
+  applicability: z.enum(['ride', 'tour', 'both']).default('ride'),
+  maxDiscountNGN: z.number().int().positive().nullable().optional(),
+  maxPerCustomer: z.number().int().positive().nullable().optional(),
 }).superRefine((data, ctx) => {
   if (data.discountType === 'fixed' && !data.amountNGN) {
     ctx.addIssue({ code: 'custom', path: ['amountNGN'], message: 'Fixed coupons require amountNGN' })
@@ -49,6 +52,9 @@ function couponData(data: z.infer<typeof schema>) {
     expiresAt: data.expiresAt ? new Date(data.expiresAt) : null,
     minSpendNGN: data.minSpendNGN,
     maxRedemptions: data.maxRedemptions,
+    applicability: data.applicability,
+    maxDiscountNGN: data.maxDiscountNGN,
+    maxPerCustomer: data.maxPerCustomer,
   }
 }
 

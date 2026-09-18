@@ -17,6 +17,7 @@ interface Coupon {
   minSpendNGN: number | null
   maxRedemptions: number | null
   redeemedCount: number
+  applicability: string
   [key: string]: unknown
 }
 
@@ -51,6 +52,7 @@ export default function AdminCouponsPage() {
           ),
         },
         { header: 'Discount', render: discountLabel },
+        { header: 'Applies to', render: (coupon) => coupon.applicability === 'both' ? 'Ride + Tour' : coupon.applicability === 'tour' ? 'Tour' : 'Ride' },
         { header: 'Status', render: (coupon) => <AdminStatusBadge status={coupon.active ? 'active' : 'inactive'} /> },
         { header: 'Min spend', render: (coupon) => coupon.minSpendNGN ? formatNGN(coupon.minSpendNGN) : '—' },
         { header: 'Usage', render: (coupon) => `${coupon.redeemedCount}${coupon.maxRedemptions ? ` / ${coupon.maxRedemptions}` : ''}` },
@@ -60,6 +62,7 @@ export default function AdminCouponsPage() {
       fields={[
         { name: 'code', label: 'Coupon code', type: 'text', required: true, placeholder: 'e.g. TEST1000' },
         { name: 'description', label: 'Description', type: 'textarea' },
+        { name: 'applicability', label: 'Applies to', type: 'select', required: true, options: [{ label: 'Ride only', value: 'ride' }, { label: 'Tour only', value: 'tour' }, { label: 'Ride + Tour', value: 'both' }] },
         {
           name: 'discountType',
           label: 'Discount type',
@@ -75,10 +78,12 @@ export default function AdminCouponsPage() {
         { name: 'active', label: 'Active', type: 'boolean' },
         { name: 'minSpendNGN', label: 'Minimum spend (NGN)', type: 'number' },
         { name: 'maxRedemptions', label: 'Max redemptions', type: 'number' },
+        { name: 'maxPerCustomer', label: 'Max uses per customer', type: 'number' },
+        { name: 'maxDiscountNGN', label: 'Maximum discount (NGN)', type: 'number' },
         { name: 'startsAt', label: 'Starts at', type: 'text', placeholder: 'YYYY-MM-DD or full ISO date' },
         { name: 'expiresAt', label: 'Expires at', type: 'text', placeholder: 'YYYY-MM-DD or full ISO date' },
       ]}
-      defaultValues={{ active: true, discountType: 'fixed' }}
+      defaultValues={{ active: true, discountType: 'fixed', applicability: 'ride' }}
     />
   )
 }

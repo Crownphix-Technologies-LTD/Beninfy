@@ -172,7 +172,7 @@ Errors:
 Launch limitations:
 
 - Tour payment initialization is supported through explicit Tour-owned `Payment` rows.
-- Tour coupons are not supported because the current coupon model is ride-booking-owned.
+- Tour coupons use the shared Coupon engine with explicit applicability. See [Tour coupons](tour-coupons.md).
 - Customer Tour cancellation is supported only before payment is completed. Refund handling remains an operations policy.
 - Driver Tour execution, Customer live Tour tracking, and Tour journey intelligence are implemented for paid Tour bookings.
 - Tour chat is not supported in v1.
@@ -381,7 +381,7 @@ Vehicle category rate per selected Tour, optional Cotonou-only Gogotinkpo addon,
 one booking for a combination of products, and an Operations quote gate for
 custom itineraries. Traveller count is capacity/operations data, not a multiplier.
 
-Tour coupons are unsupported in v1. Ride coupons must not be silently applied to Tour bookings.
+Tour coupons require explicit `tour` or `both` applicability. Existing Ride coupons remain Ride-only. See [Tour coupons](tour-coupons.md) for mutation, financial locking and usage contracts.
 
 Pending custom quotes cannot initialize payment; zero in the legacy amount
 column is not a free booking. Existing historical free-booking behavior remains

@@ -32,6 +32,7 @@ model User {
   privacyVersion      String?
   bookings            Booking[]
   tourBookings        TourBooking[]
+  tourCouponUses      TourCouponUse[]
   savedPlaces         SavedPlace[]
   travelPreference    CustomerTravelPreference?
   tripReviews         TripReview[]
@@ -650,6 +651,10 @@ model RoutePrice {
 }
 
 model Coupon {
+  applicability  String    @default("ride")
+  maxDiscountNGN Int?
+  maxPerCustomer Int?
+  tourUses       TourCouponUse[]
   id             String    @id @default(cuid())
   code           String    @unique
   description    String?
@@ -665,6 +670,24 @@ model Coupon {
   bookings       Booking[]
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
+}
+
+model TourCouponUse {
+  id            String      @id @default(cuid())
+  couponId      String
+  coupon        Coupon      @relation(fields: [couponId], references: [id], onDelete: Restrict)
+  tourBookingId String      @unique
+  tourBooking   TourBooking @relation(fields: [tourBookingId], references: [id], onDelete: Restrict)
+  userId        String
+  user          User        @relation(fields: [userId], references: [id], onDelete: Restrict)
+  status        String      @default("reserved")
+  expiresAt     DateTime?
+  redeemedAt    DateTime?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@index([couponId, status, expiresAt])
+  @@index([userId, couponId, status])
 }
 
 model Tour {
@@ -738,6 +761,10 @@ model TourItineraryStop {
 }
 
 model TourBooking {
+  subtotalNGN       Int?
+  discountNGN       Int              @default(0)
+  couponSnapshot    Json?
+  couponUse         TourCouponUse?
   selectedTourIds   String[]         @default([])
   vehicleCategoryId String?
   vehicleCategoryName String?
@@ -925,6 +952,7 @@ model BorderFee {
 }
 
 model Payment {
+  tourPricingSnapshot Json?
   id                  String             @id @default(cuid())
   bookingId           String?
   tourBookingId       String?

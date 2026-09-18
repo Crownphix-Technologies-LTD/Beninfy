@@ -189,7 +189,7 @@ Payment DTO:
   "paidAt": null,
   "canRetry": false,
   "failureCode": null,
-  "couponsSupported": false,
+  "couponsSupported": true,
   "updatedAt": "2026-10-15T12:00:00.000Z"
 }
 ```
