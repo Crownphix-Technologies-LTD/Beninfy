@@ -182,11 +182,13 @@ function payOnUsTourCheckoutConfig({
   locale,
   booking,
   payment,
+  callbackPath,
 }: {
   origin: string
   locale: 'en' | 'fr'
   booking: TourBookingForPayment
   payment: TourPaymentForDto
+  callbackPath?: string
 }) {
   const businessId = getPayOnUsBusinessId()
   if (!businessId) return null
@@ -200,7 +202,7 @@ function payOnUsTourCheckoutConfig({
     merchantCheckoutReference: payment.reference,
     countryCode: 'NG' as const,
     notificationUrl: `${origin}/api/payments/webhook`,
-    redirectUrl: `${origin}/${locale}/dashboard`,
+    redirectUrl: `${origin}${callbackPath ?? `/${locale}/dashboard`}`,
     environment: getPayOnUsEnvironment(),
     paymentMethods: ['card', 'bank', 'palmpay', 'opay'] satisfies PayOnUsPaymentMethod[],
   }
@@ -250,12 +252,16 @@ export async function initiateMobileTourBookingPayment(
     provider,
     locale,
     origin,
+    callbackPath,
+    app,
   }: {
     tourBookingId: string
     principal: MobilePrincipal
     provider: TourPaymentProvider
     locale: 'en' | 'fr'
     origin: string
+    callbackPath?: string
+    app?: 'customer-mobile' | 'customer-web'
   },
   client = prisma
 ) {
@@ -280,7 +286,10 @@ export async function initiateMobileTourBookingPayment(
   const currency = assertMobileLaunchCurrency(booking.currencyCode)
   if (!currency.ok) return { ok: false as const, code: currency.code, message: currency.message }
   if (booking.priceNGN === 0) {
-    if (booking.status !== 'payment_pending' || !['pending', 'failed'].includes(booking.paymentStatus))
+    if (
+      booking.status !== 'payment_pending' ||
+      !['pending', 'failed'].includes(booking.paymentStatus)
+    )
       return { ok: false as const, code: 'TOUR_BOOKING_NOT_PAYABLE' as const }
     const settled = await client.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT "id" FROM "TourBooking" WHERE "id" = ${booking.id} FOR UPDATE`
@@ -329,7 +338,13 @@ export async function initiateMobileTourBookingPayment(
         ...toTourPaymentDto({ booking, payment: existing }),
         checkoutConfig:
           provider === 'payonus'
-            ? payOnUsTourCheckoutConfig({ origin, locale, booking, payment: existing })
+            ? payOnUsTourCheckoutConfig({
+                origin,
+                locale,
+                booking,
+                payment: existing,
+                callbackPath,
+              })
             : null,
       },
       reused: true,
@@ -391,7 +406,7 @@ export async function initiateMobileTourBookingPayment(
         ...toTourPaymentDto(prepared),
         checkoutConfig:
           provider === 'payonus'
-            ? payOnUsTourCheckoutConfig({ origin, locale, ...prepared })
+            ? payOnUsTourCheckoutConfig({ origin, locale, ...prepared, callbackPath })
             : null,
       },
     }
@@ -414,12 +429,12 @@ export async function initiateMobileTourBookingPayment(
         email: booking.user.email || principal.email || `tour-${booking.id}@beninfy.com`,
         amountNGN: payment.amountNGN,
         reference,
-        callbackUrl: `${origin}/${locale}/dashboard`,
+        callbackUrl: `${origin}${callbackPath ?? `/${locale}/dashboard`}`,
         metadata: {
           tourBookingId: booking.id,
           paymentId: payment.id,
           provider: 'paystack',
-          app: 'customer-mobile',
+          app: app ?? 'customer-mobile',
           product: 'tour',
         },
       })
@@ -463,6 +478,7 @@ export async function initiateMobileTourBookingPayment(
         locale,
         booking: checkoutBooking,
         payment,
+        callbackPath,
       }),
     },
     reused: false,
