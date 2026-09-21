@@ -18,7 +18,7 @@ import {
   assertVehicleTypeAvailable,
   findAvailableFleetVehicle,
 } from '@/lib/availability'
-import { normalizeCouponCode, validateCouponCode } from '@/lib/coupons'
+import { normalizeCouponCode, validateCouponCode, lockCouponCodes } from '@/lib/coupons'
 import { notifyAutoAccountCreated, notifyBookingCreatedPending } from '@/lib/notifications'
 import { refreshStalePayments } from '@/lib/paymentMaintenance'
 import { checkRateLimit, requestIp } from '@/lib/rateLimit'
@@ -312,8 +312,9 @@ export async function POST(req: Request) {
           }
           reservedFleetVehicles.set(key, fleetVehicle)
         }
+        if (normalizedCouponCode) await lockCouponCodes([normalizedCouponCode], tx)
         const couponValidation = normalizedCouponCode
-          ? await validateCouponCode(normalizedCouponCode, subtotalNGN, tx)
+          ? await validateCouponCode(normalizedCouponCode, subtotalNGN, tx, { product: 'ride', userId: bookingUser.id })
           : null
 
         if (couponValidation && !couponValidation.ok) {

@@ -6,6 +6,10 @@ The [commercial-model contract](./tour-commercial-model.md) defines the canonica
 catalogue, combination checkout and custom quote gate. The execution wire fields
 below retain compatibility; new checkout requests also require `vehicleCategoryId`.
 
+Tour coupons and private post-completion feedback are additive Customer contracts:
+[coupon pricing/mutations](./tour-coupons.md) and
+[feedback eligibility/submission](./tour-feedback.md). Driver DTOs do not expose private reports.
+
 Catalogue/detail **template** stop `address`, `latitude` and `longitude` may now
 all be null for persisted incomplete itinerary drafts. Names/order/descriptions
 remain visible. The backend reports `missing_stop_coordinates` and rejects
@@ -189,7 +193,7 @@ Payment DTO:
   "paidAt": null,
   "canRetry": false,
   "failureCode": null,
-  "couponsSupported": false,
+  "couponsSupported": true,
   "updatedAt": "2026-10-15T12:00:00.000Z"
 }
 ```

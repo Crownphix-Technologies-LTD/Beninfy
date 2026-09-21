@@ -39,6 +39,9 @@ export const TOUR_BOOKING_MAX_TRAVELLERS = 30
 type Dateish = Date | string
 
 type TourBookingWithDays = {
+  subtotalNGN?: number | null
+  discountNGN?: number
+  couponSnapshot?: unknown
   selectedTourIds?: string[]
   vehicleCategoryId?: string | null
   vehicleCategoryName?: string | null
@@ -226,7 +229,7 @@ function paymentDto(booking: TourBookingWithDays) {
     amountPaidNGN: booking.amountPaidNGN,
     provider: booking.paymentProvider,
     paymentReference: booking.paymentReference,
-    canInitialize: booking.status === 'payment_pending' && booking.paymentStatus === 'pending',
+    canInitialize: booking.status === 'payment_pending' && ['pending', 'failed'].includes(booking.paymentStatus),
   }
 }
 
@@ -346,6 +349,12 @@ export function toTourBookingDto(booking: TourBookingWithDays) {
     customItinerary: booking.customItinerary ?? null,
     quoteStatus: booking.quoteStatus ?? 'not_required',
     commercial: booking.commercialSnapshot ?? null,
+    pricing: {
+      subtotal: { value: booking.subtotalNGN ?? booking.priceNGN + (booking.discountNGN ?? 0), currency: 'NGN', minorUnit: 'kobo', minorValue: (booking.subtotalNGN ?? booking.priceNGN + (booking.discountNGN ?? 0)) * 100 },
+      discount: { value: booking.discountNGN ?? 0, currency: 'NGN', minorUnit: 'kobo', minorValue: (booking.discountNGN ?? 0) * 100 },
+      total: { value: booking.priceNGN, currency: 'NGN', minorUnit: 'kobo', minorValue: booking.priceNGN * 100 },
+      coupon: booking.couponSnapshot ?? null,
+    },
     status: booking.status,
     startDate: iso(booking.startDate),
     endDate: iso(booking.endDate),
@@ -552,6 +561,7 @@ export async function createCustomerTourBooking(input: {
               paymentStatus: 'pending',
               currencyCode: price.currencyCode,
               priceNGN: price.priceNGN,
+              subtotalNGN: custom ? null : price.priceNGN,
               amountPaidNGN: 0,
               idempotencyKey: idempotency.key,
               tourTitle: orderedTours.map((value) => value.title).join(' + '),
@@ -756,6 +766,6 @@ export function tourPaymentFoundation() {
     externalPaymentInitializationImplemented: true,
     reason:
       'Tour payments use explicit Payment.tourBookingId ownership and the shared Paystack/PayOnUs provider settlement path.',
-    couponSupport: false,
+    couponSupport: true,
   }
 }

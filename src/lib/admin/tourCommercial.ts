@@ -193,6 +193,7 @@ export async function approveTourOperationsQuote(id: string, body: unknown, clie
           quoteStatus: 'approved',
           quotedAt,
           priceNGN: parsed.data.priceNGN,
+          subtotalNGN: parsed.data.priceNGN,
           status: 'payment_pending',
           commercialSnapshot: {
             ...previousSnapshot,

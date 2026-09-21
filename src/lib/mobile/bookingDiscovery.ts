@@ -379,7 +379,8 @@ export async function calculateMobileAvailability(
 
 export async function calculateMobileQuote(
   input: MobileDiscoverySelectionInput,
-  client: PrismaClientLike = prisma
+  client: PrismaClientLike = prisma,
+  context: { userId?: string } = {}
 ) {
   const availabilityResult = await calculateMobileAvailability(input, client)
   if (!availabilityResult.ok) return availabilityResult
@@ -449,7 +450,7 @@ export async function calculateMobileQuote(
   let coupon: Awaited<ReturnType<typeof validateCouponCode>> | null = null
   if (couponCode) {
     try {
-      coupon = await validateCouponCode(couponCode, fare.subtotalNGN, client)
+      coupon = await validateCouponCode(couponCode, fare.subtotalNGN, client, { product: 'ride', userId: context.userId })
     } catch (error) {
       await logMobileCouponQuoteDiagnostics({
         couponCode,

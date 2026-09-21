@@ -90,7 +90,7 @@ export async function POST(req: Request, { params }: TourPaymentContext) {
       ? mobileError(result.code, result.code, result.code === 'PAYMENT_ALREADY_COMPLETED' ? 409 : 409, {
           payment: result.dto,
         })
-      : mobileErrorFromCode(result.code, result.message ?? undefined)
+      : mobileErrorFromCode(result.code, 'message' in result ? result.message ?? undefined : undefined)
   }
 
   return Response.json(

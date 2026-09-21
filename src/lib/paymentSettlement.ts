@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/prisma'
 import { Prisma } from '@prisma/client'
 import { ACTIVE_BLOCKING_LEG_STATUSES } from '@/lib/tripLifecycle'
+import { redeemTourCoupon, expireFailedTourCoupon } from '@/lib/mobile/tourCoupons'
 
 function dayWindow(date: Date) {
   const startsAt = new Date(date)
@@ -240,6 +241,7 @@ export async function markPaymentPaidAndConfirmTourBooking({
 }) {
   return prisma.$transaction(
     async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "TourBooking" WHERE "id" = ${tourBookingId} FOR UPDATE`
       const payment = await tx.payment.findUnique({
         where: { id: paymentId },
         select: { status: true },
@@ -250,11 +252,16 @@ export async function markPaymentPaidAndConfirmTourBooking({
 
       const tourBooking = await tx.tourBooking.findUnique({
         where: { id: tourBookingId },
-        select: { id: true, status: true, paymentStatus: true },
+        select: { id: true, status: true, paymentStatus: true, priceNGN: true },
       })
       if (!tourBooking) {
         throw new Error('Tour booking not found during payment settlement')
       }
+      if (tourBooking.priceNGN !== amountNGN) throw new Error('Tour settlement amount differs from authoritative booking')
+      if (payment.status === 'paid' || tourBooking.paymentStatus === 'paid') {
+        return { ok: true as const, status: 'confirmed' as const, alreadySettled: true }
+      }
+      await redeemTourCoupon(tourBookingId, tx)
 
       await tx.payment.update({
         where: { id: paymentId },
@@ -281,12 +288,13 @@ export async function markPaymentPaidAndConfirmTourBooking({
         alreadySettled: payment.status === 'paid' || tourBooking.paymentStatus === 'paid',
       }
     },
-    { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+    // Booking row lock serializes settlement and coupon/pricing mutations.
+    { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted }
   )
 }
 
-export function failTourBookingPayment(tourBookingId: string) {
-  return prisma.tourBooking.updateMany({
+export async function failTourBookingPayment(tourBookingId: string) {
+  const result = await prisma.tourBooking.updateMany({
     where: {
       id: tourBookingId,
       status: 'payment_pending',
@@ -295,4 +303,6 @@ export function failTourBookingPayment(tourBookingId: string) {
       paymentStatus: 'failed',
     },
   })
+  await expireFailedTourCoupon(tourBookingId)
+  return result
 }

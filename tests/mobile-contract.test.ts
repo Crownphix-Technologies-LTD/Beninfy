@@ -2711,6 +2711,7 @@ test('mobile coupon quote keeps Cotonou Lagos pricing authoritative', async () =
 
 test('coupon validation normalizes integer-like money values before discount arithmetic', async () => {
   const client = {
+    tourCouponUse: { count: async () => 0 },
     coupon: {
       findUnique: async () => ({
         id: 'coupon',
@@ -4670,7 +4671,7 @@ test('tour payment foundation documents explicit tour-owned payment support', ()
     externalPaymentInitializationImplemented: true,
     reason:
       'Tour payments use explicit Payment.tourBookingId ownership and the shared Paystack/PayOnUs provider settlement path.',
-    couponSupport: false,
+    couponSupport: true,
   })
 })
 
@@ -4985,7 +4986,7 @@ test('tour payment ownership is explicit and isolated from ride payments', () =>
   assert.match(tourPayments, /initializePaystackTransaction/)
   assert.match(tourPayments, /accessCode/)
   assert.match(tourPayments, /payOnUsTourCheckoutConfig/)
-  assert.equal(tourCouponsSupported(), false)
+  assert.equal(tourCouponsSupported(), true)
   assert.equal(tourBookingPayable({ status: 'payment_pending', paymentStatus: 'pending', priceNGN: 1 }), true)
   assert.equal(tourBookingPayable({ status: 'confirmed', paymentStatus: 'paid', priceNGN: 1 }), false)
   assert.equal(tourPaymentState({ bookingStatus: 'payment_pending', paymentStatus: 'pending' }), 'pending')

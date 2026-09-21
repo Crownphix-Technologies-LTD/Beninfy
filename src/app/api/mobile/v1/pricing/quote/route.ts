@@ -22,7 +22,7 @@ export async function POST(req: Request) {
   const body = await req.json().catch(() => null)
   if (!body || typeof body !== 'object') return mobileValidationError('Invalid quote request')
 
-  const result = await calculateMobileQuote(body)
+  const result = await calculateMobileQuote(body, undefined, { userId: guard.principal.userId })
   if (!result.ok) {
     if ('details' in result && result.details !== undefined) {
       return mobileError(result.code as MobileErrorCode, result.message, 400, result.details)

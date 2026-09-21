@@ -4,6 +4,10 @@ This contract supersedes the former `Tour.startingFromNGN` payable-package model
 Execution, Driver actions, location publishing, tracking, journey intelligence and
 provider settlement retain their existing endpoints and ownership rules.
 
+[Tour coupons](./tour-coupons.md) apply after the authoritative subtotal/add-ons without
+changing component prices. [Private feedback](./tour-feedback.md) is available only
+after authoritative completion and is not a public Driver review.
+
 ## Catalogue
 
 `GET /api/mobile/v1/tours` exposes only active canonical products, in this order:
@@ -351,7 +355,7 @@ New initialization returns 201; reuse returns 200:
     "paidAt": null,
     "canRetry": false,
     "failureCode": null,
-    "couponsSupported": false,
+    "couponsSupported": true,
     "updatedAt": "<ISO timestamp>"
   },
   "reused": false,

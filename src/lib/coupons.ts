@@ -11,6 +11,9 @@ export type CouponValidationResult =
         code: string
         description: string | null
         discountType: string
+        amountNGN: number | null
+        percent: number | null
+        maxDiscountNGN: number | null
       }
       discountNGN: number
       finalAmountNGN: number
@@ -24,7 +27,8 @@ export function normalizeCouponCode(code: string) {
 export async function validateCouponCode(
   rawCode: string,
   amountNGN: number,
-  client: PrismaClientLike = prisma
+  client: PrismaClientLike = prisma,
+  context: { product?: 'ride' | 'tour'; userId?: string; excludeTourBookingId?: string } = {}
 ): Promise<CouponValidationResult> {
   const code = normalizeCouponCode(rawCode)
   if (!code) return { ok: false, error: 'Enter a coupon code' }
@@ -33,18 +37,54 @@ export async function validateCouponCode(
   const coupon = await client.coupon.findUnique({ where: { code } })
   if (!coupon) return { ok: false, error: 'Coupon code was not found' }
   if (!coupon.active) return { ok: false, error: 'Coupon code is inactive' }
+  const applicability = coupon.applicability ?? 'ride'
+  if (applicability !== 'both' && applicability !== (context.product ?? 'ride')) {
+    return { ok: false, error: 'Coupon is not applicable to this product' }
+  }
 
   const now = new Date()
-  if (coupon.startsAt && coupon.startsAt > now) return { ok: false, error: 'Coupon code is not active yet' }
-  if (coupon.expiresAt && coupon.expiresAt < now) return { ok: false, error: 'Coupon code has expired' }
+  if (coupon.startsAt && coupon.startsAt > now)
+    return { ok: false, error: 'Coupon code is not active yet' }
+  if (coupon.expiresAt && coupon.expiresAt < now)
+    return { ok: false, error: 'Coupon code has expired' }
   const minSpendNGN = normalizeIntegerMoney(coupon.minSpendNGN)
   if (minSpendNGN && eligibleAmountNGN < minSpendNGN) {
-    return { ok: false, error: `Coupon requires a minimum spend of NGN ${minSpendNGN.toLocaleString()}` }
+    return {
+      ok: false,
+      error: `Coupon requires a minimum spend of NGN ${minSpendNGN.toLocaleString()}`,
+    }
   }
   const maxRedemptions = normalizeIntegerMoney(coupon.maxRedemptions)
   const redeemedCount = normalizeIntegerMoney(coupon.redeemedCount) ?? 0
-  if (maxRedemptions && redeemedCount >= maxRedemptions) {
+  const heldWhere = {
+    couponId: coupon.id,
+    status: 'reserved',
+    ...(context.excludeTourBookingId
+      ? { tourBookingId: { not: context.excludeTourBookingId } }
+      : {}),
+    OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+  }
+  const held = maxRedemptions ? await client.tourCouponUse.count({ where: heldWhere }) : 0
+  if (maxRedemptions && redeemedCount + held >= maxRedemptions) {
     return { ok: false, error: 'Coupon code has reached its usage limit' }
+  }
+  if (coupon.maxPerCustomer) {
+    if (!context.userId) return { ok: false, error: 'Sign in to check customer coupon eligibility' }
+    const rides = await client.booking.count({
+      where: { couponId: coupon.id, userId: context.userId },
+    })
+    const tours = await client.tourCouponUse.count({
+      where: {
+        couponId: coupon.id,
+        userId: context.userId,
+        ...(context.excludeTourBookingId
+          ? { tourBookingId: { not: context.excludeTourBookingId } }
+          : {}),
+        OR: [{ status: 'redeemed' }, { ...heldWhere }],
+      },
+    })
+    if (rides + tours >= coupon.maxPerCustomer)
+      return { ok: false, error: 'Customer coupon usage limit reached' }
   }
 
   const percent = normalizeIntegerMoney(coupon.percent) ?? 0
@@ -53,7 +93,11 @@ export async function validateCouponCode(
     coupon.discountType === 'percent'
       ? Math.floor((eligibleAmountNGN * percent) / 100)
       : fixedAmountNGN
-  const discountNGN = Math.min(eligibleAmountNGN, Math.max(0, rawDiscount))
+  const discountNGN = Math.min(
+    eligibleAmountNGN,
+    coupon.maxDiscountNGN ?? eligibleAmountNGN,
+    Math.max(0, rawDiscount)
+  )
 
   if (discountNGN <= 0) return { ok: false, error: 'Coupon has no discount value' }
 
@@ -64,9 +108,19 @@ export async function validateCouponCode(
       code: coupon.code,
       description: coupon.description,
       discountType: coupon.discountType,
+      amountNGN: coupon.amountNGN,
+      percent: coupon.percent,
+      maxDiscountNGN: coupon.maxDiscountNGN ?? null,
     },
     discountNGN,
     finalAmountNGN: Math.max(0, eligibleAmountNGN - discountNGN),
+  }
+}
+
+export async function lockCouponCodes(codes: string[], tx: Prisma.TransactionClient) {
+  for (const code of [...new Set(codes)].sort()) {
+    // Also change the row version: serializable Ride checkout must not see stale Tour holds.
+    await tx.$queryRaw`UPDATE "Coupon" SET "updatedAt" = CURRENT_TIMESTAMP WHERE "code" = ${code} RETURNING "id"`
   }
 }
 
