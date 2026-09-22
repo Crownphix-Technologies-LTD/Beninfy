@@ -37,5 +37,14 @@ export async function POST(req: Request, { params }: TourCancelContext) {
   })
   if (!result.ok) return mobileErrorFromCode(result.code)
 
-  return Response.json({ tourBooking: result.dto, idempotent: result.idempotent })
+  return Response.json({
+    cancellation: {
+      tourBookingId: result.booking.id,
+      bookingStatus: result.booking.status,
+      paymentStatus: result.paymentStatus,
+      cancelled: result.cancelled,
+      idempotent: result.idempotent,
+    },
+    tourBooking: result.dto,
+  })
 }

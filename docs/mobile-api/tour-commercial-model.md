@@ -378,9 +378,12 @@ includes a server secret. `checkout.accessCode` is nullable for PayOnUs.
 SDK/widget success alone is not settlement: backend provider verification and
 webhooks remain authoritative for status, amount, reference and ownership.
 Paystack Tour checkout uses the same fixed Customer mobile navigation contract as
-Tour checkout: success is `https://beninfy.com/en/mobile/payments/success` and
+Ride checkout: success is `https://beninfy.com/en/mobile/payments/success` and
 cancel is `https://beninfy.com/en/mobile/payments/cancel`. The cancel navigation
-only dismisses checkout; it does not mutate the Tour Payment or booking status.
+itself does not mutate state. Flutter then calls
+`POST /api/mobile/v1/customer/tour-bookings/:tourBookingId/cancel`; confirmed unpaid
+cancellation returns `cancellation.cancelled = true`, while a concurrent settled
+payment returns the authoritative state with `cancelled = false`.
 
 All mobile errors use `{ "error": { "code": "...", "message": "..." } }`
 with optional `details`. Relevant statuses: `VALIDATION_ERROR` 400,

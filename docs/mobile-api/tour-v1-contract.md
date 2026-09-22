@@ -441,6 +441,15 @@ Paid `confirmed`, `active`, `completed`, and already terminal bookings are not s
 
 Cancellation stops Driver actions, location publishing, future day execution, and active journey intelligence by moving the booking/day state to terminal values.
 
+Explicit checkout cancellation uses:
+
+`POST /api/mobile/v1/customer/tour-bookings/:tourBookingId/cancel`
+
+with no request body. Success returns `cancellation.cancelled = true`, retains the
+pending Payment record, and does not label it failed. Repeated requests are
+idempotent. If concurrent settlement wins, the response has
+`cancellation.cancelled = false` and `cancellation.paymentStatus = paid`.
+
 ## Chat
 
 Tour chat is unsupported in v1.

@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto'
 import { prisma } from '../src/lib/prisma'
 import { setTourCoupon } from '../src/lib/mobile/tourCoupons'
 import { initiateMobileTourBookingPayment } from '../src/lib/mobile/tourPayments'
+import { cancelCustomerTourBooking } from '../src/lib/mobile/tourBookings'
 import { markPaymentPaidAndConfirmTourBooking } from '../src/lib/paymentSettlement'
 import { calculateTourCommercialSnapshot, CANONICAL_TOUR_IDS } from '../src/lib/tourCommercial'
 import type { MobilePrincipal } from '../src/lib/mobile/auth'
@@ -236,6 +237,102 @@ test(
         assert.equal(await prisma.payment.count({ where: { tourBookingId: zero.id } }), 0)
         assert.equal((await prisma.coupon.findUniqueOrThrow({ where: { id: free.id } })).redeemedCount, 1)
         assert.equal(calls, 1)
+      })
+      await t.test('explicit Tour checkout cancellation is idempotent and settlement wins races', async () => {
+        const unpaid = await book(0, 1, false)
+        const day = await prisma.tourBookingDay.create({
+          data: {
+            tourBookingId: unpaid.id,
+            dayNumber: 1,
+            scheduledDate: new Date('2030-01-01'),
+            status: 'upcoming',
+            title: 'Fixture day',
+            stops: {
+              create: {
+                sortOrder: 1,
+                title: 'Fixture stop',
+                address: 'Fixture address',
+                latitude: 6.3,
+                longitude: 2.4,
+              },
+            },
+          },
+        })
+        const pending = await prisma.payment.create({
+          data: {
+            tourBookingId: unpaid.id,
+            reference: randomUUID(),
+            provider: 'paystack',
+            amountNGN: unpaid.priceNGN,
+            status: 'pending',
+          },
+        })
+        const cancelled = await cancelCustomerTourBooking({
+          principal: principals[0],
+          tourBookingId: unpaid.id,
+        })
+        assert.ok(cancelled.ok)
+        assert.equal(cancelled.cancelled, true)
+        assert.equal(cancelled.paymentStatus, 'pending')
+        assert.equal(
+          (await prisma.payment.findUniqueOrThrow({ where: { id: pending.id } })).status,
+          'pending'
+        )
+        assert.equal(
+          (await prisma.tourBookingDay.findUniqueOrThrow({ where: { id: day.id } })).status,
+          'cancelled'
+        )
+        const repeated = await cancelCustomerTourBooking({
+          principal: principals[0],
+          tourBookingId: unpaid.id,
+        })
+        assert.ok(repeated.ok)
+        assert.equal(repeated.idempotent, true)
+        assert.equal(repeated.cancelled, true)
+
+        const race = await book(0, 1, false)
+        await prisma.tourBookingDay.create({
+          data: {
+            tourBookingId: race.id,
+            dayNumber: 1,
+            scheduledDate: new Date('2030-01-01'),
+            status: 'upcoming',
+            title: 'Race day',
+          },
+        })
+        const racePayment = await prisma.payment.create({
+          data: {
+            tourBookingId: race.id,
+            reference: randomUUID(),
+            provider: 'paystack',
+            amountNGN: race.priceNGN,
+            status: 'pending',
+          },
+        })
+        await Promise.all([
+          cancelCustomerTourBooking({ principal: principals[0], tourBookingId: race.id }),
+          markPaymentPaidAndConfirmTourBooking({
+            paymentId: racePayment.id,
+            tourBookingId: race.id,
+            amountNGN: race.priceNGN,
+            provider: 'paystack',
+            paymentData: { paidAt: new Date() },
+          }),
+        ])
+        const won = await prisma.tourBooking.findUniqueOrThrow({ where: { id: race.id } })
+        assert.equal(won.paymentStatus, 'paid')
+        assert.equal(won.status, 'confirmed')
+        assert.equal(won.cancelledAt, null)
+        assert.equal(
+          (await prisma.payment.findUniqueOrThrow({ where: { id: racePayment.id } })).status,
+          'paid'
+        )
+
+        const foreign = await cancelCustomerTourBooking({
+          principal: principals[1],
+          tourBookingId: unpaid.id,
+        })
+        assert.deepEqual(foreign, { ok: false, code: 'TOUR_BOOKING_NOT_FOUND' })
       })
     } finally {
       if (old.enabled === undefined) delete process.env.PAYMENTS_ENABLED

@@ -23,6 +23,7 @@ export async function markPaymentPaidAndReserveBooking({
   try {
     return await prisma.$transaction(
       async (tx) => {
+        await tx.$queryRaw`SELECT "id" FROM "Booking" WHERE "id" = ${bookingId} FOR UPDATE`
         const payment = await tx.payment.findUnique({
           where: { id: paymentId },
           select: { status: true },
@@ -52,6 +53,25 @@ export async function markPaymentPaidAndReserveBooking({
 
         if (!booking) {
           throw new Error('Booking not found during payment settlement')
+        }
+
+        // A provider settlement received after an explicit checkout cancellation
+        // remains authoritative. Keep released inventory released and move the paid
+        // booking to operations review rather than leaving a paid booking cancelled.
+        if (booking.status === 'cancelled') {
+          await tx.payment.update({
+            where: { id: paymentId },
+            data: { ...paymentData, status: 'paid' },
+          })
+          await tx.booking.update({
+            where: { id: bookingId },
+            data: { status: 'ops_review', paymentId },
+          })
+          return {
+            ok: false as const,
+            status: 'availability_conflict' as const,
+            message: 'Payment settled after cancellation. Operations will review this booking.',
+          }
         }
 
         if (booking.status === 'ops_review') {
@@ -271,6 +291,21 @@ export async function markPaymentPaidAndConfirmTourBooking({
         },
       })
 
+      if (tourBooking.status === 'cancelled') {
+        await tx.tourStopExecution.updateMany({
+          where: {
+            tourBookingDay: { tourBookingId },
+            status: 'skipped',
+            skipReason: 'tour_cancelled',
+          },
+          data: { status: 'upcoming', skippedAt: null, skipReason: null },
+        })
+        await tx.tourBookingDay.updateMany({
+          where: { tourBookingId, status: 'cancelled' },
+          data: { status: 'upcoming', cancelledAt: null },
+        })
+      }
+
       await tx.tourBooking.update({
         where: { id: tourBookingId },
         data: {
@@ -279,6 +314,7 @@ export async function markPaymentPaidAndConfirmTourBooking({
           amountPaidNGN: amountNGN,
           paymentProvider: provider,
           paymentReference: providerReference,
+          cancelledAt: null,
         },
       })
 

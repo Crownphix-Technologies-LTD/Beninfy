@@ -20,6 +20,7 @@ export const CUSTOMER_CANCELLATION_REASONS = [
   'driver_delay',
   'price_issue',
   'other',
+  'checkout_cancelled',
 ] as const
 
 export type CustomerCancellationReason = (typeof CUSTOMER_CANCELLATION_REASONS)[number]
@@ -85,63 +86,83 @@ export async function cancelCustomerBooking({
   reasonCode: CustomerCancellationReason
   note?: string | null
 }) {
-  const booking = await prisma.booking.findFirst({
-    where: { id: bookingId, userId: principal.userId },
-    include: {
-      legs: {
-        select: {
-          id: true,
-          status: true,
-          driverId: true,
-          direction: true,
-        },
-        orderBy: { departureDate: 'asc' },
-      },
-      payments: {
-        select: {
-          id: true,
-          amountNGN: true,
-          status: true,
-          provider: true,
-          providerReference: true,
-          currencyCode: true,
-        },
-      },
-    },
-  })
-
-  if (!booking) return { ok: false as const, code: 'BOOKING_NOT_FOUND' as MobileErrorCode }
-
-  const supportFollowUpRequired = booking.payments.some((payment) => payment.status === 'paid')
-  const eligibility = customerCancellationEligibility({
-    bookingStatus: booking.status,
-    legStatuses: booking.legs.map((leg) => leg.status),
-  })
-
-  if (!eligibility.ok) return { ok: false as const, code: eligibility.code }
-  if (eligibility.idempotent) {
-    return {
-      ok: true as const,
-      bookingId: booking.id,
-      bookingStatus: booking.status,
-      legs: booking.legs.map((leg) => ({
-        id: leg.id,
-        direction: leg.direction,
-        status: leg.status,
-      })),
-      reasonCode,
-      supportFollowUpRequired,
-      paymentResolutions: [],
-      idempotent: true,
-    }
-  }
-
-  const previousDrivers = booking.legs
-    .filter((leg) => leg.driverId)
-    .map((leg) => ({ bookingLegId: leg.id, driverId: leg.driverId }))
   const now = new Date()
-
   const txResult = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "Booking" WHERE "id" = ${bookingId} FOR UPDATE`
+    const booking = await tx.booking.findFirst({
+      where: { id: bookingId, userId: principal.userId },
+      include: {
+        legs: {
+          select: { id: true, status: true, driverId: true, direction: true },
+          orderBy: { departureDate: 'asc' },
+        },
+        payments: {
+          select: {
+            id: true,
+            amountNGN: true,
+            status: true,
+            provider: true,
+            providerReference: true,
+            currencyCode: true,
+          },
+          orderBy: { createdAt: 'desc' },
+        },
+      },
+    })
+    if (!booking) return { ok: false as const, code: 'BOOKING_NOT_FOUND' as MobileErrorCode }
+
+    const paid = booking.payments.some((payment) => payment.status === 'paid')
+    const paymentStatus = paid ? 'paid' : (booking.payments[0]?.status ?? 'pending')
+    const supportFollowUpRequired = paid
+    const responseLegs = booking.legs.map((leg) => ({
+      id: leg.id,
+      direction: leg.direction,
+      status: leg.status,
+    }))
+
+    if (paid && reasonCode === 'checkout_cancelled') {
+      return {
+        ok: true as const,
+        bookingId: booking.id,
+        bookingStatus: booking.status,
+        paymentStatus,
+        cancelled: false,
+        legs: responseLegs,
+        reasonCode,
+        supportFollowUpRequired: false,
+        paymentResolutions: [],
+        previousDrivers: [],
+        idempotent: true,
+      }
+    }
+
+    // Checkout cancellation is deliberately narrower than the general customer
+    // cancellation policy. A provider settlement observed under this row lock wins.
+    if (booking.status === 'cancelled') {
+      return {
+        ok: true as const,
+        bookingId: booking.id,
+        bookingStatus: booking.status,
+        paymentStatus,
+        cancelled: true,
+        legs: responseLegs,
+        reasonCode,
+        supportFollowUpRequired,
+        paymentResolutions: [],
+        previousDrivers: [],
+        idempotent: true,
+      }
+    }
+
+    const eligibility = customerCancellationEligibility({
+      bookingStatus: booking.status,
+      legStatuses: booking.legs.map((leg) => leg.status),
+    })
+    if (!eligibility.ok) return { ok: false as const, code: eligibility.code }
+
+    const previousDrivers = booking.legs
+      .filter((leg) => leg.driverId)
+      .map((leg) => ({ bookingLegId: leg.id, driverId: leg.driverId }))
     const result = await tx.booking.update({
       where: { id: booking.id },
       data: {
@@ -190,15 +211,29 @@ export async function cancelCustomerBooking({
       customerId: booking.userId ?? principal.userId,
       payments: booking.payments,
     })
-    return { booking: result, paymentResolutions }
+    return {
+      ok: true as const,
+      bookingId: result.id,
+      bookingStatus: result.status,
+      paymentStatus,
+      cancelled: true,
+      legs: result.legs,
+      reasonCode,
+      supportFollowUpRequired,
+      paymentResolutions: paymentResolutions.map(toPaymentResolutionDto),
+      previousDrivers,
+      idempotent: false,
+    }
   })
-  const updated = txResult.booking
+
+  if (!txResult.ok) return txResult
+  if (!txResult.cancelled || txResult.idempotent) return txResult
 
   await Promise.allSettled([
-    notifyBookingStatusChanged(updated.id, 'cancelled'),
-    ...previousDrivers.map((assignment) =>
+    notifyBookingStatusChanged(txResult.bookingId, 'cancelled'),
+    ...txResult.previousDrivers.map((assignment) =>
       notifyTripLifecyclePush({
-        bookingId: updated.id,
+        bookingId: txResult.bookingId,
         bookingLegId: assignment.bookingLegId,
         nextStatus: 'cancelled',
         driverId: assignment.driverId,
@@ -206,16 +241,7 @@ export async function cancelCustomerBooking({
     ),
   ])
 
-  return {
-    ok: true as const,
-    bookingId: updated.id,
-    bookingStatus: updated.status,
-    legs: updated.legs,
-    reasonCode,
-    supportFollowUpRequired,
-    paymentResolutions: txResult.paymentResolutions.map(toPaymentResolutionDto),
-    idempotent: false,
-  }
+  return txResult
 }
 
 async function expireCancelledTracking(bookingLegIds: string[], tx: Prisma.TransactionClient) {
