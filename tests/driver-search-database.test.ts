@@ -10,6 +10,8 @@ import { changeDriverSearch } from '../src/lib/admin/driverSearch'
 import { driverSearchStatusAfterLegUpdate } from '../src/lib/driverAssignmentStatus'
 import { applyDriverTripAction } from '../src/lib/mobile/tripTransitions'
 import { markPaymentPaidAndReserveBooking } from '../src/lib/paymentSettlement'
+import { cancelCustomerBooking } from '../src/lib/mobile/customerAccount'
+import type { MobilePrincipal } from '../src/lib/mobile/auth'
 
 // Opt-in: a disposable local database with all migrations applied.
 const url = process.env.DRIVER_SEARCH_TEST_DATABASE_URL
@@ -22,6 +24,17 @@ test('Driver search PostgreSQL lifecycle and concurrency', { skip: !url }, async
   const sql = new Client({ connectionString: url })
   await sql.connect()
   const prefix = 'dispatch-test-' + randomUUID()
+  const customer = await prisma.user.create({
+    data: { name: prefix, email: `${prefix}@example.test` },
+  })
+  const otherCustomer = await prisma.user.create({
+    data: { name: prefix + '-other', email: `${prefix}-other@example.test` },
+  })
+  const principal = {
+    userId: customer.id,
+    email: customer.email,
+    role: 'CUSTOMER',
+  } as MobilePrincipal
   const driver = await prisma.driver.create({ data: { name: prefix, phone: '+229000' } })
   await prisma.vehicle.create({ data: { id: prefix, name: prefix, capacity: 4 } })
   const bookingIds: string[] = []
@@ -29,6 +42,7 @@ test('Driver search PostgreSQL lifecycle and concurrency', { skip: !url }, async
   async function fixture(status = 'reserved', bookingStatus = 'confirmed') {
     const booking = await prisma.booking.create({
       data: {
+        userId: customer.id,
         from: 'Lagos',
         to: 'Cotonou',
         date: new Date('2099-01-01'),
@@ -290,6 +304,77 @@ test('Driver search PostgreSQL lifecycle and concurrency', { skip: !url }, async
         assert.equal(row.driverSearchStatus, 'idle')
       }
     )
+    await t.test('explicit Ride checkout cancellation retains payment and settlement wins races', async () => {
+      const { booking, leg } = await fixture('payment_pending', 'pending')
+      const payment = await prisma.payment.create({
+        data: {
+          bookingId: booking.id,
+          reference: randomUUID(),
+          provider: 'paystack',
+          amountNGN: 10000,
+          status: 'pending',
+        },
+      })
+      const cancelled = await cancelCustomerBooking({
+        principal,
+        bookingId: booking.id,
+        reasonCode: 'checkout_cancelled',
+      })
+      assert.ok(cancelled.ok)
+      assert.equal(cancelled.cancelled, true)
+      assert.equal(cancelled.paymentStatus, 'pending')
+      assert.equal(
+        (await prisma.payment.findUniqueOrThrow({ where: { id: payment.id } })).status,
+        'pending'
+      )
+      assert.equal(
+        (await prisma.bookingLeg.findUniqueOrThrow({ where: { id: leg.id } })).status,
+        'cancelled'
+      )
+      const repeated = await cancelCustomerBooking({
+        principal,
+        bookingId: booking.id,
+        reasonCode: 'checkout_cancelled',
+      })
+      assert.ok(repeated.ok)
+      assert.equal(repeated.idempotent, true)
+
+      const race = await fixture('payment_pending', 'pending')
+      const racePayment = await prisma.payment.create({
+        data: {
+          bookingId: race.booking.id,
+          reference: randomUUID(),
+          provider: 'paystack',
+          amountNGN: 10000,
+          status: 'pending',
+        },
+      })
+      await Promise.all([
+        cancelCustomerBooking({
+          principal,
+          bookingId: race.booking.id,
+          reasonCode: 'checkout_cancelled',
+        }),
+        markPaymentPaidAndReserveBooking({
+          paymentId: racePayment.id,
+          bookingId: race.booking.id,
+          paymentData: { paidAt: new Date() },
+        }),
+      ])
+      const won = await prisma.booking.findUniqueOrThrow({ where: { id: race.booking.id } })
+      assert.notEqual(won.status, 'cancelled')
+      assert.equal(
+        (await prisma.payment.findUniqueOrThrow({ where: { id: racePayment.id } })).status,
+        'paid'
+      )
+
+      const foreign = await cancelCustomerBooking({
+        principal: { ...principal, userId: otherCustomer.id, email: otherCustomer.email! },
+        bookingId: booking.id,
+        reasonCode: 'checkout_cancelled',
+      })
+      assert.deepEqual(foreign, { ok: false, code: 'BOOKING_NOT_FOUND' })
+    })
   } finally {
     await sql.end()
     await prisma.auditLog.deleteMany({ where: { entityId: { in: legIds } } })
@@ -297,6 +382,7 @@ test('Driver search PostgreSQL lifecycle and concurrency', { skip: !url }, async
     await prisma.booking.deleteMany({ where: { id: { in: bookingIds } } })
     await prisma.driver.delete({ where: { id: driver.id } })
     await prisma.vehicle.delete({ where: { id: prefix } })
+    await prisma.user.deleteMany({ where: { id: { in: [customer.id, otherCustomer.id] } } })
     await prisma.$disconnect()
   }
 })

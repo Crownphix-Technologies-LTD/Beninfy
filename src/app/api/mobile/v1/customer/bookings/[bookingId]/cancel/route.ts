@@ -45,6 +45,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ booking
     cancellation: {
       bookingId: result.bookingId,
       bookingStatus: result.bookingStatus,
+      paymentStatus: result.paymentStatus,
+      cancelled: result.cancelled,
       legs: result.legs,
       reasonCode: result.reasonCode,
       supportFollowUpRequired: result.supportFollowUpRequired,

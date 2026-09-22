@@ -124,12 +124,20 @@ query parameters, including a transaction reference, to the success URL. Flutter
 should match the HTTPS origin and pathname rather than requiring an exact query.
 
 On success navigation, close the WebView and call the authoritative verification
-or status endpoint. On cancel navigation, close the WebView and return to the
-pending booking; do not call a client-side failure transition. Beninfy's native
-WebView close control remains a local dismissal with the same pending semantics.
-A redirect result is only UX information and never settles a payment.
+or status endpoint. On an explicit cancel navigation (or the native checkout X),
+close the WebView and call the owned booking cancellation endpoint. Use
+`reasonCode = checkout_cancelled` for a Ride; the Tour endpoint needs no body.
+Only leave Review & Pay when the backend returns `cancelled = true`. If it returns
+`cancelled = false` and `paymentStatus = paid`, settlement won the race and Flutter
+must render the authoritative paid/current booking. Do not continue payment polling
+after confirmed cancellation.
 
-Recommended recovery:
+Network loss, WebView errors, timeouts, process death, and verification errors are
+ambiguous interruptions. They must not call cancellation and retain the existing
+recoverable pending/status-polling behavior. Navigation to the cancel URL alone does
+not mutate state; the authenticated cancellation request is authoritative.
+
+Recommended ambiguous-interruption recovery:
 
 1. Fetch status immediately on return.
 2. Poll briefly with backoff while status is `pending`.

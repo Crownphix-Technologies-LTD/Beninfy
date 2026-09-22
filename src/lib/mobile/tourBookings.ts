@@ -692,26 +692,60 @@ export async function cancelCustomerTourBooking(input: {
   principal: MobilePrincipal
   tourBookingId: string
 }) {
-  const booking = await prisma.tourBooking.findFirst({
-    where: { id: input.tourBookingId, userId: input.principal.userId },
-    include: tourBookingInclude,
-  })
-  if (!booking) return { ok: false as const, code: 'TOUR_BOOKING_NOT_FOUND' as MobileErrorCode }
-  if (booking.status === 'cancelled') {
-    return { ok: true as const, booking, dto: toTourBookingDto(booking), idempotent: true }
-  }
-  if (!['payment_pending', 'quote_pending'].includes(booking.status) || booking.paymentStatus !== 'pending') {
-    return { ok: false as const, code: 'TOUR_ACTION_NOT_ALLOWED' as MobileErrorCode }
-  }
   const now = new Date()
-  const updated = await prisma.$transaction(
+  return prisma.$transaction(
     async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "TourBooking" WHERE "id" = ${input.tourBookingId} FOR UPDATE`
+      const booking = await tx.tourBooking.findFirst({
+        where: { id: input.tourBookingId, userId: input.principal.userId },
+        include: {
+          ...tourBookingInclude,
+          payments: { select: { status: true }, orderBy: { createdAt: 'desc' } },
+        },
+      })
+      if (!booking)
+        return { ok: false as const, code: 'TOUR_BOOKING_NOT_FOUND' as MobileErrorCode }
+      const paid =
+        booking.paymentStatus === 'paid' || booking.payments.some((payment) => payment.status === 'paid')
+      if (paid) {
+        return {
+          ok: true as const,
+          booking,
+          dto: toTourBookingDto(booking),
+          cancelled: false,
+          paymentStatus: 'paid',
+          idempotent: true,
+        }
+      }
+      if (booking.status === 'cancelled') {
+        return {
+          ok: true as const,
+          booking,
+          dto: toTourBookingDto(booking),
+          cancelled: true,
+          paymentStatus: booking.paymentStatus,
+          idempotent: true,
+        }
+      }
+      if (
+        !['payment_pending', 'quote_pending'].includes(booking.status) ||
+        booking.paymentStatus !== 'pending'
+      ) {
+        return { ok: false as const, code: 'TOUR_ACTION_NOT_ALLOWED' as MobileErrorCode }
+      }
       await tx.tourBookingDay.updateMany({
         where: {
           tourBookingId: booking.id,
           status: { notIn: ['completed', 'cancelled'] },
         },
-        data: { status: 'cancelled', cancelledAt: now },
+        data: {
+          status: 'cancelled',
+          cancelledAt: now,
+          assignedDriverId: null,
+          assignedFleetVehicleId: null,
+          assignedAt: null,
+          acceptedAt: null,
+        },
       })
       await tx.tourStopExecution.updateMany({
         where: {
@@ -720,15 +754,26 @@ export async function cancelCustomerTourBooking(input: {
         },
         data: { status: 'skipped', skippedAt: now, skipReason: 'tour_cancelled' },
       })
-      return tx.tourBooking.update({
+      await tx.latestTourLocation.updateMany({
+        where: { tourBookingDay: { tourBookingId: booking.id } },
+        data: { expiresAt: now },
+      })
+      const updated = await tx.tourBooking.update({
         where: { id: booking.id },
-        data: { status: 'cancelled', paymentStatus: 'failed', cancelledAt: now },
+        data: { status: 'cancelled', cancelledAt: now },
         include: tourBookingInclude,
       })
+      return {
+        ok: true as const,
+        booking: updated,
+        dto: toTourBookingDto(updated),
+        cancelled: true,
+        paymentStatus: updated.paymentStatus,
+        idempotent: false,
+      }
     },
     { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
   )
-  return { ok: true as const, booking: updated, dto: toTourBookingDto(updated), idempotent: false }
 }
 
 export async function listAdminTourBookings() {

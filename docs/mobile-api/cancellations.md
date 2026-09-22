@@ -12,6 +12,7 @@ Customer cancellation is backend-authoritative. Flutter must not locally mark a 
 ## Reason Codes
 
 - `change_of_plans`
+- `checkout_cancelled` (explicit payment-sheet cancellation only)
 - `wrong_booking_details`
 - `duplicate_booking`
 - `schedule_changed`
@@ -30,6 +31,12 @@ Flutter localizes labels using the returned `labelKey`. Optional customer note l
 }
 ```
 
+For an explicit Ride checkout cancellation:
+
+```json
+{ "reasonCode": "checkout_cancelled" }
+```
+
 ## Success Response
 
 ```json
@@ -37,6 +44,8 @@ Flutter localizes labels using the returned `labelKey`. Optional customer note l
   "cancellation": {
     "bookingId": "booking_id",
     "bookingStatus": "cancelled",
+    "paymentStatus": "pending",
+    "cancelled": true,
     "legs": [
       { "id": "leg_id", "direction": "outbound", "status": "cancelled" }
     ],
@@ -46,6 +55,10 @@ Flutter localizes labels using the returned `labelKey`. Optional customer note l
   }
 }
 ```
+
+If payment settlement wins the row-lock race, the same endpoint returns the current
+booking state with `cancelled: false` and `paymentStatus: "paid"`. It never cancels
+that paid booking through the checkout-cancellation path.
 
 ## Policy
 
@@ -59,6 +72,10 @@ Allowed before execution reaches the active-trip cutoff. Blocking leg states:
 Completed bookings cannot be cancelled by the customer.
 
 Duplicate cancellation is treated as idempotent success.
+
+Checkout cancellation preserves the Payment row and does not rewrite pending to
+failed. Fleet/Driver assignment release, tracking expiry, and leg cancellation use
+the existing whole-booking cancellation transaction.
 
 ## Round Trips
 

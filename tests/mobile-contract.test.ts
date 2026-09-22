@@ -3616,6 +3616,7 @@ test('driver trip view sorting is operationally useful', () => {
 })
 
 test('customer cancellation reason catalogue is stable and localized by key', () => {
+  assert.equal(isCustomerCancellationReason('checkout_cancelled'), true)
   assert.equal(isCustomerCancellationReason('change_of_plans'), true)
   assert.equal(isCustomerCancellationReason('wrong_booking_details'), true)
   assert.equal(isCustomerCancellationReason('random_reason'), false)
@@ -5091,6 +5092,9 @@ test('tour cancellation is unpaid-customer only and keeps refund policy separate
   assert.match(route, /mobile-tour-cancel/)
   assert.match(service, /\['payment_pending', 'quote_pending'\]\.includes\(booking\.status\)/)
   assert.match(service, /paymentStatus !== 'pending'/)
+  assert.match(service, /FOR UPDATE/)
+  assert.match(service, /payments\.some\(\(payment\) => payment\.status === 'paid'\)/)
+  assert.doesNotMatch(service, /data:\s*\{\s*status:\s*'cancelled',\s*paymentStatus:\s*'failed'/)
   assert.match(service, /TOUR_ACTION_NOT_ALLOWED/)
   assert.match(docs, /refund policy/i)
 })
@@ -5161,10 +5165,39 @@ test('tour cancellation and terminal states stop actions tracking and journey in
     []
   )
   assert.match(booking, /status:\s*'cancelled'/)
-  assert.match(booking, /paymentStatus:\s*'failed'/)
+  assert.match(booking, /paymentStatus:\s*booking\.paymentStatus/)
   assert.match(execution, /day\.status === 'cancelled' \|\| day\.tourBooking\.status === 'cancelled'/)
   assert.match(tracking, /completed', 'cancelled/)
   assert.match(docs, /Paid cancellation and refunds require operations review/)
+})
+
+test('explicit checkout cancellation is locked, unpaid-only, idempotent and retains payments', () => {
+  const rideService = readFileSync('src/lib/mobile/customerAccount.ts', 'utf8')
+  const rideRoute = readFileSync(
+    'src/app/api/mobile/v1/customer/bookings/[bookingId]/cancel/route.ts',
+    'utf8'
+  )
+  const tourService = readFileSync('src/lib/mobile/tourBookings.ts', 'utf8')
+  const tourRoute = readFileSync(
+    'src/app/api/mobile/v1/customer/tour-bookings/[tourBookingId]/cancel/route.ts',
+    'utf8'
+  )
+  const settlement = readFileSync('src/lib/paymentSettlement.ts', 'utf8')
+
+  assert.match(rideService, /SELECT "id" FROM "Booking"[\s\S]*FOR UPDATE/)
+  assert.match(tourService, /SELECT "id" FROM "TourBooking"[\s\S]*FOR UPDATE/)
+  assert.match(settlement, /SELECT "id" FROM "Booking"[\s\S]*FOR UPDATE/)
+  assert.match(rideService, /paid && reasonCode === 'checkout_cancelled'/)
+  assert.match(rideService, /booking\.status === 'cancelled'/)
+  assert.match(tourService, /booking\.status === 'cancelled'/)
+  assert.match(rideRoute, /paymentStatus:\s*result\.paymentStatus/)
+  assert.match(rideRoute, /cancelled:\s*result\.cancelled/)
+  assert.match(tourRoute, /paymentStatus:\s*result\.paymentStatus/)
+  assert.match(tourRoute, /cancelled:\s*result\.cancelled/)
+  assert.doesNotMatch(rideService, /payment\.delete|payment\.updateMany/)
+  assert.doesNotMatch(tourService, /payment\.delete|payment\.updateMany/)
+  assert.match(settlement, /Payment settled after cancellation\. Operations will review/)
+  assert.match(settlement, /tourBooking\.status === 'cancelled'/)
 })
 
 test('tour multi-day boundary does not keep previous day tracking active overnight', () => {
