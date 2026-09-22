@@ -24,6 +24,7 @@ import {
   normalizeMobileLaunchPaymentProvider,
   type MobileLaunchPaymentProvider,
 } from '@/lib/mobile/paymentPolicy'
+import { mobilePaymentNavigationTargets } from '@/lib/mobile/paymentNavigation'
 import { toTourBookingDto } from '@/lib/mobile/tourBookings'
 import {
   freezeTourCoupon,
@@ -424,12 +425,17 @@ export async function initiateMobileTourBookingPayment(
       }
     }
     try {
+      const mobileNavigation = mobilePaymentNavigationTargets()
+      const isMobileCheckout = (app ?? 'customer-mobile') === 'customer-mobile'
       const paystack = await initializePaystackTransaction({
         secret,
         email: booking.user.email || principal.email || `tour-${booking.id}@beninfy.com`,
         amountNGN: payment.amountNGN,
         reference,
-        callbackUrl: `${origin}${callbackPath ?? `/${locale}/dashboard`}`,
+        callbackUrl: isMobileCheckout
+          ? mobileNavigation.successUrl
+          : `${origin}${callbackPath ?? `/${locale}/dashboard`}`,
+        cancelUrl: isMobileCheckout ? mobileNavigation.cancelUrl : undefined,
         metadata: {
           tourBookingId: booking.id,
           paymentId: payment.id,

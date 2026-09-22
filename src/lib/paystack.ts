@@ -87,6 +87,7 @@ export async function initializePaystackTransaction({
   amountNGN,
   reference,
   callbackUrl,
+  cancelUrl,
   metadata,
   channels,
 }: {
@@ -95,6 +96,7 @@ export async function initializePaystackTransaction({
   amountNGN: number
   reference: string
   callbackUrl: string
+  cancelUrl?: string
   metadata: Record<string, string>
   channels?: string[]
 }) {
@@ -110,7 +112,10 @@ export async function initializePaystackTransaction({
       reference,
       currency: 'NGN',
       callback_url: callbackUrl,
-      metadata,
+      metadata: {
+        ...metadata,
+        ...(cancelUrl ? { cancel_action: cancelUrl } : {}),
+      },
       ...(channels?.length ? { channels } : {}),
     }),
   })

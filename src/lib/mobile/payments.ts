@@ -22,6 +22,7 @@ import {
   normalizeMobileLaunchPaymentProvider,
   type MobileLaunchPaymentProvider,
 } from '@/lib/mobile/paymentPolicy'
+import { mobilePaymentNavigationTargets } from '@/lib/mobile/paymentNavigation'
 
 export type MobilePaymentProvider = MobileLaunchPaymentProvider
 export type MobilePaymentStatus = 'pending' | 'paid' | 'failed' | 'amount_mismatch' | 'ops_review'
@@ -296,12 +297,14 @@ export async function initiateMobileBookingPayment({
       },
     })
     try {
+      const navigation = mobilePaymentNavigationTargets()
       const paystack = await initializePaystackTransaction({
         secret,
         email: booking.passengerEmail || principal.email || `booking-${booking.id}@beninfy.com`,
         amountNGN: booking.priceNGN,
         reference,
-        callbackUrl: `${origin}/${locale}/rides/confirmed`,
+        callbackUrl: navigation.successUrl,
+        cancelUrl: navigation.cancelUrl,
         metadata: {
           bookingId: booking.id,
           paymentId: payment.id,
@@ -353,7 +356,7 @@ export async function initiateMobileBookingPayment({
       status: 'pending',
       reference,
       provider: 'payonus',
-        currencyCode: MOBILE_LAUNCH_CURRENCY,
+      currencyCode: MOBILE_LAUNCH_CURRENCY,
       checkoutAmount: booking.priceNGN,
       expiresAt: paymentExpiresAt(),
     },
