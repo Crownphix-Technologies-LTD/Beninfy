@@ -120,6 +120,11 @@ import { propagateCategoryRoutePrice } from '../src/lib/routePricePropagation'
 import { computeGoogleRoute } from '../src/lib/maps/googleRoutes'
 import { initializePaystackTransaction } from '../src/lib/paystack'
 import {
+  MOBILE_PAYMENT_CANCEL_URL,
+  MOBILE_PAYMENT_SUCCESS_URL,
+  mobilePaymentNavigationTargets,
+} from '../src/lib/mobile/paymentNavigation'
+import {
   extractSupportedCity,
   getGooglePlacesServerKey,
   normalizeCoordinateInput,
@@ -951,8 +956,9 @@ test('paystack initialization requires and maps access code for Flutter SDK chec
       email: 'customer@example.com',
       amountNGN: 180000,
       reference: 'BFY-M-123',
-      callbackUrl: 'https://beninfy.com/en/rides/confirmed',
-      metadata: { bookingId: 'booking1', provider: 'paystack' },
+      callbackUrl: MOBILE_PAYMENT_SUCCESS_URL,
+      cancelUrl: MOBILE_PAYMENT_CANCEL_URL,
+      metadata: { bookingId: 'booking1', paymentId: 'payment1', provider: 'paystack' },
     })
 
     assert.deepEqual(result, {
@@ -966,10 +972,40 @@ test('paystack initialization requires and maps access code for Flutter SDK chec
     assert.equal(requestBody.amount, 18000000)
     assert.equal(requestBody.currency, 'NGN')
     assert.equal(requestBody.reference, 'BFY-M-123')
+    assert.equal(requestBody.callback_url, MOBILE_PAYMENT_SUCCESS_URL)
+    assert.deepEqual(requestBody.metadata, {
+      bookingId: 'booking1',
+      paymentId: 'payment1',
+      provider: 'paystack',
+      cancel_action: MOBILE_PAYMENT_CANCEL_URL,
+    })
     assert.equal(JSON.stringify(result).includes('sk_test_secret_value'), false)
   } finally {
     globalThis.fetch = originalFetch
   }
+})
+
+test('mobile Paystack navigation targets are fixed trusted HTTPS URLs for Ride and Tour', () => {
+  assert.deepEqual(mobilePaymentNavigationTargets(), {
+    successUrl: 'https://beninfy.com/en/mobile/payments/success',
+    cancelUrl: 'https://beninfy.com/en/mobile/payments/cancel',
+  })
+  assert.equal(new URL(MOBILE_PAYMENT_SUCCESS_URL).protocol, 'https:')
+  assert.equal(new URL(MOBILE_PAYMENT_CANCEL_URL).protocol, 'https:')
+
+  const ridePayments = readFileSync('src/lib/mobile/payments.ts', 'utf8')
+  const tourPayments = readFileSync('src/lib/mobile/tourPayments.ts', 'utf8')
+  for (const source of [ridePayments, tourPayments]) {
+    assert.match(source, /mobilePaymentNavigationTargets/)
+    assert.equal(source.includes('.successUrl'), true)
+    assert.equal(source.includes('.cancelUrl'), true)
+  }
+})
+
+test('mobile cancel navigation is informational and never mutates payment state', () => {
+  const cancelPage = readFileSync('src/app/[locale]/mobile/payments/cancel/page.tsx', 'utf8')
+  assert.match(cancelPage, /No payment status was changed/)
+  assert.doesNotMatch(cancelPage, /prisma|payment\.update|failBookingPayment|verifyPaystack/)
 })
 
 test('paystack initialization fails closed when access code is missing', async () => {

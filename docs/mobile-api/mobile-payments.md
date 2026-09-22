@@ -113,7 +113,21 @@ This endpoint calls provider verification server-side and then uses the existing
 
 ## Checkout Return Strategy
 
-For hosted checkout, Flutter should use an external browser/deep-link or provider-supported SDK flow. A redirect/deep-link result is only UX information. Flutter must fetch the status endpoint after return.
+Paystack Ride and Tour initialization uses these fixed trusted HTTPS navigation targets:
+
+- success/callback: `https://beninfy.com/en/mobile/payments/success`
+- cancel: `https://beninfy.com/en/mobile/payments/cancel`
+
+The backend sends the success URL as `callback_url` and merges the cancel URL into
+the existing Paystack metadata as `metadata.cancel_action`. Paystack may append
+query parameters, including a transaction reference, to the success URL. Flutter
+should match the HTTPS origin and pathname rather than requiring an exact query.
+
+On success navigation, close the WebView and call the authoritative verification
+or status endpoint. On cancel navigation, close the WebView and return to the
+pending booking; do not call a client-side failure transition. Beninfy's native
+WebView close control remains a local dismissal with the same pending semantics.
+A redirect result is only UX information and never settles a payment.
 
 Recommended recovery:
 
@@ -158,7 +172,11 @@ Flutter never receives:
 
 ## Cancellation / Abandoned Checkout
 
-Pending payments remain pending until provider verification/webhook reports a terminal state or operational reconciliation marks them failed. A stale pending payment must not confirm a cancelled booking because settlement still checks booking/fleet state.
+Loading the trusted Paystack cancel target does not call any mutation or mark the
+Payment failed. Pending payments remain pending until provider verification/webhook
+reports a terminal state or operational reconciliation marks them failed. A stale
+pending payment must not confirm a cancelled booking because settlement still
+checks booking/fleet state.
 
 ## Payment History
 
