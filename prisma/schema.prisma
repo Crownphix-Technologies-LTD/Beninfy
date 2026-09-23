@@ -502,6 +502,7 @@ model LatestTourLocation {
 }
 
 model PushDevice {
+  sessionId     String?
   id            String                 @id @default(cuid())
   userId        String
   user          User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -526,6 +527,7 @@ model PushDevice {
   @@index([userId, appType, revokedAt, invalidatedAt])
   @@index([appType, principalType, platform])
   @@index([lastSeenAt])
+  @@index([sessionId])
 }
 
 model Notification {

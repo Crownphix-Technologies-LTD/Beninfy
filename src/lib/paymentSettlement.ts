@@ -1,3 +1,4 @@
+import { notifyPaymentConfirmedPush, notifyTourBookingPush } from '@/lib/mobile/notifications'
 import { prisma } from '@/lib/prisma'
 import { Prisma } from '@prisma/client'
 import { ACTIVE_BLOCKING_LEG_STATUSES } from '@/lib/tripLifecycle'
@@ -21,7 +22,7 @@ export async function markPaymentPaidAndReserveBooking({
   paymentData: Prisma.PaymentUpdateInput
 }) {
   try {
-    return await prisma.$transaction(
+    const settlement = await prisma.$transaction(
       async (tx) => {
         await tx.$queryRaw`SELECT "id" FROM "Booking" WHERE "id" = ${bookingId} FOR UPDATE`
         const payment = await tx.payment.findUnique({
@@ -184,6 +185,8 @@ export async function markPaymentPaidAndReserveBooking({
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
     )
+    if (settlement.ok) await notifyPaymentConfirmedPush(bookingId, paymentId).catch(() => null)
+    return settlement
   } catch (error) {
     if (
       error instanceof Prisma.PrismaClientKnownRequestError &&
@@ -259,7 +262,7 @@ export async function markPaymentPaidAndConfirmTourBooking({
   providerReference?: string | null
   paymentData: Prisma.PaymentUpdateInput
 }) {
-  return prisma.$transaction(
+  const settlement = await prisma.$transaction(
     async (tx) => {
       await tx.$queryRaw`SELECT "id" FROM "TourBooking" WHERE "id" = ${tourBookingId} FOR UPDATE`
       const payment = await tx.payment.findUnique({
@@ -277,7 +280,8 @@ export async function markPaymentPaidAndConfirmTourBooking({
       if (!tourBooking) {
         throw new Error('Tour booking not found during payment settlement')
       }
-      if (tourBooking.priceNGN !== amountNGN) throw new Error('Tour settlement amount differs from authoritative booking')
+      if (tourBooking.priceNGN !== amountNGN)
+        throw new Error('Tour settlement amount differs from authoritative booking')
       if (payment.status === 'paid' || tourBooking.paymentStatus === 'paid') {
         return { ok: true as const, status: 'confirmed' as const, alreadySettled: true }
       }
@@ -327,6 +331,8 @@ export async function markPaymentPaidAndConfirmTourBooking({
     // Booking row lock serializes settlement and coupon/pricing mutations.
     { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted }
   )
+  if (settlement.ok) await notifyTourBookingPush(tourBookingId, 'tour.payment_confirmed')
+  return settlement
 }
 
 export async function failTourBookingPayment(tourBookingId: string) {

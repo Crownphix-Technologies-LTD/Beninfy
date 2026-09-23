@@ -1,3 +1,4 @@
+import { notifyTourBookingPush } from '@/lib/mobile/notifications'
 import { tourPickupSchema, tourPickupSnapshot, type TourPickup } from '@/lib/mobile/tourPickup'
 import { randomBytes } from 'crypto'
 import { Prisma } from '@prisma/client'
@@ -693,7 +694,7 @@ export async function cancelCustomerTourBooking(input: {
   tourBookingId: string
 }) {
   const now = new Date()
-  return prisma.$transaction(
+  const result = await prisma.$transaction(
     async (tx) => {
       await tx.$queryRaw`SELECT "id" FROM "TourBooking" WHERE "id" = ${input.tourBookingId} FOR UPDATE`
       const booking = await tx.tourBooking.findFirst({
@@ -774,6 +775,8 @@ export async function cancelCustomerTourBooking(input: {
     },
     { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
   )
+  if (result.ok && result.cancelled) await notifyTourBookingPush(input.tourBookingId, 'tour.cancelled')
+  return result
 }
 
 export async function listAdminTourBookings() {

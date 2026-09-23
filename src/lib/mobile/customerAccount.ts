@@ -316,6 +316,10 @@ export async function logoutAllMobileSessions(principal: MobilePrincipal) {
       where: { userId: principal.userId, revokedAt: null },
       data: { revokedAt: now },
     }),
+    prisma.pushDevice.updateMany({
+      where: { userId: principal.userId, revokedAt: null },
+      data: { revokedAt: now },
+    }),
   ])
   return { ok: true as const }
 }

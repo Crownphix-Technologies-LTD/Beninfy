@@ -1,3 +1,4 @@
+import { notifyTourDayPush } from '@/lib/mobile/notifications'
 import { tourPickupSchema, tourPickupSnapshot, type TourPickup } from '@/lib/mobile/tourPickup'
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
@@ -408,7 +409,7 @@ export async function assignTourBookingDay({
     if (!territory.ok) return territory
   }
   const changesAssignment = driverId !== undefined || fleetVehicleId !== undefined || !pickupData
-  return prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     // Serialize pickup edits against lifecycle updates and route-cache writes.
     await tx.$queryRaw`SELECT id FROM "TourBookingDay" WHERE id = ${tourBookingDayId} FOR UPDATE`
     const day = await tx.tourBookingDay.findUnique({
@@ -546,10 +547,17 @@ export async function assignTourBookingDay({
     if (pickupData) await tx.tourJourneySnapshot.deleteMany({ where: { tourBookingDayId } })
     return {
       ok: true as const,
+      notificationChanged:
+        day.assignedDriverId !== updated.assignedDriverId ||
+        day.assignedFleetVehicleId !== updated.assignedFleetVehicleId ||
+        day.pickupAddress !== updated.pickupAddress || day.pickupLabel !== updated.pickupLabel ||
+        day.pickupLatitude !== updated.pickupLatitude || day.pickupLongitude !== updated.pickupLongitude,
       day: updated,
       dto: toDriverTourDayDto(updated),
     }
   })
+  if (result.ok && result.notificationChanged) await notifyTourDayPush(result.day, 'operations')
+  return result
 }
 
 function ensureActionAllowed(day: TourDayForDto, action: DriverTourAction) {
@@ -714,5 +722,7 @@ export async function applyDriverTourAction({
     },
   })
 
+  if (['start_en_route', 'arrive', 'start_day', 'complete_day'].includes(action))
+    await notifyTourDayPush(result, action)
   return { ok: true as const, dto: toDriverTourDayDto(result), idempotent: false }
 }
