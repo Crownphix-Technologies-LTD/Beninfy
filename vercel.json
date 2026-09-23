@@ -6,10 +6,11 @@
     {
       "path": "/api/workers/payments/reconcile",
       "schedule": "0 3 * * *"
-    },
-    {
-      "path": "/api/workers/notifications/deliver",
-      "schedule": "* * * * *"
     }
-  ]
+  ],
+  "git": {
+    "deploymentEnabled": {
+      "feature/mobile-production-completion": false
+    }
+  }
 }
