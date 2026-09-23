@@ -257,10 +257,31 @@ export async function refreshMobileTokens(refreshToken: string) {
 }
 
 export async function revokeMobileRefreshToken(refreshToken: string) {
-  await prisma.mobileSession.updateMany({
-    where: { refreshTokenHash: refreshTokenHash(refreshToken), revokedAt: null },
-    data: { revokedAt: new Date() },
-  })
+  await prisma.$transaction(
+    async (tx) => {
+      const session = await tx.mobileSession.findUnique({
+        where: { refreshTokenHash: refreshTokenHash(refreshToken) },
+      })
+      if (!session) return
+      const now = new Date()
+      await tx.mobileSession.updateMany({
+        where: { id: session.id, revokedAt: null },
+        data: { revokedAt: now },
+      })
+      await tx.pushDevice.updateMany({
+        where: {
+          userId: session.userId,
+          revokedAt: null,
+          OR: [
+            { sessionId: session.id },
+            ...(session.deviceId ? [{ sessionId: null, deviceId: session.deviceId }] : []),
+          ],
+        },
+        data: { revokedAt: now },
+      })
+    },
+    { timeout: 15000, maxWait: 15000 }
+  )
 }
 
 export async function requireMobilePrincipal(req: Request, expectedType?: MobilePrincipalType) {

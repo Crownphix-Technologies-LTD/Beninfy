@@ -9,7 +9,7 @@
     },
     {
       "path": "/api/workers/notifications/deliver",
-      "schedule": "0 2 * * *"
+      "schedule": "* * * * *"
     }
   ]
 }

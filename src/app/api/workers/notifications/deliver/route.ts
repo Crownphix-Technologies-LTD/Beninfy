@@ -2,6 +2,7 @@ import { processDueNotificationDeliveries } from '@/lib/mobile/notifications'
 import { requireWorkerSecret } from '@/lib/workerAuth'
 
 export const runtime = 'nodejs'
+export const maxDuration = 60
 
 async function run(req: Request) {
   const guard = requireWorkerSecret(req)

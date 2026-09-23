@@ -1,6 +1,7 @@
 import { isEmailConfigured, sendEmail } from '@/lib/email'
 import {
   notifyAssignmentPush,
+  notifyBookingStatePush,
   notifyPaymentConfirmedPush,
   notifyPaymentFailedPush,
 } from '@/lib/mobile/notifications'
@@ -563,6 +564,7 @@ export async function notifyPaymentIssue(input: {
 }
 
 export async function notifyBookingStatusChanged(bookingId: string, status: string) {
+  await notifyBookingStatePush(bookingId, status)
   const booking = await getBookingEmailData(bookingId)
   if (!booking) return
 

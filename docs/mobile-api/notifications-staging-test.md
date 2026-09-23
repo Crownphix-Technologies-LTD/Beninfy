@@ -1,47 +1,58 @@
-# Notifications Staging Test Plan
+# Notifications Test Plan
 
-Do not send production notifications during this test. Use `PUSH_PROVIDER=mock` or `PUSH_PROVIDER=disabled`.
+## Automated / local verification
 
-## Prerequisites
+Use a disposable localhost database with all migrations applied, including
+`20260923120000_customer_push_session_ownership`. Never use production data.
+Set DATABASE_URL and CUSTOMER_PUSH_TEST_DATABASE_URL to that same database.
 
-Apply pending migrations in this order:
+Run `node --import tsx --test tests/customer-push.test.ts tests/customer-push-database.test.ts`.
+Tests mock all OAuth/FCM requests and delivery providers. No live FCM calls occur.
+PUSH_PROVIDER=disabled is suitable for local inbox testing. PUSH_PROVIDER=mock is
+only accepted outside NODE_ENV=production; a production build with mock selected
+records configuration-blocked delivery rather than fake success.
 
-1. `20260813120000_mobile_auth_foundation`
-2. `20260815120000_scalability_concurrency_indexes`
-3. `20260815140000_trip_lifecycle`
-4. `20260815160000_realtime_location_foundation`
-5. `20260815180000_push_notification_foundation`
+Verify:
 
-## Test Flow
+1. Customer POST `/api/mobile/v1/customer/push-tokens` requires authentication and
+   rejects userId/appType/sessionId spoofing. Responses never contain raw tokens.
+2. Repeat registration, concurrent registration, token rotation and previously
+   registered token/installation collisions preserve one active registration.
+3. DELETE `/api/mobile/v1/customer/push-tokens/:installationId` is idempotent and
+   cannot affect another account. Logout revokes the bound session's devices;
+   logout-all revokes all registrations. Expired/revoked sessions cannot send.
+4. User A → revoke/logout → User B on the same installation transfers ownership.
+   Queued notifications for A do not target B. Repeat with a changed FCM token.
+5. Concurrent workers/replayed domain events send once per successful device;
+   one invalid or failing token does not block other devices. Invalid-token
+   cleanup never revokes an unrelated or newly refreshed token.
+6. Inbox persists independently of push; ownership and mark-read remain intact.
+7. English and French devices receive their respective localized push copy.
+8. Ride assignment produces `trip.driver_assigned`; existing arrived/start/
+   completion/cancellation and payment confirmation events remain authoritative.
+9. Tour payment/zero-payable confirmation, cancellation, assignment/pickup updates
+   and actual day transitions create the documented Tour events.
+10. Missing credentials leave delivery blocked. Provider failure never changes
+    committed payment, booking, assignment or trip state. Logs are sanitized.
+11. Worker authentication rejects missing/wrong secrets. Its counts reflect work
+    processed, not proof a device displayed a notification.
 
-1. Log in as a customer from the customer Flutter app.
-2. Register a customer push token with `POST /api/mobile/v1/devices/push-token`.
-3. Log in as a driver from the driver Flutter app.
-4. Register a driver push token with `POST /api/mobile/v1/devices/push-token`.
-5. Assign a driver to a booking leg from the admin backoffice.
-6. Verify a driver notification event exists for `trip.driver_assigned`.
-7. Verify the customer receives or stores `trip.assignment_changed`.
-8. Driver starts en route.
-9. Verify customer notification event `trip.driver_en_route`.
-10. Driver marks arrived.
-11. Verify customer notification event `trip.driver_arrived`.
-12. Driver starts and completes the trip.
-13. Verify `trip.started` and `trip.completed` events.
-14. Repeat the same lifecycle call or webhook retry where possible.
-15. Verify dedupe prevents duplicate notification records for the same event occurrence.
-16. Simulate an invalid-token provider response with a mock adapter/test.
-17. Verify the backend marks only that device token invalid.
-18. Set the user's persisted locale to French, with no active push device, and verify the notification is stored in French.
-19. Register one English device and one French device. Verify notification language resolution prefers persisted user locale, then push-device language, then English.
-20. Log out from the app and unregister the device token.
-21. Verify future events for that user/app are `skipped_no_device` if no other active device exists.
-22. Verify driver `trip.driver_assigned` and `trip.completed` copy differs from customer copy.
+## Later staging physical acceptance — not performed by this task
 
-## Expected Behavior
+Requires explicit staging configuration and the Customer Flutter integration.
+Use the same Firebase project as both Customer platform builds, server-only FCM
+credentials, valid iOS APNs configuration and the authenticated worker running
+once per minute. See [server setup and payload contract](./notifications.md).
 
-- Domain state changes succeed even when push delivery is disabled or fails.
-- Customers cannot register driver tokens.
-- Drivers cannot register customer tokens.
-- Notification list pagination works.
-- Mark-read can be called repeatedly without error.
-- No GPS ping creates a push notification.
+On a real Android and iPhone, verify foreground, background and terminated-app
+reception; notification permission denied/allowed; tapping each whitelisted Ride
+and Tour type; fetching current authoritative detail; EN/FR copy; token refresh;
+multiple devices; and A → logout → B isolation on one installation.
+
+Provider acceptance is not physical-delivery evidence. Record platform, build,
+notification ID, receive/tap result and time without recording raw tokens or
+credentials. Already-submitted FCM/APNs messages cannot be recalled after logout;
+the backend prevents further intentional dispatch after revocation completes.
+
+No production deployment, credential configuration, live sends or physical
+acceptance are authorized by the current implementation task.

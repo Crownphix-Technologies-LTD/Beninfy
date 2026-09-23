@@ -1,3 +1,4 @@
+import { pushLog } from '@/lib/mobile/pushDevices'
 import { createHash } from 'crypto'
 import { Prisma } from '@prisma/client'
 import type { MobilePrincipal } from '@/lib/mobile/auth'
@@ -8,6 +9,7 @@ export type PushAppType = 'customer' | 'driver'
 export type PushPlatform = 'android' | 'ios'
 export type NotificationLanguage = 'en' | 'fr'
 export type NotificationDeliveryState =
+  | 'blocked'
   | 'pending'
   | 'sent'
   | 'failed'
@@ -16,6 +18,10 @@ export type NotificationDeliveryState =
   | 'skipped_no_device'
 
 export type NotificationType =
+  | 'tour.booking_confirmed'
+  | 'tour.payment_confirmed'
+  | 'tour.cancelled'
+  | 'tour.status_updated'
   | 'booking.confirmed'
   | 'payment.confirmed'
   | 'payment.failed'
@@ -34,7 +40,10 @@ export type NotificationType =
   | 'refund.completed'
   | 'refund.rejected'
 
-type PushPayload = {
+export type PushPayload = {
+  tourBookingId?: string
+  entityType?: 'ride' | 'tour'
+  entityId?: string
   type: NotificationType
   version: 1
   bookingId?: string
@@ -71,6 +80,46 @@ const templates: Record<
   NotificationType,
   Record<NotificationLanguage, { title: string; body: string }>
 > = {
+  'tour.booking_confirmed': {
+    en: {
+      title: 'Tour confirmed',
+      body: 'Your Beninfy Tour is confirmed. Open the app for details.',
+    },
+    fr: {
+      title: 'Circuit confirmé',
+      body: 'Votre circuit Beninfy est confirmé. Consultez les détails dans l’application.',
+    },
+  },
+  'tour.payment_confirmed': {
+    en: {
+      title: 'Tour payment received',
+      body: 'Your Tour payment is confirmed. Open the app for details.',
+    },
+    fr: {
+      title: 'Paiement du circuit reçu',
+      body: 'Le paiement de votre circuit est confirmé. Consultez l’application.',
+    },
+  },
+  'tour.cancelled': {
+    en: {
+      title: 'Tour cancelled',
+      body: 'Your Beninfy Tour has been cancelled. Open the app for details.',
+    },
+    fr: {
+      title: 'Circuit annulé',
+      body: 'Votre circuit Beninfy a été annulé. Consultez l’application.',
+    },
+  },
+  'tour.status_updated': {
+    en: {
+      title: 'Tour day updated',
+      body: 'Your Tour day has an update. Open the app for the latest status.',
+    },
+    fr: {
+      title: 'Journée du circuit mise à jour',
+      body: 'Le statut de votre journée a changé. Consultez l’application.',
+    },
+  },
   'booking.confirmed': {
     en: {
       title: 'Booking confirmed',
@@ -188,11 +237,17 @@ const templates: Record<
   },
   'refund.approved': {
     en: { title: 'Refund approved', body: 'Your refund request has been approved.' },
-    fr: { title: 'Remboursement approuve', body: 'Votre demande de remboursement a ete approuvee.' },
+    fr: {
+      title: 'Remboursement approuve',
+      body: 'Votre demande de remboursement a ete approuvee.',
+    },
   },
   'refund.processing': {
     en: { title: 'Refund processing', body: 'Your refund is being processed by operations.' },
-    fr: { title: 'Remboursement en cours', body: 'Votre remboursement est en cours de traitement.' },
+    fr: {
+      title: 'Remboursement en cours',
+      body: 'Votre remboursement est en cours de traitement.',
+    },
   },
   'refund.completed': {
     en: { title: 'Refund completed', body: 'Your refund resolution has been completed.' },
@@ -279,7 +334,12 @@ export function templateFor(
   appType: PushAppType
 ) {
   const audienceTemplate = audienceTemplates[appType]?.[type]
-  return audienceTemplate?.[language] ?? audienceTemplate?.en ?? templates[type]?.[language] ?? templates[type]?.en
+  return (
+    audienceTemplate?.[language] ??
+    audienceTemplate?.en ??
+    templates[type]?.[language] ??
+    templates[type]?.en
+  )
 }
 
 export function pushPayloadToData(payload: PushPayload): Record<string, string> {
@@ -313,7 +373,7 @@ export function classifyProviderError(code: string): ProviderSendResult {
 export function getPushProvider(): PushNotificationProvider {
   const provider = (process.env.PUSH_PROVIDER ?? 'disabled').toLowerCase()
 
-  if (provider === 'mock') {
+  if (provider === 'mock' && process.env.NODE_ENV !== 'production') {
     return {
       name: 'mock',
       async send() {
@@ -335,105 +395,7 @@ export function getPushProvider(): PushNotificationProvider {
   }
 }
 
-export async function registerPushDevice({
-  principal,
-  input,
-}: {
-  principal: MobilePrincipal
-  input: {
-    token: string
-    platform: PushPlatform
-    appType: PushAppType
-    deviceId?: string | null
-    deviceName?: string | null
-    appVersion?: string | null
-    language?: string | null
-  }
-}) {
-  if (!principalOwnsAppType(principal, input.appType)) {
-    return { ok: false as const, code: 'FORBIDDEN' as const }
-  }
-
-  const now = new Date()
-  const cleanToken = input.token.trim()
-  const cleanDeviceId = input.deviceId?.trim().slice(0, 120) || null
-  const data = {
-    userId: principal.userId,
-    appType: input.appType,
-    principalType: principal.type.toLowerCase(),
-    platform: input.platform,
-    token: cleanToken,
-    tokenHash: tokenHash(cleanToken),
-    deviceId: cleanDeviceId,
-    deviceName: input.deviceName?.trim().slice(0, 120) || null,
-    appVersion: input.appVersion?.trim().slice(0, 40) || null,
-    language: normalizeNotificationLanguage(input.language),
-    lastSeenAt: now,
-    revokedAt: null,
-    invalidatedAt: null,
-  }
-
-  const existingByDevice = cleanDeviceId
-    ? await prisma.pushDevice.findUnique({
-        where: {
-          userId_appType_deviceId: {
-            userId: principal.userId,
-            appType: input.appType,
-            deviceId: cleanDeviceId,
-          },
-        },
-      })
-    : null
-
-  const device = existingByDevice
-    ? await prisma.pushDevice.update({ where: { id: existingByDevice.id }, data })
-    : await prisma.pushDevice.upsert({
-        where: { appType_tokenHash: { appType: input.appType, tokenHash: data.tokenHash } },
-        create: data,
-        update: data,
-      })
-
-  console.info('Push device registered', {
-    deviceId: device.id,
-    userId: principal.userId,
-    appType: input.appType,
-    platform: input.platform,
-  })
-
-  return { ok: true as const, device }
-}
-
-export async function revokePushDevice({
-  principal,
-  appType,
-  token,
-  deviceId,
-}: {
-  principal: MobilePrincipal
-  appType: PushAppType
-  token?: string | null
-  deviceId?: string | null
-}) {
-  if (!principalOwnsAppType(principal, appType)) {
-    return { ok: false as const, code: 'FORBIDDEN' as const }
-  }
-  if (!token && !deviceId) return { ok: false as const, code: 'PUSH_TOKEN_NOT_FOUND' as const }
-
-  const updated = await prisma.pushDevice.updateMany({
-    where: {
-      userId: principal.userId,
-      appType,
-      revokedAt: null,
-      ...(token ? { tokenHash: tokenHash(token) } : {}),
-      ...(deviceId ? { deviceId } : {}),
-    },
-    data: { revokedAt: new Date() },
-  })
-
-  return updated.count > 0
-    ? { ok: true as const, revoked: updated.count }
-    : { ok: false as const, code: 'PUSH_TOKEN_NOT_FOUND' as const }
-}
+export { registerPushDevice, revokePushDevice } from '@/lib/mobile/pushDevices'
 
 async function resolveLanguage(
   userId: string,
@@ -472,6 +434,69 @@ export function resolveNotificationLanguagePreference({
   return normalizeNotificationLanguage(fallback)
 }
 
+export const CUSTOMER_NOTIFICATION_TYPES = [
+  'booking.confirmed',
+  'payment.confirmed',
+  'payment.failed',
+  'chat.new_message',
+  'trip.driver_assigned',
+  'trip.assignment_changed',
+  'trip.driver_en_route',
+  'trip.driver_arrived',
+  'trip.started',
+  'trip.completed',
+  'trip.cancelled',
+  'payment_resolution.under_review',
+  'refund.approved',
+  'refund.processing',
+  'refund.completed',
+  'refund.rejected',
+  'tour.booking_confirmed',
+  'tour.payment_confirmed',
+  'tour.cancelled',
+  'tour.status_updated',
+] as const
+
+function safeId(value: unknown): value is string {
+  return typeof value === 'string' && /^[A-Za-z0-9._:-]{1,200}$/.test(value)
+}
+
+export function customerPushData(notification: {
+  id: string
+  type: string
+  payload: unknown
+}): Record<string, string> | null {
+  if (!(CUSTOMER_NOTIFICATION_TYPES as readonly string[]).includes(notification.type)) return null
+  if (!notification.payload || typeof notification.payload !== 'object') return null
+  const payload = notification.payload as Record<string, unknown>
+  const entityType = notification.type.startsWith('tour.') ? 'tour' : 'ride'
+  const entityId = entityType === 'tour' ? payload.tourBookingId : payload.bookingId
+  if (!safeId(entityId)) return null
+  return {
+    version: '1',
+    type: notification.type,
+    entityType,
+    entityId,
+    notificationId: notification.id,
+  }
+}
+
+function safePayload(type: NotificationType, payload: PushPayload): PushPayload {
+  const result: PushPayload = { type, version: 1 }
+  for (const key of [
+    'bookingId',
+    'bookingLegId',
+    'paymentId',
+    'paymentResolutionId',
+    'conversationId',
+    'messageId',
+    'tourBookingId',
+  ] as const) {
+    if (safeId(payload[key])) result[key] = payload[key]
+  }
+  return result
+}
+
 export async function createNotificationEvent({
   userId,
   appType,
@@ -488,52 +513,90 @@ export async function createNotificationEvent({
   language?: NotificationLanguage
 }) {
   if (!userId) return null
-  const resolvedLanguage = await resolveLanguage(userId, appType, language)
-  const template = templateFor(type, resolvedLanguage, appType) ?? templateFor(type, 'en', appType)
-  if (!template) return null
-
   try {
-    const notification = await prisma.notification.create({
-      data: {
+    const resolvedLanguage = await resolveLanguage(userId, appType, language)
+    const template = templateFor(type, resolvedLanguage, appType)
+    if (!template) return null
+    const normalized = safePayload(type, payload)
+    if (appType === 'customer') {
+      const data = customerPushData({ id: 'pending', type, payload: normalized })
+      if (!data) return null
+      normalized.entityType = data.entityType as 'ride' | 'tour'
+      normalized.entityId = data.entityId
+    }
+    // Notification is the durable outbox. Only the existing worker contacts FCM.
+    const notification = await prisma.notification.upsert({
+      where: { dedupeKey },
+      update: {},
+      create: {
         userId,
         appType,
         type,
         language: resolvedLanguage,
         title: template.title,
         body: template.body,
-        payload: payload as Prisma.InputJsonValue,
+        payload: normalized as Prisma.InputJsonValue,
         dedupeKey,
       },
     })
-
-    console.info('Notification event created', {
-      notificationId: notification.id,
-      type,
-      userId,
-      appType,
-    })
-
-    deliverNotification(notification.id).catch((error) => {
-      console.warn('Notification delivery failed after event creation', {
-        notificationId: notification.id,
-        type,
-        error: error instanceof Error ? error.message : 'unknown',
-      })
-    })
-
+    pushLog('persisted', { notificationId: notification.id, type, userId, appType })
     return notification
-  } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-      return prisma.notification.findUnique({ where: { dedupeKey } })
-    }
-    throw error
+  } catch {
+    // Notification transport/persistence must never change the business result.
+    pushLog('persistence_failed', { type, userId, appType, category: 'storage' })
+    return null
   }
 }
 
-export async function deliverNotification(notificationId: string, provider = getPushProvider()) {
+export async function deliverNotification(
+  notificationId: string,
+  provider = getPushProvider(),
+  deadline = Date.now() + 45000
+) {
   const notification = await prisma.notification.findUnique({ where: { id: notificationId } })
   if (!notification) return null
-
+  const data =
+    notification.appType === 'customer'
+      ? customerPushData(notification)
+      : pushPayloadToData(
+          safePayload(notification.type as NotificationType, notification.payload as PushPayload)
+        )
+  if (!data) {
+    await prisma.notification.update({
+      where: { id: notificationId },
+      data: { deliveryState: 'skipped' },
+    })
+    pushLog('dispatch_skipped', {
+      notificationId,
+      type: notification.type,
+      category: 'unsupported_payload',
+    })
+    return { state: 'skipped' as const }
+  }
+  // Retire retries for registrations that have been removed, revoked, or transferred.
+  // Otherwise an old failed delivery can monopolize the worker retry queue forever.
+  await prisma.notificationDelivery.updateMany({
+    where: {
+      notificationId,
+      status: { in: ['failed', 'blocked'] },
+      OR: [
+        { pushDevice: null },
+        {
+          pushDevice: {
+            is: {
+              OR: [
+                { userId: { not: notification.userId } },
+                { appType: { not: notification.appType } },
+                { revokedAt: { not: null } },
+                { invalidatedAt: { not: null } },
+              ],
+            },
+          },
+        },
+      ],
+    },
+    data: { status: 'skipped', nextAttemptAt: null },
+  })
   const devices = await prisma.pushDevice.findMany({
     where: {
       userId: notification.userId,
@@ -541,198 +604,237 @@ export async function deliverNotification(notificationId: string, provider = get
       revokedAt: null,
       invalidatedAt: null,
     },
+    select: { id: true },
   })
-
-  if (devices.length === 0) {
+  if (!devices.length) {
     await prisma.notification.update({
-      where: { id: notification.id },
+      where: { id: notificationId },
       data: { deliveryState: 'skipped_no_device' },
     })
-    console.info('Notification delivery skipped: no active device', {
-      notificationId: notification.id,
-      userId: notification.userId,
-      appType: notification.appType,
-    })
+    pushLog('dispatch_skipped', { notificationId, type: notification.type, category: 'no_device' })
     return { state: 'skipped_no_device' as const }
   }
-
-  let sent = 0
-  let invalid = 0
-  let failed = 0
-  let skipped = 0
-
-  for (const device of devices) {
-    const existingDelivery = await prisma.notificationDelivery.findUnique({
-      where: {
-        notificationId_pushDeviceId: {
-          notificationId: notification.id,
-          pushDeviceId: device.id,
+  for (const candidate of devices) {
+    if (Date.now() >= deadline) break
+    try {
+      await prisma.$transaction(
+        async (tx) => {
+          // Serializes send with revoke/transfer/refresh, and with concurrent workers.
+          await tx.$queryRaw`SELECT id FROM "PushDevice" WHERE id = ${candidate.id} FOR UPDATE`
+          const device = await tx.pushDevice.findUnique({
+            where: { id: candidate.id },
+            include: {
+              user: { select: { disabledAt: true, deletionRequestedAt: true, anonymizedAt: true } },
+            },
+          })
+          if (
+            !device ||
+            device.userId !== notification.userId ||
+            device.appType !== notification.appType ||
+            device.revokedAt ||
+            device.invalidatedAt
+          )
+            return
+          const session = device.sessionId
+            ? await tx.mobileSession.findFirst({
+                where: {
+                  id: device.sessionId,
+                  userId: device.userId,
+                  revokedAt: null,
+                  expiresAt: { gt: new Date() },
+                },
+              })
+            : null
+          if (
+            device.user.disabledAt ||
+            device.user.deletionRequestedAt ||
+            device.user.anonymizedAt ||
+            (device.sessionId && !session) ||
+            (device.appType === 'customer' && !session)
+          ) {
+            await tx.pushDevice.update({
+              where: { id: device.id },
+              data: { revokedAt: new Date() },
+            })
+            pushLog('dispatch_skipped', {
+              notificationId,
+              deviceId: device.id,
+              category: 'session_inactive',
+            })
+            return
+          }
+          const where = { notificationId_pushDeviceId: { notificationId, pushDeviceId: device.id } }
+          const existing = await tx.notificationDelivery.findUnique({ where })
+          if (
+            existing &&
+            (['sent', 'invalid_token', 'skipped'].includes(existing.status) ||
+              existing.attempts >= MAX_RETRY_ATTEMPTS ||
+              (existing.nextAttemptAt && existing.nextAttemptAt > new Date()))
+          )
+            return
+          const copy = templateFor(
+            notification.type as NotificationType,
+            normalizeNotificationLanguage(device.language),
+            notification.appType as PushAppType
+          )
+          if (!copy) return
+          pushLog('dispatch_attempted', {
+            notificationId,
+            deviceId: device.id,
+            type: notification.type,
+          })
+          let result: ProviderSendResult
+          try {
+            result = await provider.send({
+              token: device.token,
+              title: copy.title,
+              body: copy.body,
+              data,
+            })
+          } catch {
+            result = { ok: false, classification: 'transient', errorCode: 'PUSH_SEND_FAILED' }
+          }
+          const now = new Date()
+          const status = result.ok
+            ? 'sent'
+            : result.classification === 'configuration'
+              ? 'blocked'
+              : result.classification === 'invalid_token'
+                ? 'invalid_token'
+                : 'failed'
+          const attempts = (existing?.attempts ?? 0) + (status === 'blocked' ? 0 : 1)
+          const values = {
+            provider: ['fcm', 'mock', 'disabled'].includes(provider.name)
+              ? provider.name
+              : 'custom',
+            status,
+            attempts,
+            lastAttemptAt: now,
+            nextAttemptAt:
+              (status === 'failed' && attempts < MAX_RETRY_ATTEMPTS) || status === 'blocked'
+                ? new Date(now.getTime() + 5 * 60000)
+                : null,
+            providerMessageId: result.ok ? (result.providerMessageId ?? null) : null,
+            // Only categories are persisted; arbitrary provider error strings may contain secrets.
+            errorCode: result.ok ? null : result.classification,
+          }
+          await tx.notificationDelivery.upsert({
+            where,
+            create: { notificationId, pushDeviceId: device.id, ...values },
+            update: values,
+          })
+          if (status === 'invalid_token') {
+            await tx.pushDevice.update({ where: { id: device.id }, data: { invalidatedAt: now } })
+            pushLog('invalid_token_cleanup', {
+              notificationId,
+              deviceId: device.id,
+              category: 'invalid_token',
+            })
+          }
+          pushLog('dispatch_result', {
+            notificationId,
+            deviceId: device.id,
+            type: notification.type,
+            status,
+            category: result.ok ? 'accepted' : result.classification,
+          })
         },
-      },
-    })
-    if (existingDelivery?.status === 'sent' || existingDelivery?.status === 'invalid_token') {
-      if (existingDelivery.status === 'sent') sent += 1
-      if (existingDelivery.status === 'invalid_token') invalid += 1
-      continue
-    }
-    if ((existingDelivery?.attempts ?? 0) >= MAX_RETRY_ATTEMPTS) {
-      skipped += 1
-      continue
-    }
-
-    const result = await provider.send({
-      token: device.token,
-      title: notification.title,
-      body: notification.body,
-      data: pushPayloadToData(notification.payload as PushPayload),
-    })
-    const now = new Date()
-
-    if (result.ok) {
-      sent += 1
-      await prisma.notificationDelivery.upsert({
-        where: {
-          notificationId_pushDeviceId: {
-            notificationId: notification.id,
-            pushDeviceId: device.id,
-          },
-        },
-        create: {
-          notificationId: notification.id,
-          pushDeviceId: device.id,
-          provider: provider.name,
-          status: 'sent',
-          attempts: 1,
-          lastAttemptAt: now,
-          providerMessageId: result.providerMessageId,
-        },
-        update: {
-          provider: provider.name,
-          status: 'sent',
-          attempts: { increment: 1 },
-          lastAttemptAt: now,
-          providerMessageId: result.providerMessageId,
-          errorCode: null,
-        },
+        { timeout: 12000, maxWait: 15000 }
+      )
+    } catch {
+      // Continue fanout; leave any unfinished durable delivery eligible for the worker.
+      pushLog('dispatch_failed', {
+        notificationId,
+        deviceId: candidate.id,
+        type: notification.type,
+        category: 'storage',
       })
-      continue
     }
-
-    const status =
-      result.classification === 'invalid_token'
-        ? 'invalid_token'
-        : result.classification === 'configuration'
-          ? 'skipped'
-          : 'failed'
-    if (status === 'invalid_token') invalid += 1
-    else if (status === 'skipped') skipped += 1
-    else failed += 1
-
-    if (status === 'invalid_token') {
-      await prisma.pushDevice.update({
-        where: { id: device.id },
-        data: { invalidatedAt: now },
-      })
-      console.warn('Push device invalidated', {
-        deviceId: device.id,
-        userId: device.userId,
-        appType: device.appType,
-        errorCode: result.errorCode,
-      })
-    }
-
-    await prisma.notificationDelivery.upsert({
-      where: {
-        notificationId_pushDeviceId: {
-          notificationId: notification.id,
-          pushDeviceId: device.id,
-        },
-      },
-      create: {
-        notificationId: notification.id,
-        pushDeviceId: device.id,
-        provider: provider.name,
-        status,
-        attempts: 1,
-        lastAttemptAt: now,
-        nextAttemptAt: status === 'failed' ? new Date(now.getTime() + 5 * 60 * 1000) : null,
-        errorCode: result.errorCode,
-      },
-      update: {
-        provider: provider.name,
-        status,
-        attempts: { increment: 1 },
-        lastAttemptAt: now,
-        nextAttemptAt: status === 'failed' ? new Date(now.getTime() + 5 * 60 * 1000) : null,
-        errorCode: result.errorCode,
-      },
-    })
   }
-
-  const deliveryState: NotificationDeliveryState =
-    sent > 0
-      ? 'sent'
-      : invalid > 0 && failed === 0
-        ? 'invalid_token'
-        : failed > 0
-          ? 'failed'
-          : skipped > 0
-            ? 'skipped'
-            : 'pending'
-
+  const deliveries = await prisma.notificationDelivery.findMany({ where: { notificationId } })
+  const sent = deliveries.filter((row) => row.status === 'sent').length
+  const failed = deliveries.filter((row) => row.status === 'failed').length
+  const blocked = deliveries.filter((row) => row.status === 'blocked').length
+  const invalid = deliveries.filter((row) => row.status === 'invalid_token').length
+  const unfinished = devices.some(
+    (device) => !deliveries.some((row) => row.pushDeviceId === device.id)
+  )
+  // Unfinished rows are retried only while that device still belongs to this user.
+  const active = unfinished
+    ? await prisma.pushDevice.count({
+        where: {
+          id: {
+            in: devices
+              .filter((device) => !deliveries.some((row) => row.pushDeviceId === device.id))
+              .map((device) => device.id),
+          },
+          userId: notification.userId,
+          appType: notification.appType,
+          revokedAt: null,
+          invalidatedAt: null,
+        },
+      })
+    : 0
+  const state = active
+    ? 'pending'
+    : blocked
+      ? 'blocked'
+      : failed
+        ? 'failed'
+        : sent
+          ? 'sent'
+          : invalid
+            ? 'invalid_token'
+            : 'skipped_no_device'
   await prisma.notification.update({
-    where: { id: notification.id },
-    data: { deliveryState },
+    where: { id: notificationId },
+    data: { deliveryState: state },
   })
-
-  console.info('Notification delivery attempted', {
-    notificationId: notification.id,
-    provider: provider.name,
-    deliveryState,
-    sent,
-    invalid,
-    failed,
-    skipped,
-  })
-
-  return { state: deliveryState, sent, invalid, failed, skipped }
+  return { state, sent, failed, blocked, invalid }
 }
 
 export async function processDueNotificationDeliveries({
   take = 50,
   now = new Date(),
+  provider = getPushProvider(),
 }: {
   take?: number
   now?: Date
+  provider?: PushNotificationProvider
 } = {}) {
-  const dueDeliveryRows = await prisma.notificationDelivery.findMany({
+  const batchSize = Number.isFinite(take) ? Math.min(200, Math.max(1, Math.floor(take))) : 50
+  const rows = await prisma.notificationDelivery.findMany({
     where: {
-      status: 'failed',
+      status: { in: ['failed', 'blocked'] },
       attempts: { lt: MAX_RETRY_ATTEMPTS },
       OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: now } }],
     },
     orderBy: [{ nextAttemptAt: 'asc' }, { createdAt: 'asc' }],
-    take,
+    take: batchSize,
     select: { notificationId: true },
   })
-  const dueIds = new Set(dueDeliveryRows.map((row) => row.notificationId))
-  if (dueIds.size < take) {
+  const ids = new Set(rows.map((row) => row.notificationId))
+  if (ids.size < batchSize) {
     const pending = await prisma.notification.findMany({
       where: { deliveryState: 'pending' },
       orderBy: { createdAt: 'asc' },
-      take: take - dueIds.size,
+      take: batchSize - ids.size,
       select: { id: true },
     })
-    for (const row of pending) dueIds.add(row.id)
+    for (const row of pending) ids.add(row.id)
   }
-
   let processed = 0
-  for (const notificationId of dueIds) {
-    await deliverNotification(notificationId)
-    processed += 1
+  const startedAt = Date.now()
+  for (const id of ids) {
+    if (Date.now() - startedAt > 45000) break
+    try {
+      await deliverNotification(id, provider, startedAt + 45000)
+      processed += 1
+    } catch {
+      pushLog('worker_failed', { notificationId: id, category: 'storage' })
+    }
   }
-
-  return { checked: dueIds.size, processed }
+  return { checked: ids.size, processed }
 }
 
 export async function notifyPaymentConfirmedPush(bookingId: string, paymentId: string) {
@@ -858,18 +960,19 @@ export async function notifyAssignmentPush({
     }
   }
   if (leg.booking.userId && (leg.driverId || previousDriverId)) {
+    const customerType = leg.driverId ? 'trip.driver_assigned' : 'trip.assignment_changed'
     tasks.push(
       createNotificationEvent({
         userId: leg.booking.userId,
         appType: 'customer',
-        type: 'trip.assignment_changed',
+        type: customerType,
         payload: {
-          type: 'trip.assignment_changed',
+          type: customerType,
           version: 1,
           bookingId: leg.bookingId,
           bookingLegId: leg.id,
         },
-        dedupeKey: `trip.assignment_changed:${leg.id}:${leg.driverId ?? 'none'}`,
+        dedupeKey: `${customerType}:customer:${leg.id}:${leg.driverId ?? 'none'}:${leg.assignedAt?.toISOString() ?? 'none'}`,
       })
     )
   }
@@ -915,7 +1018,10 @@ export async function notifyTripLifecyclePush({
         appType: 'customer',
         type,
         payload: { type, version: 1, bookingId, bookingLegId },
-        dedupeKey: `${type}:${bookingLegId}:${nextStatus}`,
+        dedupeKey:
+          nextStatus === 'cancelled'
+            ? `${type}:${bookingId}`
+            : `${type}:${bookingLegId}:${nextStatus}`,
       })
     )
   }
@@ -945,4 +1051,74 @@ export async function notifyTripLifecyclePush({
   }
 
   await Promise.allSettled(tasks)
+}
+
+export async function notifyBookingStatePush(bookingId: string, status: string) {
+  if (status !== 'confirmed' && status !== 'cancelled') return null
+  try {
+    const booking = await prisma.booking.findUnique({
+      where: { id: bookingId },
+      select: { userId: true, status: true },
+    })
+    if (!booking || booking.status !== status) return null
+    const type = status === 'confirmed' ? 'booking.confirmed' : 'trip.cancelled'
+    return createNotificationEvent({
+      userId: booking.userId,
+      appType: 'customer',
+      type,
+      payload: { type, version: 1, bookingId },
+      dedupeKey: `${type}:${bookingId}`,
+    })
+  } catch {
+    pushLog('event_failed', { category: 'storage' })
+    return null
+  }
+}
+
+export async function notifyTourBookingPush(
+  tourBookingId: string,
+  type: 'tour.booking_confirmed' | 'tour.payment_confirmed' | 'tour.cancelled',
+  client = prisma
+) {
+  try {
+    const booking = await client.tourBooking.findUnique({
+      where: { id: tourBookingId },
+      select: { userId: true, status: true, paymentStatus: true },
+    })
+    if (
+      !booking ||
+      (type === 'tour.cancelled'
+        ? booking.status !== 'cancelled'
+        : booking.paymentStatus !== 'paid')
+    )
+      return null
+    return createNotificationEvent({
+      userId: booking.userId,
+      appType: 'customer',
+      type,
+      payload: { type, version: 1, tourBookingId },
+      dedupeKey: `${type}:${tourBookingId}`,
+    })
+  } catch {
+    pushLog('event_failed', { type, category: 'storage' })
+    return null
+  }
+}
+
+export async function notifyTourDayPush(
+  day: {
+    id: string
+    tourBookingId: string
+    updatedAt: Date | string
+    tourBooking: { user: { id: string } }
+  },
+  event: string
+) {
+  return createNotificationEvent({
+    userId: day.tourBooking.user.id,
+    appType: 'customer',
+    type: 'tour.status_updated',
+    payload: { type: 'tour.status_updated', version: 1, tourBookingId: day.tourBookingId },
+    dedupeKey: `tour.status_updated:${day.id}:${event}:${new Date(day.updatedAt).toISOString()}`,
+  })
 }

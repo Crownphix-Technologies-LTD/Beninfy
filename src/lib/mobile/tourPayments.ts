@@ -1,3 +1,4 @@
+import { notifyTourBookingPush } from '@/lib/mobile/notifications'
 import { randomBytes } from 'crypto'
 import type { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
@@ -307,6 +308,7 @@ export async function initiateMobileTourBookingPayment(
       return { ok: true as const }
     })
     if (!settled.ok) return settled
+    await notifyTourBookingPush(booking.id, 'tour.booking_confirmed', client)
     return {
       ok: true as const,
       booking,
