@@ -170,10 +170,18 @@ or CRON_SECRET. POST accepts optional `{ "take": 50 }` (clamped to 1–200).
 Response: `{ "ok": true, "result": { "checked": 1, "processed": 1 } }`.
 The checked/processed counts mean queue work, **not device delivery receipts**.
 
-The repository's notification cron is changed from daily to every minute.
-Deployment must support that schedule; otherwise an external authenticated
-scheduler must call the same worker at that cadence. Without a running worker,
-notifications remain in the inbox as pending and no push is sent.
+The notification worker is deliberately not registered in Vercel cron, so the
+configuration remains compatible with Hobby. The payment cron is unchanged.
+Automatic Git deployments are disabled only for feature/mobile-production-completion
+so pushing this preparation change cannot deploy or run build-time migrations.
+An explicit deployment still requires separate authorization; main is unaffected.
+For the controlled Android physical test, manually invoke this authenticated
+worker after a read-only queue safety check and separate send authorization.
+See [the test procedure](./notifications-staging-test.md#controlled-android-test-in-the-existing-environment).
+Before final production push certification, a recurring authenticated worker
+solution (normally every minute) must be configured and verified. No external
+scheduler is implemented here. Without invocation, inbox notifications remain
+pending and no push is sent.
 
 Worker sends are serialized on each registration row, rechecking ownership,
 session, account status and prior delivery before contacting FCM. Registration,

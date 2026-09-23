@@ -37,22 +37,90 @@ Verify:
 11. Worker authentication rejects missing/wrong secrets. Its counts reflect work
     processed, not proof a device displayed a notification.
 
-## Later staging physical acceptance — not performed by this task
+## Controlled Android test in the existing environment
 
-Requires explicit staging configuration and the Customer Flutter integration.
-Use the same Firebase project as both Customer platform builds, server-only FCM
-credentials, valid iOS APNs configuration and the authenticated worker running
-once per minute. See [server setup and payload contract](./notifications.md).
+No separate staging environment is required for this controlled test. The
+notification cron is absent from vercel.json; the worker endpoint and its secret
+check remain unchanged. A recurring authenticated worker solution is required
+before final production push certification. No scheduler is installed here.
 
-On a real Android and iPhone, verify foreground, background and terminated-app
-reception; notification permission denied/allowed; tapping each whitelisted Ride
-and Tour type; fetching current authoritative detail; EN/FR copy; token refresh;
-multiple devices; and A → logout → B isolation on one installation.
+### Read-only queue safety check
 
-Provider acceptance is not physical-delivery evidence. Record platform, build,
-notification ID, receive/tap result and time without recording raw tokens or
-credentials. Already-submitted FCM/APNs messages cannot be recalled after logout;
-the backend prevents further intentional dispatch after revocation completes.
+Run the SQL below through an authorized PostgreSQL session, after the push schema
+is available. Supply psql variables test_customer_id (User.id) and
+test_push_device_id (PushDevice.id, not an FCM token). Do not echo connection
+strings or identifiers. If either identifier, DB access, or schema is unavailable,
+report UNVERIFIED and do not invoke the worker.
 
-No production deployment, credential configuration, live sends or physical
-acceptance are authorized by the current implementation task.
+This checks all due/pending notifications, including ones with no delivery row
+created yet, and counts eligible notification/device pairs. It applies device,
+account, session, retry and previous-delivery checks. Counts are conservative:
+unsupported payloads/templates may subsequently be skipped by the worker. An
+outside-recipient count therefore blocks testing even if payload validation might
+later skip that record. No token or personal information is selected or returned.
+
+```sql
+BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY;
+SET LOCAL statement_timeout = '10s';
+WITH designated AS (
+  SELECT NULLIF(:'test_customer_id', '') AS customer_id,
+         NULLIF(:'test_push_device_id', '') AS device_id
+), queued AS (
+  SELECT n.id, n."userId", n."appType"
+  FROM "Notification" n
+  WHERE n."deliveryState" = 'pending' OR EXISTS (
+    SELECT 1 FROM "NotificationDelivery" retry
+    WHERE retry."notificationId" = n.id
+      AND retry.status IN ('failed', 'blocked') AND retry.attempts < 3
+      AND (retry."nextAttemptAt" IS NULL OR retry."nextAttemptAt" <= CURRENT_TIMESTAMP)
+  )
+), eligible AS (
+  SELECT n."appType", (d.id IS NOT NULL) AS existing_delivery,
+    COALESCE(n."appType" = 'customer' AND n."userId" = p.customer_id
+      AND pd.id = p.device_id, false) AS designated_recipient
+  FROM queued n
+  JOIN "PushDevice" pd ON pd."userId" = n."userId" AND pd."appType" = n."appType"
+  JOIN "User" u ON u.id = n."userId"
+  LEFT JOIN "MobileSession" s ON s.id = pd."sessionId" AND s."userId" = pd."userId"
+    AND s."revokedAt" IS NULL AND s."expiresAt" > CURRENT_TIMESTAMP
+  LEFT JOIN "NotificationDelivery" d ON d."notificationId" = n.id AND d."pushDeviceId" = pd.id
+  CROSS JOIN designated p
+  WHERE pd."revokedAt" IS NULL AND pd."invalidatedAt" IS NULL
+    AND u."disabledAt" IS NULL AND u."deletionRequestedAt" IS NULL AND u."anonymizedAt" IS NULL
+    AND (s.id IS NOT NULL OR (pd."sessionId" IS NULL AND pd."appType" = 'driver'))
+    AND (d.id IS NULL OR (
+      d.status NOT IN ('sent', 'invalid_token', 'skipped') AND d.attempts < 3
+      AND (d."nextAttemptAt" IS NULL OR d."nextAttemptAt" <= CURRENT_TIMESTAMP)
+    ))
+)
+SELECT COUNT(*) AS eligible_delivery_pairs,
+  COUNT(*) FILTER (WHERE "appType" = 'customer') AS customer_delivery_pairs,
+  COUNT(*) FILTER (WHERE "appType" = 'driver') AS driver_delivery_pairs,
+  COUNT(*) FILTER (WHERE existing_delivery) AS eligible_existing_delivery_rows,
+  COUNT(*) FILTER (WHERE NOT existing_delivery) AS eligible_not_yet_created_delivery_rows,
+  COUNT(*) FILTER (WHERE NOT designated_recipient) AS outside_test_recipient_pairs,
+  COALESCE(BOOL_OR(NOT designated_recipient), false) AS any_outside_test_recipient,
+  (SELECT customer_id IS NOT NULL AND device_id IS NOT NULL FROM designated) AS designation_complete
+FROM eligible;
+ROLLBACK;
+```
+
+This is a snapshot, not a recipient lock. Recheck immediately before an authorized
+send; any change in registrations/queue requires another check. If another
+recipient is eligible, stop and report it. Do not delete, revoke or mutate other
+users' queue/device records to make the check pass. A batch limit is not an account
+filter: the worker also processes Driver deliveries.
+
+### Manual worker invocation (requires separate send authorization)
+
+After the queue check passes, call POST /api/workers/notifications/deliver using
+Authorization: Bearer <WORKER_SECRET> from a trusted operator process. Load the
+secret from secure configuration, never command-line literals or logs. Do not
+call FCM directly. The existing worker must create/update NotificationDelivery
+through its normal path. No invocation or live send is part of preparation.
+
+On the Samsung, verify login, token registration, a normal Ride assignment,
+persisted Notification, worker acceptance and actual receipt. Provider acceptance
+alone is not physical-delivery evidence. Later certification must also cover
+background/terminated reception, EN/FR, token rotation, multiple devices and
+account switching. Already-submitted FCM/APNs messages cannot be recalled.
