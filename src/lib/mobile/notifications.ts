@@ -1,3 +1,4 @@
+import { announcementContentSchema } from '@/lib/admin/notificationContract'
 import { pushLog } from '@/lib/mobile/pushDevices'
 import { createHash } from 'crypto'
 import { Prisma } from '@prisma/client'
@@ -18,6 +19,7 @@ export type NotificationDeliveryState =
   | 'skipped_no_device'
 
 export type NotificationType =
+  | 'admin.message'
   | 'tour.booking_confirmed'
   | 'tour.payment_confirmed'
   | 'tour.cancelled'
@@ -77,7 +79,7 @@ export type PushNotificationProvider = {
 const MAX_RETRY_ATTEMPTS = 3
 
 const templates: Record<
-  NotificationType,
+  Exclude<NotificationType, 'admin.message'>,
   Record<NotificationLanguage, { title: string; body: string }>
 > = {
   'tour.booking_confirmed': {
@@ -333,6 +335,7 @@ export function templateFor(
   language: NotificationLanguage,
   appType: PushAppType
 ) {
+  if (type === 'admin.message') return undefined
   const audienceTemplate = audienceTemplates[appType]?.[type]
   return (
     audienceTemplate?.[language] ??
@@ -435,6 +438,7 @@ export function resolveNotificationLanguagePreference({
 }
 
 export const CUSTOMER_NOTIFICATION_TYPES = [
+  'admin.message',
   'booking.confirmed',
   'payment.confirmed',
   'payment.failed',
@@ -466,6 +470,8 @@ export function customerPushData(notification: {
   type: string
   payload: unknown
 }): Record<string, string> | null {
+  if (notification.type === 'admin.message')
+    return { version: '1', type: 'admin.message', notificationId: notification.id }
   if (!(CUSTOMER_NOTIFICATION_TYPES as readonly string[]).includes(notification.type)) return null
   if (!notification.payload || typeof notification.payload !== 'object') return null
   const payload = notification.payload as Record<string, unknown>
@@ -553,10 +559,13 @@ export async function deliverNotification(
   provider = getPushProvider(),
   deadline = Date.now() + 45000
 ) {
-  const notification = await prisma.notification.findUnique({ where: { id: notificationId } })
+  const notification = await prisma.notification.findUnique({
+    where: { id: notificationId },
+    include: { campaign: { select: { content: true } } },
+  })
   if (!notification) return null
   const data =
-    notification.appType === 'customer'
+    notification.type === 'admin.message' || notification.appType === 'customer'
       ? customerPushData(notification)
       : pushPayloadToData(
           safePayload(notification.type as NotificationType, notification.payload as PushPayload)
@@ -578,7 +587,7 @@ export async function deliverNotification(
   await prisma.notificationDelivery.updateMany({
     where: {
       notificationId,
-      status: { in: ['failed', 'blocked'] },
+      status: { in: ['pending', 'failed', 'blocked'] },
       OR: [
         { pushDevice: null },
         {
@@ -652,6 +661,14 @@ export async function deliverNotification(
             (device.sessionId && !session) ||
             (device.appType === 'customer' && !session)
           ) {
+            await tx.notificationDelivery.updateMany({
+              where: {
+                notificationId,
+                pushDeviceId: device.id,
+                status: { in: ['pending', 'failed', 'blocked'] },
+              },
+              data: { status: 'skipped', nextAttemptAt: null },
+            })
             await tx.pushDevice.update({
               where: { id: device.id },
               data: { revokedAt: new Date() },
@@ -672,11 +689,17 @@ export async function deliverNotification(
               (existing.nextAttemptAt && existing.nextAttemptAt > new Date()))
           )
             return
-          const copy = templateFor(
-            notification.type as NotificationType,
-            normalizeNotificationLanguage(device.language),
-            notification.appType as PushAppType
-          )
+          const customContent =
+            notification.type === 'admin.message'
+              ? announcementContentSchema.safeParse(notification.campaign?.content)
+              : null
+          const copy = customContent?.success
+            ? customContent.data[normalizeNotificationLanguage(device.language)]
+            : templateFor(
+                notification.type as NotificationType,
+                normalizeNotificationLanguage(device.language),
+                notification.appType as PushAppType
+              )
           if (!copy) return
           pushLog('dispatch_attempted', {
             notificationId,
@@ -757,7 +780,8 @@ export async function deliverNotification(
   const blocked = deliveries.filter((row) => row.status === 'blocked').length
   const invalid = deliveries.filter((row) => row.status === 'invalid_token').length
   const unfinished = devices.some(
-    (device) => !deliveries.some((row) => row.pushDeviceId === device.id)
+    (device) =>
+      !deliveries.some((row) => row.pushDeviceId === device.id && row.status !== 'pending')
   )
   // Unfinished rows are retried only while that device still belongs to this user.
   const active = unfinished
@@ -765,7 +789,12 @@ export async function deliverNotification(
         where: {
           id: {
             in: devices
-              .filter((device) => !deliveries.some((row) => row.pushDeviceId === device.id))
+              .filter(
+                (device) =>
+                  !deliveries.some(
+                    (row) => row.pushDeviceId === device.id && row.status !== 'pending'
+                  )
+              )
               .map((device) => device.id),
           },
           userId: notification.userId,

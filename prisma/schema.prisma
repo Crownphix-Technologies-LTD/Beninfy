@@ -531,6 +531,8 @@ model PushDevice {
 }
 
 model Notification {
+  campaignId String?
+  campaign AdminNotificationCampaign? @relation(fields: [campaignId], references: [id], onDelete: Restrict)
   id            String                 @id @default(cuid())
   userId        String
   user          User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -551,6 +553,7 @@ model Notification {
   @@index([userId, appType, readAt, createdAt])
   @@index([deliveryState, createdAt])
   @@index([type, createdAt])
+  @@index([campaignId])
 }
 
 model NotificationDelivery {
@@ -1067,4 +1070,22 @@ model PaymentResolution {
   @@index([customerId, status, createdAt])
   @@index([bookingId])
   @@index([status, createdAt])
+}
+
+model AdminNotificationCampaign {
+  id String @id @default(cuid())
+  actorId String
+  requestKey String @unique
+  audience String
+  recipientId String?
+  content Json
+  recipientCount Int
+  deviceCount Int
+  audienceHash String
+  status String @default("preview")
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  queuedAt DateTime?
+  notifications Notification[]
+  @@index([createdAt, id])
 }
