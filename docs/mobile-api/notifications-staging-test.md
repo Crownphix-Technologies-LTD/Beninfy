@@ -18,7 +18,7 @@ Verify:
    rejects userId/appType/sessionId spoofing. Responses never contain raw tokens.
 2. Repeat registration, concurrent registration, token rotation and previously
    registered token/installation collisions preserve one active registration.
-3. DELETE `/api/mobile/v1/customer/push-tokens/:installationId` is idempotent and
+3. DELETE `/api/mobile/v1/customer/push-tokens` with `installationId` is idempotent and
    cannot affect another account. Logout revokes the bound session's devices;
    logout-all revokes all registrations. Expired/revoked sessions cannot send.
 4. User A → revoke/logout → User B on the same installation transfers ownership.

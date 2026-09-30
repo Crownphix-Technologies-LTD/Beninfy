@@ -10,10 +10,12 @@ export const customerPushTokenSchema = z
     installationId: z
       .string()
       .trim()
-      .min(1)
+      .min(8)
       .max(120)
       .regex(/^[A-Za-z0-9._:-]+$/),
     locale: z.string().trim().min(2).max(16).optional(),
+    deviceName: z.string().trim().max(120).optional().nullable(),
+    appVersion: z.string().trim().max(40).optional().nullable(),
   })
   .strict()
 
