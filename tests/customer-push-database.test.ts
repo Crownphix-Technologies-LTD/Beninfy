@@ -24,7 +24,7 @@ import {
   markPaymentPaidAndReserveBooking,
 } from '../src/lib/paymentSettlement'
 import { cancelCustomerTourBooking } from '../src/lib/mobile/tourBookings'
-import { POST } from '../src/app/api/mobile/v1/customer/push-tokens/route'
+import { DELETE as DELETE_BODY, POST } from '../src/app/api/mobile/v1/customer/push-tokens/route'
 import { DELETE } from '../src/app/api/mobile/v1/customer/push-tokens/[installationId]/route'
 import { GET as inbox } from '../src/app/api/mobile/v1/notifications/route'
 
@@ -150,7 +150,14 @@ test(
         async () => {
           const token = 'fixture-api-token-' + randomUUID()
           tokens.push(token)
-          const body = { token, platform: 'ios', locale: 'fr-BJ', installationId: a.installationId }
+          const body = {
+            token,
+            platform: 'ios',
+            locale: 'fr-BJ',
+            installationId: a.installationId,
+            deviceName: 'Test iPhone',
+            appVersion: '1.0.0',
+          }
           const post = () =>
             POST(
               new Request('https://test/api/mobile/v1/customer/push-tokens', {
@@ -162,12 +169,45 @@ test(
           const response = await post()
           assert.equal(response.status, 200)
           const json = await response.json()
-          assert.equal(json.installation.locale, 'fr')
+          assert.deepEqual(Object.keys(json), ['registration'])
+          assert.equal(json.registration.locale, 'fr')
+          assert.equal(json.registration.installationId, a.installationId)
+          assert.equal(json.registration.active, true)
           assert.equal(JSON.stringify(json).includes(token), false)
           assert.equal(JSON.stringify(json).includes(users[0].id), false)
           const again = await (await post()).json()
-          assert.equal(again.installation.id, json.installation.id)
+          assert.equal(again.registration.id, json.registration.id)
           assert.equal(await prisma.pushDevice.count({ where: { userId: users[0].id } }), 1)
+
+          const revoke = await DELETE_BODY(
+            new Request('https://test/api/mobile/v1/customer/push-tokens', {
+              method: 'DELETE',
+              headers: a.headers,
+              body: JSON.stringify({ installationId: a.installationId }),
+            })
+          )
+          assert.equal(revoke.status, 200)
+          assert.deepEqual(await revoke.json(), {
+            revocation: {
+              installationId: a.installationId,
+              revoked: true,
+              idempotent: false,
+            },
+          })
+          const repeated = await DELETE_BODY(
+            new Request('https://test/api/mobile/v1/customer/push-tokens', {
+              method: 'DELETE',
+              headers: a.headers,
+              body: JSON.stringify({ installationId: a.installationId }),
+            })
+          )
+          assert.deepEqual(await repeated.json(), {
+            revocation: {
+              installationId: a.installationId,
+              revoked: false,
+              idempotent: true,
+            },
+          })
         }
       )
       await t.test(

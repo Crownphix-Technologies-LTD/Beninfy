@@ -4,7 +4,7 @@ import { generateKeyPairSync } from 'node:crypto'
 import { getFcmProvider, classifyFcmResponse } from '../src/lib/mobile/fcm'
 import { customerPushData, getPushProvider, templateFor } from '../src/lib/mobile/notifications'
 import { customerPushTokenSchema } from '../src/lib/mobile/pushDevices'
-import { POST } from '../src/app/api/mobile/v1/customer/push-tokens/route'
+import { DELETE as DELETE_BODY, POST } from '../src/app/api/mobile/v1/customer/push-tokens/route'
 import { DELETE } from '../src/app/api/mobile/v1/customer/push-tokens/[installationId]/route'
 
 const payload = {
@@ -40,8 +40,15 @@ test('registration and revocation reject unauthenticated requests before touchin
   const del = await DELETE(new Request('https://test', { method: 'DELETE' }), {
     params: Promise.resolve({ installationId: 'any' }),
   })
+  const bodyDelete = await DELETE_BODY(
+    new Request('https://test/api/mobile/v1/customer/push-tokens', {
+      method: 'DELETE',
+      body: JSON.stringify({ installationId: 'install-1' }),
+    })
+  )
   assert.equal(post.status, 401)
   assert.equal(del.status, 401)
+  assert.equal(bodyDelete.status, 401)
 })
 
 test('Ride and Tour payloads contain only whitelisted routing keys and notification identity', () => {
@@ -61,6 +68,7 @@ test('Ride and Tour payloads contain only whitelisted routing keys and notificat
         entityType,
         entityId: entityType === 'ride' ? 'ride-1' : 'tour-1',
         notificationId: 'notification-1',
+        ...(entityType === 'ride' ? { bookingId: 'ride-1' } : {}),
       }
     )
   }

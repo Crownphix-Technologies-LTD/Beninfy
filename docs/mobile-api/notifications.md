@@ -28,14 +28,16 @@ are rejected. No GET/list endpoint exists for installations.
   "token": "FCM-registration-token-from-the-Customer-app",
   "platform": "android",
   "locale": "fr",
-  "installationId": "persistent-random-installation-id"
+  "installationId": "persistent-random-installation-id",
+  "deviceName": "optional",
+  "appVersion": "optional"
 }
 ```
 
 - `token`: required FCM registration token on **both Android and iOS**, 20–4096
   characters, no whitespace. Do not send a raw APNs token.
 - `platform`: required `android` or `ios`.
-- `installationId`: required stable installation identity, 1–120 characters from
+- `installationId`: required stable installation identity, 8–120 characters from
   `A-Z a-z 0-9 . _ : -`. Generate once per installation, not per login.
 - `locale`: optional, 2–16 characters. `fr`/`fr-*` normalize to `fr`; otherwise `en`.
 - Unknown properties, including `userId`, `sessionId`, and `appType`, are rejected.
@@ -44,14 +46,13 @@ HTTP 200, including idempotent registration:
 
 ```json
 {
-  "installation": {
+  "registration": {
     "id": "backend-registration-id",
     "installationId": "persistent-random-installation-id",
     "platform": "android",
-    "appType": "customer",
     "locale": "fr",
     "active": true,
-    "lastSeenAt": "2026-09-23T12:00:00.000Z"
+    "registeredAt": "2026-09-23T12:00:00.000Z"
   }
 }
 ```
@@ -64,12 +65,25 @@ Customer/IP.
 
 ### Unregister
 
-`DELETE /api/mobile/v1/customer/push-tokens/:installationId`
-
-No request body. HTTP 200:
+`DELETE /api/mobile/v1/customer/push-tokens`
 
 ```json
-{ "ok": true }
+{
+  "installationId": "persistent-random-installation-id",
+  "token": "optional-current-FCM-token"
+}
+```
+
+HTTP 200:
+
+```json
+{
+  "revocation": {
+    "installationId": "persistent-random-installation-id",
+    "revoked": true,
+    "idempotent": false
+  }
+}
 ```
 
 Idempotent: missing, already revoked, and another user's installation have the
@@ -108,7 +122,7 @@ token while an old provider request is running.
 ## Stable Customer FCM payload
 
 The FCM `message.notification` contains localized `title` and `body`.
-`message.data` contains **only these five string fields**:
+`message.data` contains the five routing fields and optional whitelisted Ride context IDs:
 
 ```json
 {
@@ -116,7 +130,9 @@ The FCM `message.notification` contains localized `title` and `body`.
   "type": "trip.driver_assigned",
   "entityType": "ride",
   "entityId": "booking-id",
-  "notificationId": "persistent-notification-id"
+  "notificationId": "persistent-notification-id",
+  "bookingId": "booking-id",
+  "bookingLegId": "optional-leg-id"
 }
 ```
 

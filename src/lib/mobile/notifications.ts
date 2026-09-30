@@ -478,13 +478,16 @@ export function customerPushData(notification: {
   const entityType = notification.type.startsWith('tour.') ? 'tour' : 'ride'
   const entityId = entityType === 'tour' ? payload.tourBookingId : payload.bookingId
   if (!safeId(entityId)) return null
-  return {
+  const result: Record<string, string> = {
     version: '1',
     type: notification.type,
     entityType,
     entityId,
     notificationId: notification.id,
   }
+  if (safeId(payload.bookingId)) result.bookingId = payload.bookingId
+  if (safeId(payload.bookingLegId)) result.bookingLegId = payload.bookingLegId
+  return result
 }
 
 function safePayload(type: NotificationType, payload: PushPayload): PushPayload {
@@ -547,7 +550,10 @@ export async function createNotificationEvent({
     })
     pushLog('persisted', { notificationId: notification.id, type, userId, appType })
     return notification
-  } catch {
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      return prisma.notification.findUnique({ where: { dedupeKey } })
+    }
     // Notification transport/persistence must never change the business result.
     pushLog('persistence_failed', { type, userId, appType, category: 'storage' })
     return null

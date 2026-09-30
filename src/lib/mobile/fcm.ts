@@ -12,6 +12,16 @@ export function getFcmConfig() {
   return projectId && clientEmail && privateKey ? { projectId, clientEmail, privateKey } : null
 }
 
+export function fcmConfigurationStatus() {
+  const provider = process.env.PUSH_PROVIDER?.trim().toLowerCase() || 'disabled'
+  const missing = [
+    !process.env.FIREBASE_PROJECT_ID?.trim() && 'FIREBASE_PROJECT_ID',
+    !process.env.FIREBASE_CLIENT_EMAIL?.trim() && 'FIREBASE_CLIENT_EMAIL',
+    !process.env.FIREBASE_PRIVATE_KEY?.trim() && 'FIREBASE_PRIVATE_KEY',
+  ].filter((value): value is string => Boolean(value))
+  return { provider, configured: provider === 'fcm' && missing.length === 0, missing }
+}
+
 type FcmError = {
   error?: {
     status?: string
