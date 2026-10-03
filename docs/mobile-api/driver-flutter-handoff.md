@@ -34,7 +34,7 @@ Flutter must never send authoritative `driverId`, `userId`, trip ownership, paym
 | Supabase Broadcast   | PROVIDER-CONFIG REQUIRED | `SUPABASE_URL`, `SUPABASE_SECRET_KEY`                          | tracking/chat realtime metadata                     | Yes, REST fallback works | Configure provider for realtime                                             |
 | Supabase Presence    | PARTIAL                  | Flutter must use Supabase Presence with backend token metadata | `POST /driver/presence`                             | Yes                      | Backend persists presence snapshot; provider join is client-side            |
 | Chat                 | FULLY WIRED              | Supabase Broadcast optional                                    | `/trips/:bookingLegId/chat*`                        | Yes                      | Chat send only during active assigned lifecycle                             |
-| Push notifications   | PROVIDER-CONFIG REQUIRED | `PUSH_PROVIDER=fcm`, Firebase env                              | `/devices/push-token`, `/notifications`             | Yes                      | Provider setup needed for external push                                     |
+| Push notifications   | PROVIDER-CONFIG REQUIRED | `PUSH_PROVIDER=fcm`, Firebase env                              | `/driver/push-tokens`, `/notifications`              | Yes                      | Provider setup needed for external push                                     |
 | Support config       | FULLY WIRED              | Support env names                                              | `GET /config/support`                               | Yes                      | Configure channels                                                          |
 | Driver history       | FULLY WIRED              | None                                                           | `GET /driver/trip-history`                          | Yes                      | Complete released/declined history starts from assignment-history migration |
 | Incident reporting   | MISSING                  | N/A                                                            | None                                                | No                       | Future approved scope                                                       |
@@ -685,7 +685,7 @@ Rules:
 
 ## Notifications
 
-### `POST /api/mobile/v1/devices/push-token`
+### `POST /api/mobile/v1/driver/push-tokens`
 
 Auth: Driver bearer token.
 
@@ -695,11 +695,8 @@ Request:
 {
   "token": "fcm-token",
   "platform": "android|ios",
-  "appType": "driver",
-  "deviceId": "optional",
-  "deviceName": "optional",
-  "appVersion": "optional",
-  "language": "en|fr"
+  "installationId": "stable-installation-id",
+  "locale": "en|fr"
 }
 ```
 
@@ -707,37 +704,32 @@ Success:
 
 ```json
 {
-  "device": {
-    "id": "pushDeviceId",
-    "appType": "driver",
+  "registration": {
+    "id": "backend-registration-id",
+    "installationId": "stable-installation-id",
     "platform": "android|ios",
-    "deviceId": "optional or null",
-    "language": "en|fr",
-    "lastSeenAt": "ISO date",
-    "revokedAt": null,
-    "invalidatedAt": null
+    "locale": "en|fr",
+    "active": true,
+    "registeredAt": "ISO date"
   }
 }
 ```
 
-`appType` must match the authenticated principal. Driver cannot register a customer token.
+Driver identity and app scope come from the authenticated session. Do not send
+`driverId`, `userId`, `accountId`, or `appType`.
 
-### `DELETE /api/mobile/v1/devices/push-token`
+### `DELETE /api/mobile/v1/driver/push-tokens/:installationId`
 
-Request:
+No request body.
 
 ```json
 {
-  "appType": "driver",
-  "token": "optional",
-  "deviceId": "optional"
+  "revocation": {
+    "installationId": "stable-installation-id",
+    "revoked": true,
+    "idempotent": false
+  }
 }
-```
-
-Success:
-
-```json
-{ "ok": true, "revoked": 1 }
 ```
 
 ### `GET /api/mobile/v1/notifications?limit=20&cursor=<id>&unread=true`

@@ -19,6 +19,20 @@ export const customerPushTokenSchema = z
   })
   .strict()
 
+export const driverPushTokenSchema = z
+  .object({
+    token: z.string().trim().min(20).max(4096).regex(/^\S+$/),
+    platform: z.enum(['android', 'ios']),
+    installationId: z
+      .string()
+      .trim()
+      .min(8)
+      .max(120)
+      .regex(/^[A-Za-z0-9._:-]+$/),
+    locale: z.enum(['en', 'fr']),
+  })
+  .strict()
+
 export function pushTokenHash(token: string) {
   return createHash('sha256').update(token.trim()).digest('hex')
 }
