@@ -461,6 +461,15 @@ export const CUSTOMER_NOTIFICATION_TYPES = [
   'tour.status_updated',
 ] as const
 
+export const DRIVER_NOTIFICATION_TYPES = [
+  'admin.message',
+  'chat.new_message',
+  'trip.driver_assigned',
+  'trip.assignment_removed',
+  'trip.completed',
+  'trip.cancelled',
+] as const
+
 function safeId(value: unknown): value is string {
   return typeof value === 'string' && /^[A-Za-z0-9._:-]{1,200}$/.test(value)
 }
@@ -488,6 +497,22 @@ export function customerPushData(notification: {
   if (safeId(payload.bookingId)) result.bookingId = payload.bookingId
   if (safeId(payload.bookingLegId)) result.bookingLegId = payload.bookingLegId
   return result
+}
+
+export function driverPushData(notification: {
+  id: string
+  type: string
+  payload: unknown
+}): Record<string, string> | null {
+  if (!(DRIVER_NOTIFICATION_TYPES as readonly string[]).includes(notification.type)) return null
+  if (notification.type === 'admin.message')
+    return { version: '1', type: 'admin.message', notificationId: notification.id }
+  if (!notification.payload || typeof notification.payload !== 'object') return null
+  const payload = notification.payload as PushPayload
+  return {
+    ...pushPayloadToData(safePayload(notification.type as NotificationType, payload)),
+    notificationId: notification.id,
+  }
 }
 
 function safePayload(type: NotificationType, payload: PushPayload): PushPayload {
@@ -571,11 +596,9 @@ export async function deliverNotification(
   })
   if (!notification) return null
   const data =
-    notification.type === 'admin.message' || notification.appType === 'customer'
+    notification.appType === 'customer'
       ? customerPushData(notification)
-      : pushPayloadToData(
-          safePayload(notification.type as NotificationType, notification.payload as PushPayload)
-        )
+      : driverPushData(notification)
   if (!data) {
     await prisma.notification.update({
       where: { id: notificationId },

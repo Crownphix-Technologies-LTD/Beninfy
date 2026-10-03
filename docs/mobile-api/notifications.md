@@ -97,12 +97,93 @@ envelope: 401 UNAUTHENTICATED, 403 FORBIDDEN, 400 VALIDATION_ERROR or
 PUSH_TOKEN_INVALID, 429 RATE_LIMITED, 500 INTERNAL_ERROR. No provider/token secrets
 are included in errors.
 
+## Driver installation API
+
+Driver Flutter uses a dedicated contract backed by the same session-bound
+`PushDevice`, durable inbox, FCM provider and delivery worker as Customer.
+Identity and `appType=driver` are server-derived. The legacy shared
+`/api/mobile/v1/devices/push-token` route is not the Driver Flutter contract.
+
+### Register or refresh
+
+`POST /api/mobile/v1/driver/push-tokens`
+
+```json
+{
+  "token": "FCM-registration-token-from-the-Driver-app",
+  "platform": "android",
+  "locale": "fr",
+  "installationId": "persistent-random-installation-id"
+}
+```
+
+The strict request accepts only these four fields. `platform` is `android` or
+`ios`; `locale` is exactly `en` or `fr`; token and installation constraints are
+the same as Customer. HTTP 200 returns:
+
+```json
+{
+  "registration": {
+    "id": "backend-registration-id",
+    "installationId": "persistent-random-installation-id",
+    "platform": "android",
+    "locale": "fr",
+    "active": true,
+    "registeredAt": "2026-09-23T12:00:00.000Z"
+  }
+}
+```
+
+### Revoke
+
+`DELETE /api/mobile/v1/driver/push-tokens/:installationId`
+
+No request body is required. HTTP 200 returns:
+
+```json
+{
+  "revocation": {
+    "installationId": "persistent-random-installation-id",
+    "revoked": true,
+    "idempotent": false
+  }
+}
+```
+
+Missing, already-revoked and another Driver's installation all return the same
+non-enumerating success with `revoked=false` and `idempotent=true`. A Driver may
+have multiple active installations. Registering an installation for another
+authenticated Driver transfers active ownership atomically; unrelated
+installations remain active. Token refresh and locale changes update the
+canonical registration.
+
+Driver FCM data always contains string values and `notificationId`:
+
+```json
+{
+  "version": "1",
+  "type": "trip.driver_assigned",
+  "notificationId": "notification-id",
+  "bookingId": "booking-id",
+  "bookingLegId": "booking-leg-id"
+}
+```
+
+Chat may additionally contain `conversationId` and `messageId`. `admin.message`
+contains only `version`, `type` and `notificationId`. No arbitrary navigation URL
+is returned. The frozen Driver types are `admin.message`, `chat.new_message`,
+`trip.driver_assigned`, `trip.assignment_removed`, `trip.completed`, and
+`trip.cancelled`. FCM delivery never marks inbox content read; use
+`POST /api/mobile/v1/notifications/:id/read`.
+
+Common errors use the standard envelope: `401 UNAUTHENTICATED`, `403 FORBIDDEN`,
+`400 VALIDATION_ERROR` or `PUSH_TOKEN_INVALID`, `429 RATE_LIMITED`, and
+`500 INTERNAL_ERROR`.
+
 ### Compatibility and ownership
 
-The shared `POST/DELETE /api/mobile/v1/devices/push-token` remains available with
-its existing `appType`, `deviceId`, `language` representation. Driver payload
-routing stays unchanged and no Driver app changes are required. Shared DELETE
-is now idempotent (`revoked: 0` for no matching active registration).
+The shared `/api/mobile/v1/devices/push-token` route remains temporarily present
+for backward compatibility, but is obsolete for current Driver Flutter work.
 
 Migration `20260923120000_customer_push_session_ownership` adds nullable
 `PushDevice.sessionId` and its index. Existing `deviceId`/`language` represent
