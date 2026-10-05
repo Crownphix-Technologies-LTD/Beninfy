@@ -81,6 +81,8 @@ export type MobileErrorCode =
   | 'OTP_ATTEMPTS_EXCEEDED'
   | 'OTP_RESEND_TOO_SOON'
   | 'OTP_RATE_LIMITED'
+  | 'OTP_DELIVERY_UNAVAILABLE'
+  | 'OTP_IDENTITY_CONFLICT'
   | 'RESET_TOKEN_INVALID'
   | 'RESET_TOKEN_EXPIRED'
   | 'PASSWORD_INVALID'
@@ -328,6 +330,14 @@ export function mobileErrorFromCode(code: MobileErrorCode, message?: string) {
       return mobileError(code, message ?? 'Please wait before requesting another code', 429)
     case 'OTP_RATE_LIMITED':
       return mobileError(code, message ?? 'Too many verification code requests', 429)
+    case 'OTP_DELIVERY_UNAVAILABLE':
+      return mobileError(
+        code,
+        message ?? 'Verification code delivery is temporarily unavailable',
+        503
+      )
+    case 'OTP_IDENTITY_CONFLICT':
+      return mobileError(code, message ?? 'Restart verification to continue securely', 409)
     case 'RESET_TOKEN_INVALID':
       return mobileError(code, message ?? 'Password reset token is invalid', 400)
     case 'RESET_TOKEN_EXPIRED':
@@ -365,17 +375,29 @@ export function mobileErrorFromCode(code: MobileErrorCode, message?: string) {
     case 'TOUR_NOT_FOUND':
       return mobileError(code, message ?? 'Tour not found', 404)
     case 'TOUR_PICKUP_OUTSIDE_COTONOU':
-      return mobileError(code, message ?? 'Tour pickup must be within Cotonou. Book a ride to Cotonou.', 400)
+      return mobileError(
+        code,
+        message ?? 'Tour pickup must be within Cotonou. Book a ride to Cotonou.',
+        400
+      )
     case 'TOUR_QUOTE_REQUIRED':
       return mobileError(code, message ?? 'An Operations quote is required before payment', 409)
     case 'TOUR_PRICING_LOCKED':
-      return mobileError(code, message ?? 'Pricing cannot change while checkout is pending verification', 409)
+      return mobileError(
+        code,
+        message ?? 'Pricing cannot change while checkout is pending verification',
+        409
+      )
     case 'TOUR_FEEDBACK_NOT_ALLOWED':
       return mobileError(code, message ?? 'Feedback requires a completed paid Tour', 409)
     case 'TOUR_FEEDBACK_ALREADY_SUBMITTED':
       return mobileError(code, message ?? 'Feedback has already been submitted', 409)
     case 'TOUR_FEEDBACK_TARGET_INVALID':
-      return mobileError(code, message ?? 'Feedback targets must match the completed Tour assignments', 400)
+      return mobileError(
+        code,
+        message ?? 'Feedback targets must match the completed Tour assignments',
+        400
+      )
     case 'TOUR_NOT_EXECUTION_READY':
       return mobileError(code, message ?? 'This tour is not ready for booking', 409)
     case 'TOUR_BOOKING_NOT_FOUND':

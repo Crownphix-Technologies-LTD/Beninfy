@@ -12,6 +12,7 @@ export type MobileOnboardingDto = {
   nextStep: 'collect_phone' | 'verify_email_otp' | 'customer_home'
   phoneRequired: boolean
   emailVerified: boolean
+  phoneVerified: boolean
 }
 
 export type MobileLocale = 'en' | 'fr'
@@ -56,9 +57,8 @@ export function normalizeMobilePhone(value: string) {
       : compact
   const digits = normalized.startsWith('+') ? normalized.slice(1) : normalized
 
-  if (/^229\d{8,10}$/.test(digits)) return `+${digits}`
-  if (/^234\d{10}$/.test(digits)) return `+${digits}`
   if (/^0\d{10}$/.test(digits)) return `+234${digits.slice(1)}`
+  if (/^[1-9]\d{7,14}$/.test(digits)) return `+${digits}`
 
   return null
 }
@@ -66,6 +66,7 @@ export function normalizeMobilePhone(value: string) {
 export function toMobileOnboardingDto(user: {
   phone: string | null
   emailVerified: Date | string | null
+  phoneVerified?: Date | string | null
 }): MobileOnboardingDto {
   if (!user.phone) {
     return {
@@ -73,15 +74,17 @@ export function toMobileOnboardingDto(user: {
       nextStep: 'collect_phone',
       phoneRequired: true,
       emailVerified: Boolean(user.emailVerified),
+      phoneVerified: Boolean(user.phoneVerified),
     }
   }
 
-  if (!user.emailVerified) {
+  if (!user.emailVerified && !user.phoneVerified) {
     return {
       status: 'email_verification_required',
       nextStep: 'verify_email_otp',
       phoneRequired: false,
       emailVerified: false,
+      phoneVerified: false,
     }
   }
 
@@ -89,13 +92,15 @@ export function toMobileOnboardingDto(user: {
     status: 'complete',
     nextStep: 'customer_home',
     phoneRequired: false,
-    emailVerified: true,
+    emailVerified: Boolean(user.emailVerified),
+    phoneVerified: Boolean(user.phoneVerified),
   }
 }
 
 export function isMobileCustomerOnboardingComplete(user: {
   phone: string | null
   emailVerified: Date | string | null
+  phoneVerified?: Date | string | null
 }) {
   return toMobileOnboardingDto(user).status === 'complete'
 }

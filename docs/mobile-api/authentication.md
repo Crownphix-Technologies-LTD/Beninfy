@@ -23,24 +23,28 @@ Refresh token:
 
 ## Endpoints
 
-| Endpoint                                    | Status      | Principal                                   |
-| ------------------------------------------- | ----------- | ------------------------------------------- |
-| `POST /api/mobile/v1/auth/register`         | IMPLEMENTED | PUBLIC customer registration                |
-| `POST /api/mobile/v1/auth/login`            | IMPLEMENTED | PUBLIC customer or driver login             |
-| `POST /api/mobile/v1/auth/google`           | IMPLEMENTED | PUBLIC customer Google Sign-In              |
-| `POST /api/mobile/v1/auth/refresh`          | IMPLEMENTED | PUBLIC with valid refresh token             |
-| `POST /api/mobile/v1/auth/logout`           | IMPLEMENTED | Refresh token revocation                    |
-| `POST /api/mobile/v1/auth/logout-all`       | IMPLEMENTED | Revoke all mobile sessions for principal    |
-| `GET /api/mobile/v1/auth/me`                | IMPLEMENTED | CUSTOMER or DRIVER                          |
-| `POST /api/mobile/v1/auth/onboarding/phone` | IMPLEMENTED | CUSTOMER collects phone and sends email OTP |
-| `POST /api/mobile/v1/auth/email/send-otp`   | IMPLEMENTED | CUSTOMER resend email OTP                   |
-| `POST /api/mobile/v1/auth/email/verify-otp` | IMPLEMENTED | CUSTOMER verify email OTP                   |
-| `POST /api/mobile/v1/auth/forgot-password`  | IMPLEMENTED | PUBLIC generic reset request                |
-| `POST /api/mobile/v1/auth/reset-password`   | IMPLEMENTED | PUBLIC single-use token reset               |
-| `POST /api/mobile/v1/customer/change-password` | IMPLEMENTED | CUSTOMER authenticated password change   |
-| `POST /api/mobile/v1/driver/change-password` | IMPLEMENTED | DRIVER authenticated password change      |
-| `GET /api/mobile/v1/auth/sessions`          | PLANNED     | CUSTOMER or DRIVER                          |
-| `DELETE /api/mobile/v1/auth/sessions/:id`   | PLANNED     | CUSTOMER or DRIVER                          |
+| Endpoint                                       | Status      | Principal                                   |
+| ---------------------------------------------- | ----------- | ------------------------------------------- |
+| `POST /api/mobile/v1/auth/register`            | IMPLEMENTED | PUBLIC customer registration                |
+| `POST /api/mobile/v1/auth/login`               | IMPLEMENTED | PUBLIC customer or driver login             |
+| `POST /api/mobile/v1/auth/google`              | IMPLEMENTED | PUBLIC customer Google Sign-In              |
+| `POST /api/mobile/v1/auth/otp/start`           | IMPLEMENTED | PUBLIC unified email/SMS OTP start          |
+| `POST /api/mobile/v1/auth/otp/resend`          | IMPLEMENTED | PUBLIC same-channel OTP rotation            |
+| `POST /api/mobile/v1/auth/otp/verify`          | IMPLEMENTED | PUBLIC OTP verification/session resolution  |
+| `POST /api/mobile/v1/auth/otp/signup`          | IMPLEMENTED | PUBLIC verified passwordless signup         |
+| `POST /api/mobile/v1/auth/refresh`             | IMPLEMENTED | PUBLIC with valid refresh token             |
+| `POST /api/mobile/v1/auth/logout`              | IMPLEMENTED | Refresh token revocation                    |
+| `POST /api/mobile/v1/auth/logout-all`          | IMPLEMENTED | Revoke all mobile sessions for principal    |
+| `GET /api/mobile/v1/auth/me`                   | IMPLEMENTED | CUSTOMER or DRIVER                          |
+| `POST /api/mobile/v1/auth/onboarding/phone`    | IMPLEMENTED | CUSTOMER collects phone and sends email OTP |
+| `POST /api/mobile/v1/auth/email/send-otp`      | IMPLEMENTED | CUSTOMER resend email OTP                   |
+| `POST /api/mobile/v1/auth/email/verify-otp`    | IMPLEMENTED | CUSTOMER verify email OTP                   |
+| `POST /api/mobile/v1/auth/forgot-password`     | IMPLEMENTED | PUBLIC generic reset request                |
+| `POST /api/mobile/v1/auth/reset-password`      | IMPLEMENTED | PUBLIC single-use token reset               |
+| `POST /api/mobile/v1/customer/change-password` | IMPLEMENTED | CUSTOMER authenticated password change      |
+| `POST /api/mobile/v1/driver/change-password`   | IMPLEMENTED | DRIVER authenticated password change        |
+| `GET /api/mobile/v1/auth/sessions`             | PLANNED     | CUSTOMER or DRIVER                          |
+| `DELETE /api/mobile/v1/auth/sessions/:id`      | PLANNED     | CUSTOMER or DRIVER                          |
 
 Google sign-in for Customer mobile verifies Google ID tokens server-side. Flutter must never call Beninfy backend APIs with Google server credentials, and must never initialize a Beninfy user session by trusting client-side Google profile fields alone.
 
@@ -148,7 +152,7 @@ The existing Customer session remains valid. The Customer can subsequently use e
 
 Customer registration collects name, email, password, locale, and explicit Terms/Privacy acceptance. Phone is collected after authentication through `/auth/onboarding/phone`.
 
-The backend sends a six-digit OTP to the customer email address, not by SMS. Phone is stored as customer contact data and is not used as a login identifier.
+The legacy authenticated onboarding routes still send email OTP for backward compatibility. New passwordless Customer authentication uses the unified email/SMS contract in `unified-otp-authentication.md`.
 
 Stable onboarding states:
 
@@ -159,6 +163,8 @@ Stable onboarding states:
 `register`, `login`, and `/me` include an `onboarding` object so Flutter can route splash/sign-in/onboarding/home without guessing.
 
 Transactional customer endpoints such as bookings, payment, and tracking return `ONBOARDING_INCOMPLETE` until onboarding is complete.
+
+Email OTP marks email ownership verified. SMS OTP marks phone ownership verified without falsely marking email verified. Either verified contact completes the verification portion of onboarding once a phone number is present.
 
 ## Account Recovery
 

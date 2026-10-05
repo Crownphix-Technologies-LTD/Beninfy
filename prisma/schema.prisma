@@ -15,6 +15,7 @@ model User {
   name                String?
   email               String?                   @unique
   emailVerified       DateTime?
+  phoneVerified       DateTime?
   image               String?
   phone               String?
   hashedPassword      String?
@@ -42,6 +43,7 @@ model User {
   driver              Driver?
   mobileSessions      MobileSession[]
   otpChallenges       OtpChallenge[]
+  customerAuthOtpChallenges CustomerAuthOtpChallenge[]
   passwordResetTokens PasswordResetToken[]
   pushDevices         PushDevice[]
   notifications       Notification[]
@@ -119,6 +121,36 @@ model OtpChallenge {
 
   @@index([userId, purpose, consumedAt, invalidatedAt, expiresAt])
   @@index([targetNormalized, purpose, createdAt])
+  @@index([expiresAt])
+}
+
+model CustomerAuthOtpChallenge {
+  id                String    @id
+  userId            String?
+  user              User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  purpose           String    @default("customer_auth")
+  channel           String
+  identityEmail     String
+  targetNormalized  String
+  targetMasked      String
+  codeHash          String
+  locale            String    @default("en")
+  eligible          Boolean   @default(true)
+  attempts          Int       @default(0)
+  maxAttempts       Int       @default(5)
+  expiresAt         DateTime
+  resendAvailableAt DateTime
+  deliveredAt       DateTime?
+  deliveryFailedAt  DateTime?
+  verifiedAt        DateTime?
+  consumedAt        DateTime?
+  invalidatedAt     DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([identityEmail, purpose, createdAt])
+  @@index([targetNormalized, channel, purpose, createdAt])
+  @@index([userId, purpose, consumedAt, invalidatedAt, expiresAt])
   @@index([expiresAt])
 }
 
