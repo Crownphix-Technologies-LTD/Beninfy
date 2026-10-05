@@ -86,6 +86,7 @@ export type MobileErrorCode =
   | 'CURRENT_PASSWORD_INVALID'
   | 'SAVED_PLACE_NOT_FOUND'
   | 'SAVED_PLACE_TYPE_CONFLICT'
+  | 'SAVED_TRAVELLER_NOT_FOUND'
   | 'TRAVEL_PREFERENCE_INVALID'
   | 'REVIEW_NOT_FOUND'
   | 'REVIEW_NOT_ALLOWED'
@@ -324,6 +325,8 @@ export function mobileErrorFromCode(code: MobileErrorCode, message?: string) {
       return mobileError(code, message ?? 'Saved place not found', 404)
     case 'SAVED_PLACE_TYPE_CONFLICT':
       return mobileError(code, message ?? 'A saved place with this type already exists', 409)
+    case 'SAVED_TRAVELLER_NOT_FOUND':
+      return mobileError(code, message ?? 'Saved traveller not found', 404)
     case 'TRAVEL_PREFERENCE_INVALID':
       return mobileError(code, message ?? 'Travel preference is invalid', 400)
     case 'REVIEW_NOT_FOUND':

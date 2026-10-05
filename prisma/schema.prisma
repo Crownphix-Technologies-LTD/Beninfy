@@ -35,6 +35,7 @@ model User {
   tourCouponUses      TourCouponUse[]
   tourFeedback        TourFeedback[]
   savedPlaces         SavedPlace[]
+  savedTravellers     SavedTraveller[]
   travelPreference    CustomerTravelPreference?
   tripReviews         TripReview[]
   paymentResolutions  PaymentResolution[]
@@ -69,6 +70,20 @@ model SavedPlace {
   updatedAt       DateTime @updatedAt
 
   @@index([userId, type])
+  @@index([userId, updatedAt])
+}
+
+model SavedTraveller {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fullName  String
+  phone     String
+  email     String?
+  label     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   @@index([userId, updatedAt])
 }
 
