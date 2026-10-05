@@ -3,6 +3,10 @@ import { prisma } from '@/lib/prisma'
 import { isAdminRole } from '@/lib/roles'
 import { issueMobileTokens, type MobileDeviceInput } from '@/lib/mobile/auth'
 import type { MobileErrorCode } from '@/lib/mobile/errors'
+import {
+  safeGoogleVerificationDiagnostic,
+  type GoogleVerificationFailure,
+} from '@/lib/mobile/googleAuthDiagnostics'
 
 type GoogleTokenInfo = {
   iss?: string
@@ -41,11 +45,35 @@ export async function verifyGoogleMobileIdToken(idToken: string) {
     return { ok: false as const, code: 'GOOGLE_AUTH_UNAVAILABLE' as MobileErrorCode }
   }
 
+  const diagnostic = (
+    reason: GoogleVerificationFailure,
+    providerStatus?: number,
+    verifiedClaims?: GoogleTokenInfo
+  ) => {
+    console.warn(
+      '[mobile-google-verification]',
+      safeGoogleVerificationDiagnostic({
+        token: idToken,
+        audiences: config.clientIds,
+        iosClient: process.env.GOOGLE_IOS_CLIENT_ID?.trim(),
+        reason,
+        providerStatus,
+        verifiedClaims: verifiedClaims as Record<string, unknown> | undefined,
+      })
+    )
+  }
+
   const res = await fetch(`${config.tokenInfoUrl}?id_token=${encodeURIComponent(idToken)}`, {
     method: 'GET',
     headers: { Accept: 'application/json' },
-  }).catch(() => null)
-  if (!res?.ok) return { ok: false as const, code: 'GOOGLE_AUTH_INVALID' as MobileErrorCode }
+  }).catch(() => {
+    diagnostic('provider_transport_failure')
+    return null
+  })
+  if (!res?.ok) {
+    if (res) diagnostic('provider_rejected', res.status)
+    return { ok: false as const, code: 'GOOGLE_AUTH_INVALID' as MobileErrorCode }
+  }
 
   const payload = (await res.json().catch(() => null)) as GoogleTokenInfo | null
   const expiresAtSeconds = Number(payload?.exp)
@@ -56,6 +84,20 @@ export async function verifyGoogleMobileIdToken(idToken: string) {
   const email = payload?.email?.trim().toLowerCase()
 
   if (!issuerOk || !audienceOk || !expiryOk || !sub || !email || !verifiedEmail(payload?.email_verified)) {
+    const reason: GoogleVerificationFailure = !payload
+      ? 'provider_response_malformed'
+      : !issuerOk
+        ? 'issuer_mismatch'
+        : !audienceOk
+          ? 'audience_mismatch'
+          : !expiryOk
+            ? 'expired_or_invalid_expiry'
+            : !sub
+              ? 'missing_subject'
+              : !email
+                ? 'missing_email'
+                : 'unverified_email'
+    diagnostic(reason, res.status, payload ?? undefined)
     return { ok: false as const, code: 'GOOGLE_AUTH_INVALID' as MobileErrorCode }
   }
 
