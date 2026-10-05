@@ -673,8 +673,12 @@ export async function exportCustomerData(principal: MobilePrincipal) {
       updatedAt: true,
     },
   })
-  const [savedPlaces, travelPreference, reviews, bookings, payments] = await Promise.all([
+  const [savedPlaces, savedTravellers, travelPreference, reviews, bookings, payments] = await Promise.all([
     prisma.savedPlace.findMany({
+      where: { userId: principal.userId },
+      orderBy: { updatedAt: 'desc' },
+    }),
+    prisma.savedTraveller.findMany({
       where: { userId: principal.userId },
       orderBy: { updatedAt: 'desc' },
     }),
@@ -732,6 +736,15 @@ export async function exportCustomerData(principal: MobilePrincipal) {
       updatedAt: iso(user?.updatedAt),
     },
     savedPlaces: savedPlaces.map(toSavedPlaceDto),
+    savedTravellers: savedTravellers.map((traveller) => ({
+      id: traveller.id,
+      fullName: traveller.fullName,
+      phone: traveller.phone,
+      email: traveller.email,
+      label: traveller.label,
+      createdAt: iso(traveller.createdAt),
+      updatedAt: iso(traveller.updatedAt),
+    })),
     travelPreference: toTravelPreferenceDto(travelPreference),
     reviews: reviews.map(toTripReviewDto),
     bookings: bookings.map((booking) => ({
