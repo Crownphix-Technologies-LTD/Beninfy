@@ -1,12 +1,13 @@
+import bcrypt from 'bcryptjs'
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { isAdminRole } from '@/lib/roles'
-import { issueMobileTokens, type MobileDeviceInput } from '@/lib/mobile/auth'
-import type { MobileErrorCode } from '@/lib/mobile/errors'
 import {
-  safeGoogleVerificationDiagnostic,
-  type GoogleVerificationFailure,
-} from '@/lib/mobile/googleAuthDiagnostics'
+  issueMobileTokens,
+  type MobileDeviceInput,
+  type MobilePrincipal,
+} from '@/lib/mobile/auth'
+import type { MobileErrorCode } from '@/lib/mobile/errors'
 
 type GoogleTokenInfo = {
   iss?: string
@@ -45,35 +46,11 @@ export async function verifyGoogleMobileIdToken(idToken: string) {
     return { ok: false as const, code: 'GOOGLE_AUTH_UNAVAILABLE' as MobileErrorCode }
   }
 
-  const diagnostic = (
-    reason: GoogleVerificationFailure,
-    providerStatus?: number,
-    verifiedClaims?: GoogleTokenInfo
-  ) => {
-    console.warn(
-      '[mobile-google-verification]',
-      safeGoogleVerificationDiagnostic({
-        token: idToken,
-        audiences: config.clientIds,
-        iosClient: process.env.GOOGLE_IOS_CLIENT_ID?.trim(),
-        reason,
-        providerStatus,
-        verifiedClaims: verifiedClaims as Record<string, unknown> | undefined,
-      })
-    )
-  }
-
   const res = await fetch(`${config.tokenInfoUrl}?id_token=${encodeURIComponent(idToken)}`, {
     method: 'GET',
     headers: { Accept: 'application/json' },
-  }).catch(() => {
-    diagnostic('provider_transport_failure')
-    return null
-  })
-  if (!res?.ok) {
-    if (res) diagnostic('provider_rejected', res.status)
-    return { ok: false as const, code: 'GOOGLE_AUTH_INVALID' as MobileErrorCode }
-  }
+  }).catch(() => null)
+  if (!res?.ok) return { ok: false as const, code: 'GOOGLE_AUTH_INVALID' as MobileErrorCode }
 
   const payload = (await res.json().catch(() => null)) as GoogleTokenInfo | null
   const expiresAtSeconds = Number(payload?.exp)
@@ -84,20 +61,6 @@ export async function verifyGoogleMobileIdToken(idToken: string) {
   const email = payload?.email?.trim().toLowerCase()
 
   if (!issuerOk || !audienceOk || !expiryOk || !sub || !email || !verifiedEmail(payload?.email_verified)) {
-    const reason: GoogleVerificationFailure = !payload
-      ? 'provider_response_malformed'
-      : !issuerOk
-        ? 'issuer_mismatch'
-        : !audienceOk
-          ? 'audience_mismatch'
-          : !expiryOk
-            ? 'expired_or_invalid_expiry'
-            : !sub
-              ? 'missing_subject'
-              : !email
-                ? 'missing_email'
-                : 'unverified_email'
-    diagnostic(reason, res.status, payload ?? undefined)
     return { ok: false as const, code: 'GOOGLE_AUTH_INVALID' as MobileErrorCode }
   }
 
@@ -112,7 +75,7 @@ export async function verifyGoogleMobileIdToken(idToken: string) {
   }
 }
 
-function customerAccountBlocked(user: {
+export function customerGoogleAccountBlock(user: {
   role: string
   disabledAt: Date | null
   deletionRequestedAt: Date | null
@@ -125,6 +88,19 @@ function customerAccountBlocked(user: {
   if (user.anonymizedAt || user.deletionRequestedAt) return 'ACCOUNT_DELETION_PENDING' as const
   if (user.disabledAt) return 'ACCOUNT_DISABLED' as const
   return null
+}
+
+export function googleLinkRelationship(input: {
+  targetUserId: string
+  identityOwnerUserId: string | null
+  targetHasGoogleIdentity: boolean
+}) {
+  if (input.identityOwnerUserId) {
+    return input.identityOwnerUserId === input.targetUserId
+      ? ('already_linked' as const)
+      : ('conflict' as const)
+  }
+  return input.targetHasGoogleIdentity ? ('conflict' as const) : ('create' as const)
 }
 
 async function findOrCreateGoogleCustomer(input: {
@@ -140,27 +116,19 @@ async function findOrCreateGoogleCustomer(input: {
         include: { user: { include: { driver: true } } },
       })
       if (account) {
-        const blocked = customerAccountBlocked(account.user)
+        const blocked = customerGoogleAccountBlock(account.user)
         if (blocked) return { ok: false as const, code: blocked }
         return { ok: true as const, user: account.user }
       }
 
-      const existingUser = await tx.user.findUnique({
-        where: { email: input.email },
+      const existingUser = await tx.user.findFirst({
+        where: { email: { equals: input.email, mode: 'insensitive' } },
         include: { driver: true },
       })
       if (existingUser) {
-        const blocked = customerAccountBlocked(existingUser)
+        const blocked = customerGoogleAccountBlock(existingUser)
         if (blocked) return { ok: false as const, code: blocked }
-        await tx.account.create({
-          data: {
-            userId: existingUser.id,
-            type: 'oauth',
-            provider: 'google',
-            providerAccountId: input.sub,
-          },
-        })
-        return { ok: true as const, user: existingUser }
+        return { ok: false as const, code: 'GOOGLE_LINK_REQUIRED' as const }
       }
 
       const user = await tx.user.create({
@@ -217,7 +185,7 @@ export async function authenticateMobileGoogle(input: {
         include: { user: { include: { driver: true } } },
       })
       if (account) {
-        const blocked = customerAccountBlocked(account.user)
+        const blocked = customerGoogleAccountBlock(account.user)
         if (blocked) return { ok: false as const, code: blocked }
         return {
           ok: true as const,
@@ -230,6 +198,95 @@ export async function authenticateMobileGoogle(input: {
           user: account.user,
         }
       }
+    }
+    throw error
+  }
+}
+
+export async function linkGoogleToCustomer(input: {
+  principal: MobilePrincipal
+  idToken: string
+  currentPassword: string
+}) {
+  const verified = await verifyGoogleMobileIdToken(input.idToken)
+  if (!verified.ok) return verified
+
+  const customer = await prisma.user.findUnique({
+    where: { id: input.principal.userId },
+    include: { driver: true },
+  })
+  if (!customer) return { ok: false as const, code: 'UNAUTHENTICATED' as const }
+
+  const blocked = customerGoogleAccountBlock(customer)
+  if (blocked) return { ok: false as const, code: blocked }
+  if (!customer.email || customer.email.trim().toLowerCase() !== verified.profile.email) {
+    return { ok: false as const, code: 'GOOGLE_ACCOUNT_CONFLICT' as const }
+  }
+  if (!customer.hashedPassword) {
+    return { ok: false as const, code: 'ACCOUNT_REAUTH_REQUIRED' as const }
+  }
+  if (!(await bcrypt.compare(input.currentPassword, customer.hashedPassword))) {
+    return { ok: false as const, code: 'CURRENT_PASSWORD_INVALID' as const }
+  }
+
+  try {
+    const linked = await prisma.$transaction(
+      async (tx) => {
+        await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${customer.id} FOR UPDATE`
+
+        const accountForIdentity = await tx.account.findUnique({
+          where: {
+            provider_providerAccountId: {
+              provider: 'google',
+              providerAccountId: verified.profile.sub,
+            },
+          },
+        })
+        const existingGoogle = await tx.account.findFirst({
+          where: { userId: customer.id, provider: 'google' },
+          select: { id: true },
+        })
+
+        const relationship = googleLinkRelationship({
+          targetUserId: customer.id,
+          identityOwnerUserId: accountForIdentity?.userId ?? null,
+          targetHasGoogleIdentity: Boolean(existingGoogle),
+        })
+        if (relationship === 'already_linked') {
+          return { ok: true as const, alreadyLinked: true }
+        }
+        if (relationship === 'conflict') {
+          return { ok: false as const, code: 'GOOGLE_ACCOUNT_CONFLICT' as const }
+        }
+
+        await tx.account.create({
+          data: {
+            userId: customer.id,
+            type: 'oauth',
+            provider: 'google',
+            providerAccountId: verified.profile.sub,
+          },
+        })
+        return { ok: true as const, alreadyLinked: false }
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+    )
+    if (!linked.ok) return linked
+    return { ok: true as const, alreadyLinked: linked.alreadyLinked, user: customer }
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      const account = await prisma.account.findUnique({
+        where: {
+          provider_providerAccountId: {
+            provider: 'google',
+            providerAccountId: verified.profile.sub,
+          },
+        },
+      })
+      if (account?.userId === customer.id) {
+        return { ok: true as const, alreadyLinked: true, user: customer }
+      }
+      return { ok: false as const, code: 'GOOGLE_ACCOUNT_CONFLICT' as const }
     }
     throw error
   }

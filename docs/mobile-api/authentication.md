@@ -109,10 +109,40 @@ Response shape matches password login:
 Google linking rules:
 
 - Existing Google account by provider/sub signs in the linked Customer.
-- Verified Google email may link to an existing legitimate Customer account.
+- A verified Google email matching an existing Customer does not auto-link from a signed-out request. The endpoint returns `409 GOOGLE_LINK_REQUIRED` with a safe linking handoff.
+- The Customer signs in using the existing password, then calls `POST /api/mobile/v1/customer/auth-methods/google` with the Google ID token and current password.
+- Successful linking creates an `Account(provider = "google", providerAccountId = Google sub)` relation without changing the Customer ID, password, bookings, Saved Travellers, notifications, or ownership records.
 - New verified Customer email creates a Customer account.
 - Driver/Admin accounts, disabled accounts, deletion-pending accounts, and anonymized accounts are rejected.
 - Flutter must never send `userId`, Google account ownership IDs other than the provider-issued ID token, OAuth secrets, or authoritative verification state.
+
+### Link Google to an existing Customer
+
+```http
+POST /api/mobile/v1/customer/auth-methods/google
+Authorization: Bearer CUSTOMER_ACCESS_TOKEN
+Content-Type: application/json
+```
+
+```json
+{
+  "idToken": "GOOGLE_ID_TOKEN_FROM_PLATFORM_SDK",
+  "currentPassword": "existing-customer-password"
+}
+```
+
+The backend verifies the authenticated Customer, current password, Google token, verified normalized email, role isolation, and stable Google `sub`. Linking is serialized and idempotent for the same Customer. A Google identity already owned by another Customer, a different email, another Google identity on the Customer, or a Driver/Admin identity returns `409 GOOGLE_ACCOUNT_CONFLICT`.
+
+```json
+{
+  "linked": true,
+  "alreadyLinked": false,
+  "provider": "google",
+  "user": {}
+}
+```
+
+The existing Customer session remains valid. The Customer can subsequently use either password or Google sign-in. No OAuth token or provider secret is persisted by this endpoint.
 
 ## Customer Onboarding
 
