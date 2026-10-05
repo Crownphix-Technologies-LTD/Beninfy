@@ -1120,26 +1120,44 @@ test('customer mobile onboarding exposes stable routing states', () => {
     nextStep: 'collect_phone',
     phoneRequired: true,
     emailVerified: false,
+    phoneVerified: false,
   })
   assert.deepEqual(toMobileOnboardingDto({ phone: '+22951019134', emailVerified: null }), {
     status: 'email_verification_required',
     nextStep: 'verify_email_otp',
     phoneRequired: false,
     emailVerified: false,
+    phoneVerified: false,
   })
   assert.deepEqual(toMobileOnboardingDto({ phone: '+22951019134', emailVerified: new Date() }), {
     status: 'complete',
     nextStep: 'customer_home',
     phoneRequired: false,
     emailVerified: true,
+    phoneVerified: false,
   })
+  assert.deepEqual(
+    toMobileOnboardingDto({
+      phone: '+22951019134',
+      emailVerified: null,
+      phoneVerified: new Date(),
+    }),
+    {
+      status: 'complete',
+      nextStep: 'customer_home',
+      phoneRequired: false,
+      emailVerified: false,
+      phoneVerified: true,
+    }
+  )
 })
 
 test('customer onboarding accepts supported Benin and Nigeria phone formats', () => {
   assert.equal(normalizeMobilePhone('+229 51 01 91 34'), '+22951019134')
   assert.equal(normalizeMobilePhone('08012345678'), '+2348012345678')
   assert.equal(normalizeMobilePhone('+234 801 234 5678'), '+2348012345678')
-  assert.equal(normalizeMobilePhone('+233201234567'), null)
+  assert.equal(normalizeMobilePhone('+233201234567'), '+233201234567')
+  assert.equal(normalizeMobilePhone('+228 90 12 34 56'), '+22890123456')
 })
 
 test('customer onboarding locale is explicit and conservative', () => {
@@ -1355,8 +1373,14 @@ test('tour itinerary template validation enforces ordering and coordinates', () 
 
   assert.equal(valid.ok, true)
   if (valid.ok) {
-    assert.deepEqual(valid.days.map((day) => day.dayNumber), [1, 2])
-    assert.deepEqual(valid.days[1].stops.map((stop) => stop.sortOrder), [1, 2])
+    assert.deepEqual(
+      valid.days.map((day) => day.dayNumber),
+      [1, 2]
+    )
+    assert.deepEqual(
+      valid.days[1].stops.map((stop) => stop.sortOrder),
+      [1, 2]
+    )
   }
 
   assert.equal(validTourCoordinate(6.1725, 1.2314), true)
@@ -1524,7 +1548,10 @@ test('tour execution foundation docs separate booking foundation from later exec
   assert.match(docs, /GET \/api\/admin\/tours\/:id\/itinerary/)
   assert.match(docs, /POST \/api\/mobile\/v1\/customer\/tours\/:tourId\/book/)
   assert.match(docs, /Tour payment initialization is supported/)
-  assert.match(docs, /Driver Tour execution, Customer live Tour tracking, and Tour journey intelligence are implemented/)
+  assert.match(
+    docs,
+    /Driver Tour execution, Customer live Tour tracking, and Tour journey intelligence are implemented/
+  )
 })
 
 test('mobile route discovery DTO is customer safe and stable', () => {
@@ -3794,7 +3821,10 @@ test('customer mobile Google auth is configured with backend-only mobile client 
       'ios-client.apps.googleusercontent.com',
       'extra-client.apps.googleusercontent.com',
     ])
-    assert.equal(config.clientIds.some((key) => key.startsWith('GOCSPX-')), false)
+    assert.equal(
+      config.clientIds.some((key) => key.startsWith('GOCSPX-')),
+      false
+    )
   } finally {
     process.env.GOOGLE_ANDROID_CLIENT_ID = oldAndroid
     process.env.GOOGLE_IOS_CLIENT_ID = oldIos
@@ -4164,7 +4194,14 @@ test('customer journey target follows trip lifecycle exactly', () => {
   assert.equal(journeyTargetForLegStatus('driver_arrived'), 'pickup')
   assert.equal(journeyTargetForLegStatus('passenger_onboard'), 'pickup')
   assert.equal(journeyTargetForLegStatus('in_progress'), 'destination')
-  for (const status of ['payment_pending', 'reserved', 'unassigned', 'assigned', 'completed', 'cancelled']) {
+  for (const status of [
+    'payment_pending',
+    'reserved',
+    'unassigned',
+    'assigned',
+    'completed',
+    'cancelled',
+  ]) {
     assert.equal(journeyTargetForLegStatus(status), null, status)
   }
 })
@@ -4738,10 +4775,16 @@ test('tour booking endpoints require customer ownership and do not expose provid
   assert.match(paymentSource, /initiateMobileTourBookingPayment/)
   assert.doesNotMatch(paymentSource, /disabled/i)
   assert.match(paymentSource, /getMobileTourBookingPayment\(\{\s*principal:\s*guard\.principal/)
-  assert.match(serviceSource, /where:\s*\{\s*id:\s*input\.tourBookingId,\s*userId:\s*input\.principal\.userId\s*\}/)
+  assert.match(
+    serviceSource,
+    /where:\s*\{\s*id:\s*input\.tourBookingId,\s*userId:\s*input\.principal\.userId\s*\}/
+  )
   assert.match(serviceSource, /idempotencyKey:\s*idempotency\.key/)
   assert.match(serviceSource, /pricingBasis:\s*'existing-idempotency-key'/)
-  assert.doesNotMatch(createSource + listSource + detailSource + paymentSource + serviceSource, /PAYSTACK_SECRET|PAYONUS|GOOGLE_/)
+  assert.doesNotMatch(
+    createSource + listSource + detailSource + paymentSource + serviceSource,
+    /PAYSTACK_SECRET|PAYONUS|GOOGLE_/
+  )
 })
 
 test('tour booking source snapshots itinerary and rejects unready catalogue tours', () => {
@@ -4880,7 +4923,12 @@ function tourExecutionDay(overrides: Partial<TourDayForDto> = {}): TourDayForDto
       travellers: 3,
       priceNGN: 300000,
       currencyCode: 'NGN',
-      user: { id: 'user1', name: 'Customer One', email: 'customer@example.com', phone: '+22951019134' },
+      user: {
+        id: 'user1',
+        name: 'Customer One',
+        email: 'customer@example.com',
+        phone: '+22951019134',
+      },
       days: [
         { id: 'day1', dayNumber: 1, status: 'assigned' },
         { id: 'day2', dayNumber: 2, status: 'upcoming' },
@@ -4950,10 +4998,7 @@ test('driver tour action and assignment endpoints are scoped and transactional',
     'utf8'
   )
   const serviceSource = readFileSync('src/lib/mobile/tourExecution.ts', 'utf8')
-  const adminSource = readFileSync(
-    'src/app/api/admin/tour-bookings/days/[dayId]/route.ts',
-    'utf8'
-  )
+  const adminSource = readFileSync('src/app/api/admin/tour-bookings/days/[dayId]/route.ts', 'utf8')
 
   assert.match(listSource, /requireMobilePrincipal\(req,\s*'DRIVER'\)/)
   assert.match(detailSource, /getDriverTourDay\(guard\.principal/)
@@ -5024,9 +5069,18 @@ test('tour payment ownership is explicit and isolated from ride payments', () =>
   assert.match(tourPayments, /accessCode/)
   assert.match(tourPayments, /payOnUsTourCheckoutConfig/)
   assert.equal(tourCouponsSupported(), true)
-  assert.equal(tourBookingPayable({ status: 'payment_pending', paymentStatus: 'pending', priceNGN: 1 }), true)
-  assert.equal(tourBookingPayable({ status: 'confirmed', paymentStatus: 'paid', priceNGN: 1 }), false)
-  assert.equal(tourPaymentState({ bookingStatus: 'payment_pending', paymentStatus: 'pending' }), 'pending')
+  assert.equal(
+    tourBookingPayable({ status: 'payment_pending', paymentStatus: 'pending', priceNGN: 1 }),
+    true
+  )
+  assert.equal(
+    tourBookingPayable({ status: 'confirmed', paymentStatus: 'paid', priceNGN: 1 }),
+    false
+  )
+  assert.equal(
+    tourPaymentState({ bookingStatus: 'payment_pending', paymentStatus: 'pending' }),
+    'pending'
+  )
   assert.equal(tourPaymentState({ bookingStatus: 'confirmed', paymentStatus: 'paid' }), 'paid')
 })
 
@@ -5109,7 +5163,10 @@ test('tour decline releases only the day for reassignment without cancelling boo
   assert.match(source, /assignedAt:\s*null/)
   assert.match(source, /acceptedAt:\s*null/)
   assert.match(source, /status:\s*'upcoming'/)
-  assert.doesNotMatch(source.match(/action === 'decline'[\s\S]*?\} else if/)?.[0] ?? '', /tourBooking\.update/)
+  assert.doesNotMatch(
+    source.match(/action === 'decline'[\s\S]*?\} else if/)?.[0] ?? '',
+    /tourBooking\.update/
+  )
   assert.match(docs, /does not cancel the Tour booking/)
   assert.match(docs, /day is ready for reassignment/)
 })
@@ -5122,7 +5179,10 @@ test('tour reassignment immediately revokes old driver detail action and locatio
   assert.match(execution, /assignedDriverId !== principal\.driverId/)
   assert.match(execution, /where:\s*\{\s*id:\s*day\.id,\s*assignedDriverId:\s*principal\.driverId/)
   assert.match(execution, /update\.count > 0/)
-  assert.match(execution, /if \(!result\) return \{ ok: false as const, code: 'TOUR_ACTION_NOT_ALLOWED'/)
+  assert.match(
+    execution,
+    /if \(!result\) return \{ ok: false as const, code: 'TOUR_ACTION_NOT_ALLOWED'/
+  )
   assert.match(tracking, /assignedDriverId:\s*principal\.driverId/)
   assert.match(tracking, /TOUR_DAY_NOT_ASSIGNED/)
   assert.match(docs, /Driver A loses detail\/action\/location access/)
@@ -5166,7 +5226,10 @@ test('tour cancellation and terminal states stop actions tracking and journey in
   )
   assert.match(booking, /status:\s*'cancelled'/)
   assert.match(booking, /paymentStatus:\s*booking\.paymentStatus/)
-  assert.match(execution, /day\.status === 'cancelled' \|\| day\.tourBooking\.status === 'cancelled'/)
+  assert.match(
+    execution,
+    /day\.status === 'cancelled' \|\| day\.tourBooking\.status === 'cancelled'/
+  )
   assert.match(tracking, /completed', 'cancelled/)
   assert.match(docs, /Paid cancellation and refunds require operations review/)
 })
@@ -5244,7 +5307,10 @@ test('tour journey target invalidates across pickup stop progression and day com
     ],
   })
 
-  assert.equal(tourJourneyTargetForDay(tourExecutionDay({ status: 'driver_en_route' }))?.type, 'pickup')
+  assert.equal(
+    tourJourneyTargetForDay(tourExecutionDay({ status: 'driver_en_route' }))?.type,
+    'pickup'
+  )
   assert.equal(tourJourneyTargetForDay(firstStopEnRoute)?.id, 'stop1')
   assert.equal(tourJourneyTargetForDay(secondStopEnRoute)?.id, 'stop2')
   assert.equal(tourJourneyTargetForDay(tourExecutionDay({ status: 'completed' })), null)
