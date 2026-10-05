@@ -9,6 +9,7 @@ export type MobileErrorCode =
   | 'ACCOUNT_REAUTH_REQUIRED'
   | 'GOOGLE_AUTH_UNAVAILABLE'
   | 'GOOGLE_AUTH_INVALID'
+  | 'GOOGLE_LINK_REQUIRED'
   | 'GOOGLE_ACCOUNT_CONFLICT'
   | 'DRIVER_NOT_LINKED'
   | 'DRIVER_INACTIVE'
@@ -171,6 +172,20 @@ export function mobileErrorFromCode(code: MobileErrorCode, message?: string) {
       return mobileError(code, message ?? 'Google sign-in is not configured', 503)
     case 'GOOGLE_AUTH_INVALID':
       return mobileError(code, message ?? 'Google sign-in token is invalid', 401)
+    case 'GOOGLE_LINK_REQUIRED':
+      return mobileError(
+        code,
+        message ?? 'Sign in to your existing customer account to link Google',
+        409,
+        {
+          linking: {
+            required: true,
+            method: 'authenticated_customer',
+            proof: 'current_password',
+            endpoint: '/api/mobile/v1/customer/auth-methods/google',
+          },
+        }
+      )
     case 'GOOGLE_ACCOUNT_CONFLICT':
       return mobileError(code, message ?? 'Google account cannot be linked to this customer', 409)
     case 'DRIVER_NOT_LINKED':
