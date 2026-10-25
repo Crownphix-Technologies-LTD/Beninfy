@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { Prisma } from '@prisma/client'
 import { ACTIVE_BLOCKING_LEG_STATUSES } from '@/lib/tripLifecycle'
 import { redeemTourCoupon, expireFailedTourCoupon } from '@/lib/mobile/tourCoupons'
+import { isPaymentSerializationConflict, retryPaymentSerialization } from '@/lib/paymentSerialization'
 
 function dayWindow(date: Date) {
   const startsAt = new Date(date)
@@ -22,7 +23,7 @@ export async function markPaymentPaidAndReserveBooking({
   paymentData: Prisma.PaymentUpdateInput
 }) {
   try {
-    const settlement = await prisma.$transaction(
+    const settlement = await retryPaymentSerialization(() => prisma.$transaction(
       async (tx) => {
         await tx.$queryRaw`SELECT "id" FROM "Booking" WHERE "id" = ${bookingId} FOR UPDATE`
         const payment = await tx.payment.findUnique({
@@ -184,37 +185,48 @@ export async function markPaymentPaidAndReserveBooking({
         }
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
-    )
+    ))
     if (settlement.ok) await notifyPaymentConfirmedPush(bookingId, paymentId).catch(() => null)
     return settlement
   } catch (error) {
     if (
       error instanceof Prisma.PrismaClientKnownRequestError &&
-      (error.code === 'P2002' || error.code === 'P2034')
+      (error.code === 'P2002' || isPaymentSerializationConflict(error))
     ) {
-      await prisma.$transaction([
-        prisma.payment.update({
+      // A concurrent settlement can win while retries are exhausted. Lock and
+      // re-read before recording the provider result; never downgrade its outcome.
+      const settlement = await prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT "id" FROM "Booking" WHERE "id" = ${bookingId} FOR UPDATE`
+        const booking = await tx.booking.findUniqueOrThrow({ where: { id: bookingId } })
+        const payment = await tx.payment.findUniqueOrThrow({ where: { id: paymentId } })
+        await tx.payment.update({
           where: { id: paymentId },
-          data: {
-            ...paymentData,
-            status: 'paid',
-          },
-        }),
-        prisma.booking.update({
+          data: { ...paymentData, status: 'paid' },
+        })
+        if (booking.status === 'confirmed' || booking.status === 'completed') {
+          return {
+            ok: true as const,
+            status: 'confirmed' as const,
+            alreadySettled: payment.status === 'paid',
+          }
+        }
+        await tx.booking.update({
           where: { id: bookingId },
           data: {
             status: 'ops_review',
             legs: { updateMany: { where: {}, data: { driverSearchStatus: 'idle' } } },
             paymentId,
           },
-        }),
-      ])
-      return {
-        ok: false as const,
-        status: 'availability_conflict' as const,
-        message:
-          'Fleet availability changed while confirming payment. Operations will review this booking.',
-      }
+        })
+        return {
+          ok: false as const,
+          status: 'availability_conflict' as const,
+          message:
+            'Fleet availability changed while confirming payment. Operations will review this booking.',
+        }
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted })
+      if (settlement.ok) await notifyPaymentConfirmedPush(bookingId, paymentId).catch(() => null)
+      return settlement
     }
     throw error
   }
