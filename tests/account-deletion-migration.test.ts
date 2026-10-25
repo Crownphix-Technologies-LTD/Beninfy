@@ -43,7 +43,7 @@ test('cleanup migration is additive, private and enforces durable outbox constra
       await assert.rejects(db.query(sql), (error: unknown) => (error as {code?: string}).code === code)
       await db.query('ROLLBACK TO SAVEPOINT invalid_change')
     }
-    await rejects(`DELETE FROM "User" WHERE id='fixture'`, '23503')
+    await rejects(`DELETE FROM "User" WHERE id='fixture'`, '23001')
     await rejects(`INSERT INTO "AccountDeletionCleanup" (id,"userId","avatarUrl","updatedAt") VALUES ('duplicate','fixture','synthetic-avatar',now())`, '23505')
     await rejects(`UPDATE "AccountDeletionCleanup" SET attempts=9`, '23514')
     await rejects(`UPDATE "AccountDeletionCleanup" SET status='discarded'`, '23514')
