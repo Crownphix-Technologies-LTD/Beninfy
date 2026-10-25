@@ -88,3 +88,22 @@ operations owner for overdue deletion. Management must name actual people, alert
 destination and coverage before enabling production scheduling. No alert service
 or responder acknowledgement has been verified. Restrict raw outbox access to
 authorized backend/operations roles; RLS grants no anon/authenticated access.
+
+## RC design verification (2026-10-25)
+
+Supabase's current Cron documentation supports intervals from seconds to a year
+and HTTP jobs; the proposed \*/5 * * * * interval is technically supported.
+[pg_net documentation](https://supabase.com/docs/guides/database/extensions/pg_net)
+confirms POST accepts JSON headers and an explicit timeout in milliseconds.
+Use 55000 rather than its 2000ms default. The response is asynchronous: record the
+request ID and correlate HTTP status/body, not only cron.job_run_details success.
+Protect access to cron commands, Vault decryption, pg_net request headers and
+response logs; only authorized operators should inspect these internals.
+
+Production access/owner approval is still required to verify the actual extension
+versions, existing jobs, exactly one nonempty matching Vault secret, backend role
+privileges and request/response monitoring. Do not print Vault values. Approve the
+job and named primary/backup responder with an alert destination and coverage,
+then separately authorize activation. No schedule is activated by this RC.
+The deletion cadence does not modify or share the existing payment cron job;
+vercel.json remains unchanged at 0 3 * * * for payment reconciliation.

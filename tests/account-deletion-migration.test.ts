@@ -26,6 +26,12 @@ test('cleanup migration is additive, private and enforces durable outbox constra
       (SELECT jsonb_agg(t) FROM "User" t) AS users,
       (SELECT jsonb_agg(t) FROM "Booking" t) AS bookings,
       (SELECT jsonb_agg(t) FROM "Payment" t) AS payments`)).rows
+    // Exercise the Supabase-role branch as well as the ordinary PostgreSQL
+    // migration chain. Fixture roles created here roll back with this transaction.
+    await db.query(`DO $$ BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='anon') THEN CREATE ROLE anon; END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='authenticated') THEN CREATE ROLE authenticated; END IF;
+    END $$`)
     const before = await snapshot()
     await db.query(readFileSync('prisma/migrations/20261025120000_account_deletion_cleanup/migration.sql', 'utf8'))
     assert.deepEqual(await snapshot(), before)
@@ -34,6 +40,12 @@ test('cleanup migration is additive, private and enforces durable outbox constra
       FROM pg_class WHERE oid = '"AccountDeletionCleanup"'::regclass`)).rows[0]
     assert.equal(metadata.relrowsecurity, true)
     assert.equal(metadata.private, true)
+    for (const role of ['anon', 'authenticated']) {
+      const privileges = (await db.query(`SELECT
+        has_table_privilege($1, '"AccountDeletionCleanup"', 'SELECT') AS read,
+        has_table_privilege($1, '"AccountDeletionCleanup"', 'INSERT,UPDATE,DELETE') AS write`, [role])).rows[0]
+      assert.deepEqual(privileges, {read: false, write: false})
+    }
     const indexes = (await db.query(`SELECT indexdef FROM pg_indexes WHERE schemaname = $1 AND tablename = 'AccountDeletionCleanup'`, [schema])).rows.map(r => r.indexdef).join('\n')
     assert.match(indexes, /UNIQUE.*\("userId"\)/)
     assert.match(indexes, /\(status, "nextAttemptAt"\)/)

@@ -77,7 +77,10 @@ These are draft operational proposals, not invented statutory rules. No retentio
 purge or legal-period promise was deployed. EN/FR avatar wording now describes
 durable retry, without promising immediate complete erasure.
 
-## Validation and remaining release gates
+## Validation and remaining release gates (pre-integration snapshot)
+
+For current integrated results, see [the RC evidence](./account-deletion-release-candidate.md).
+The results below preserve the original repair review before payment integration.
 
 - 27 focused deletion checks pass: original stale-selection regression, actual
   PostgreSQL contention in both restoration/worker orders, concurrent workers,
