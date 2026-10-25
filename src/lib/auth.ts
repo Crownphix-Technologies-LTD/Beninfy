@@ -7,6 +7,7 @@ import { z } from 'zod'
 import { prisma } from '@/lib/prisma'
 import { checkRateLimit, requestIp } from '@/lib/rateLimit'
 import { isAdminRole } from '@/lib/roles'
+import { accountAccessBlocked } from '@/lib/accountDeletion'
 
 const credentialsSchema = z.object({
   email: z.string().email(),
@@ -62,7 +63,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         const email = parsed.data.email.trim().toLowerCase()
         const { password } = parsed.data
         const user = await prisma.user.findUnique({ where: { email } })
-        if (!user || !user.hashedPassword) return null
+        if (!user || !user.hashedPassword || accountAccessBlocked(user)) return null
         const ok = await bcrypt.compare(password, user.hashedPassword)
         if (!ok) return null
         return { id: user.id, email: user.email, name: user.name, image: user.image, role: user.role }
@@ -85,8 +86,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       try {
         const existingUser = await prisma.user.findUnique({
           where: { email: googleEmail },
-          select: { role: true },
+          select: { role: true, disabledAt: true, deletionRequestedAt: true, anonymizedAt: true },
         })
+        if (existingUser && accountAccessBlocked(existingUser)) return false
         if (existingUser && isAdminRole(existingUser.role)) {
           return '/login?error=AdminGoogleBlocked'
         }
@@ -126,18 +128,19 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         const dbUser = tokenUserId
           ? await prisma.user.findUnique({
               where: { id: tokenUserId },
-              select: { id: true, role: true, sessionVersion: true },
+              select: { id: true, role: true, sessionVersion: true, disabledAt: true, deletionRequestedAt: true, anonymizedAt: true },
             })
           : tokenEmail
             ? await prisma.user.findUnique({
                 where: { email: tokenEmail },
-                select: { id: true, role: true, sessionVersion: true },
+                select: { id: true, role: true, sessionVersion: true, disabledAt: true, deletionRequestedAt: true, anonymizedAt: true },
               })
             : null
         const tokenVersion = typeof token.sessionVersion === 'number' ? token.sessionVersion : null
 
         if (
           !dbUser ||
+          accountAccessBlocked(dbUser) ||
           (!isFreshSignIn && tokenVersion !== dbUser.sessionVersion) ||
           (!isFreshSignIn && tokenExpiredForRole(token.iat, dbUser.role))
         ) {

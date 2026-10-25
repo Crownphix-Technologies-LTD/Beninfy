@@ -141,13 +141,31 @@ function publicStoragePathFromUrl(url: string, config: { url: string; bucket: st
   return path
 }
 
-export async function deleteStorageImageByPublicUrl(url: string | null | undefined) {
+export async function deleteStorageImageByPublicUrl(
+  url: string | null | undefined,
+  options: { signal?: AbortSignal; avatarUserId?: string } = {}
+) {
   if (!url) return { ok: true as const, skipped: true as const }
+  // Google-hosted profile images are not Beninfy-owned storage objects.
+  if (options.avatarUserId) {
+    try {
+      const external = new URL(url)
+      if (external.protocol === 'https:' && external.hostname.endsWith('.googleusercontent.com'))
+        return { ok: true as const, skipped: true as const }
+    } catch {
+      return { ok: false as const, error: 'invalid_avatar_target' }
+    }
+  }
   const config = getSupabaseStorageConfig()
   if ('error' in config) return { ok: false as const, error: config.error }
 
   const path = publicStoragePathFromUrl(url, config)
-  if (!path) return { ok: true as const, skipped: true as const }
+  if (options.avatarUserId) {
+    const safeId = options.avatarUserId.replace(/[^a-zA-Z0-9_-]/g, '-')
+    if (!path || !path.startsWith(`avatars/${safeId}/`) || path.split('/').length !== 3)
+      return { ok: false as const, error: 'avatar_target_mismatch' }
+  } else if (!path) return { ok: true as const, skipped: true as const }
+  if (!path) return { ok: false as const, error: 'avatar_target_mismatch' }
 
   const deleteUrl = `${config.url}/storage/v1/object/${encodeURIComponent(config.bucket)}/${path
     .split('/')
@@ -155,6 +173,7 @@ export async function deleteStorageImageByPublicUrl(url: string | null | undefin
     .join('/')}`
   const res = await fetch(deleteUrl, {
     method: 'DELETE',
+    signal: options.signal,
     headers: {
       apikey: config.key,
       Authorization: `Bearer ${config.key}`,

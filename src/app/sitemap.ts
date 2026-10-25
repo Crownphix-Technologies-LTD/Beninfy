@@ -12,6 +12,7 @@ const publicPages = [
   { path: 'about', priority: 0.72, changeFrequency: 'monthly' as const },
   { path: 'terms', priority: 0.42, changeFrequency: 'yearly' as const },
   { path: 'privacy', priority: 0.42, changeFrequency: 'yearly' as const },
+  { path: 'delete-account', priority: 0.42, changeFrequency: 'monthly' as const },
 ]
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {

@@ -113,6 +113,11 @@ export default function Footer() {
                 </Link>
               </li>
             ))}
+            <li>
+              <Link href={`/${locale}/delete-account`} className="block py-3 hover:text-primary transition-colors sm:py-0">
+                {locale === 'fr' ? 'Supprimer mon compte' : 'Delete my account'}
+              </Link>
+            </li>
           </ul>
         </div>
       </div>
