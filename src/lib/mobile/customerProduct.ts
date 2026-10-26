@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs'
 import type { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
+import { scheduleCustomerAccountDeletion } from '@/lib/accountDeletion'
 import { notifyMobileEmailOtp } from '@/lib/notifications'
 import { deleteStorageImageByPublicUrl, uploadAvatarImage } from '@/lib/supabaseStorage'
 import {
@@ -38,7 +39,6 @@ const OTP_TTL_MS = Number(process.env.MOBILE_EMAIL_OTP_TTL_MS ?? 10 * 60 * 1000)
 const OTP_RESEND_COOLDOWN_MS = Number(process.env.MOBILE_EMAIL_OTP_RESEND_COOLDOWN_MS ?? 60 * 1000)
 const OTP_MAX_ATTEMPTS = Number(process.env.MOBILE_EMAIL_OTP_MAX_ATTEMPTS ?? 5)
 const ACCOUNT_DELETE_CONFIRMATION = 'DELETE_MY_ACCOUNT'
-const ACCOUNT_DELETION_GRACE_DAYS = Number(process.env.ACCOUNT_DELETION_GRACE_DAYS ?? 30)
 const ACCOUNT_DELETION_RECENT_SESSION_SECONDS = Number(
   process.env.ACCOUNT_DELETION_RECENT_SESSION_SECONDS ?? 15 * 60
 )
@@ -540,124 +540,14 @@ export async function deleteCustomerAccount(input: {
     return { ok: false as const, code: 'ACCOUNT_REAUTH_REQUIRED' as MobileErrorCode }
   }
 
-  const now = new Date()
-  const scheduledAt = new Date(now.getTime() + ACCOUNT_DELETION_GRACE_DAYS * 24 * 60 * 60 * 1000)
-  await prisma.$transaction([
-    prisma.user.update({
-      where: { id: user.id },
-      data: {
-        disabledAt: now,
-        deletionRequestedAt: now,
-        scheduledDeletionAt: scheduledAt,
-        deletionCancelledAt: null,
-        sessionVersion: { increment: 1 },
-      },
-    }),
-    prisma.mobileSession.updateMany({
-      where: { userId: user.id, revokedAt: null },
-      data: { revokedAt: now },
-    }),
-    prisma.pushDevice.updateMany({
-      where: { userId: user.id, revokedAt: null },
-      data: { revokedAt: now, invalidatedAt: now },
-    }),
-  ])
-  return {
-    ok: true as const,
-    deletion: {
-      status: 'pending' as const,
-      requestedAt: now.toISOString(),
-      scheduledAt: scheduledAt.toISOString(),
-      anonymizedAt: null,
-    },
-  }
+  const deletion = await prisma.$transaction((tx) => scheduleCustomerAccountDeletion(tx, user.id, {
+    channel: 'mobile', verification: user.hashedPassword ? 'password' : 'recent_session',
+  }))
+  if (!deletion) return { ok: false as const, code: 'ACCOUNT_DELETION_PENDING' as MobileErrorCode }
+  return { ok: true as const, deletion }
 }
 
-export async function anonymizeDueCustomerAccounts(input: { now?: Date; take?: number } = {}) {
-  const now = input.now ?? new Date()
-  const take = Math.min(Math.max(input.take ?? 25, 1), 100)
-  const users = await prisma.user.findMany({
-    where: {
-      role: 'user',
-      deletionRequestedAt: { not: null },
-      scheduledDeletionAt: { lte: now },
-      anonymizedAt: null,
-    },
-    select: { id: true, image: true },
-    orderBy: { scheduledDeletionAt: 'asc' },
-    take,
-  })
-
-  const results = []
-  for (const user of users) {
-    const anonymizedEmail = `deleted+${user.id}@deleted.beninfy.local`
-    const updated = await prisma.$transaction(async (tx) => {
-      await tx.savedPlace.deleteMany({ where: { userId: user.id } })
-      await tx.customerTravelPreference.deleteMany({ where: { userId: user.id } })
-      await tx.tripReview.deleteMany({ where: { customerId: user.id } })
-      await tx.otpChallenge.deleteMany({ where: { userId: user.id } })
-      await tx.passwordResetToken.deleteMany({ where: { userId: user.id } })
-      await tx.account.deleteMany({ where: { userId: user.id } })
-      await tx.session.deleteMany({ where: { userId: user.id } })
-      await tx.mobileSession.updateMany({
-        where: { userId: user.id, revokedAt: null },
-        data: { revokedAt: now },
-      })
-      await tx.pushDevice.updateMany({
-        where: { userId: user.id },
-        data: { revokedAt: now, invalidatedAt: now },
-      })
-      return tx.user.updateMany({
-        where: {
-          id: user.id,
-          deletionRequestedAt: { not: null },
-          scheduledDeletionAt: { lte: now },
-          anonymizedAt: null,
-        },
-        data: {
-          name: 'Deleted Beninfy Customer',
-          email: anonymizedEmail,
-          emailVerified: null,
-          image: null,
-          phone: null,
-          hashedPassword: null,
-          locale: null,
-          anonymizedAt: now,
-          disabledAt: now,
-          sessionVersion: { increment: 1 },
-        },
-      })
-    })
-    const avatarCleanup = updated.count === 1 ? await deleteStorageImageByPublicUrl(user.image) : null
-    results.push({ userId: user.id, anonymized: updated.count === 1, avatarCleanup })
-  }
-
-  return {
-    processed: results.filter((result) => result.anonymized).length,
-    checked: users.length,
-    results,
-  }
-}
-
-export async function restorePendingCustomerDeletion(input: { userId: string }) {
-  const now = new Date()
-  const restored = await prisma.user.updateMany({
-    where: {
-      id: input.userId,
-      role: 'user',
-      deletionRequestedAt: { not: null },
-      anonymizedAt: null,
-    },
-    data: {
-      disabledAt: null,
-      deletionRequestedAt: null,
-      scheduledDeletionAt: null,
-      deletionCancelledAt: now,
-      sessionVersion: { increment: 1 },
-    },
-  })
-  return { ok: restored.count === 1, cancelledAt: now.toISOString() }
-}
+export { anonymizeDueCustomerAccounts, restorePendingCustomerDeletion } from '@/lib/accountDeletionWorker'
 
 export async function exportCustomerData(principal: MobilePrincipal) {
   const user = await prisma.user.findUnique({

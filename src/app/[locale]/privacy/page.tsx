@@ -3,6 +3,10 @@ import { setRequestLocale } from 'next-intl/server'
 import type { Metadata } from 'next'
 import type { ReactNode } from 'react'
 import { pageMetadata } from '@/lib/seo'
+import DeletionPolicy from '@/components/account-deletion/DeletionPolicy'
+import { accountDeletionGraceDays } from '@/lib/accountDeletion'
+
+export const dynamic = 'force-dynamic'
 
 export async function generateMetadata({ params }: { params: Promise<{ locale: string }> }): Promise<Metadata> {
   const { locale } = await params
@@ -84,11 +88,7 @@ export default async function PrivacyPage({ params }: { params: Promise<{ locale
             </PolicySection>
 
             <PolicySection title="6. Data Retention">
-              <p>
-                We keep booking, payment, and support records for as long as needed to provide the
-                service, meet accounting and legal obligations, resolve disputes, and improve
-                transport operations.
-              </p>
+              <DeletionPolicy locale={locale === 'fr' ? 'fr' : 'en'} graceDays={accountDeletionGraceDays()} />
             </PolicySection>
 
             <PolicySection title="7. Your Choices">
@@ -98,6 +98,9 @@ export default async function PrivacyPage({ params }: { params: Promise<{ locale
                 payment records may need to be retained for legal, accounting, or operational
                 reasons.
               </p>
+              <Link href={`/${locale}/delete-account`} className="mt-4 inline-flex min-h-12 items-center text-primary underline underline-offset-4">
+                {locale === 'fr' ? 'Demander la suppression de mon compte sans l’application' : 'Request account deletion without the app'}
+              </Link>
             </PolicySection>
 
             <PolicySection title="8. Contact">

@@ -4,6 +4,7 @@ import './globals.css'
 import { siteConfig } from '@/lib/config'
 import { absoluteUrl, seoImages } from '@/lib/seo'
 import PWAUpdater from '@/components/shared/PWAUpdater'
+import { getLocale } from 'next-intl/server'
 
 const inter = Inter({
   subsets: ['latin'],
@@ -66,9 +67,10 @@ export const metadata: Metadata = {
   },
 }
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const locale = await getLocale()
   return (
-    <html suppressHydrationWarning>
+    <html lang={locale} suppressHydrationWarning>
       <head>
         <meta name="theme-color" content="#3e004c" />
         <meta name="google-site-verification" content="eBSYR23muXIiOSfL8vm_MCM_kgEBF7VtseXK8zeGKhw" />

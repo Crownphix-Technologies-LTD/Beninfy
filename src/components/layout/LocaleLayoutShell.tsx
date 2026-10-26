@@ -16,6 +16,7 @@ export default function LocaleLayoutShell({ children }: { children: React.ReactN
   const { status } = useSession()
   const isAuthPage = AUTH_PAGES.some((p) => pathname.endsWith(p))
   const isAdmin = pathname.includes('/admin')
+  const isDeletionPage = pathname.endsWith('/delete-account')
   const showBottomNav = status === 'authenticated'
 
   if (isAuthPage) {
@@ -38,7 +39,7 @@ export default function LocaleLayoutShell({ children }: { children: React.ReactN
       </main>
       <Footer />
       <BottomNav />
-      <SupportBot />
+      {!isDeletionPage && <SupportBot />}
     </div>
   )
 }
