@@ -10,7 +10,8 @@
   ],
   "git": {
     "deploymentEnabled": {
-      "feature/mobile-production-completion": false
+      "feature/mobile-production-completion": false,
+      "release/account-deletion-production-20261026": false
     }
   }
 }
