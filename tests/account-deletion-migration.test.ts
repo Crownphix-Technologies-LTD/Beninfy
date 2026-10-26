@@ -12,6 +12,9 @@ test('cleanup migration is additive, private and enforces durable outbox constra
   const db = new Client({ connectionString: url })
   await db.connect()
   try {
+    const serverMajor = Math.floor(Number((await db.query('SHOW server_version_num')).rows[0].server_version_num) / 10000)
+    assert.ok(serverMajor === 17 || serverMajor === 18, 'Verify RESTRICT SQLSTATE for a new PostgreSQL major')
+    const restrictCode = serverMajor === 17 ? '23503' : '23001'
     await db.query('BEGIN')
     const schema = 'migration_' + randomUUID().replaceAll('-', '')
     await db.query(`CREATE SCHEMA "${schema}"`)
@@ -50,12 +53,20 @@ test('cleanup migration is additive, private and enforces durable outbox constra
     assert.match(indexes, /UNIQUE.*\("userId"\)/)
     assert.match(indexes, /\(status, "nextAttemptAt"\)/)
     await db.query(`INSERT INTO "AccountDeletionCleanup" (id,"userId","avatarUrl","updatedAt") VALUES ('job','fixture','synthetic-avatar',now())`)
-    async function rejects(sql: string, code: string) {
+    const foreignKey = (await db.query(`SELECT confdeltype, confupdtype FROM pg_constraint
+      WHERE conrelid = '"AccountDeletionCleanup"'::regclass AND conname = 'AccountDeletionCleanup_userId_fkey'`)).rows[0]
+    assert.deepEqual(foreignKey, { confdeltype: 'r', confupdtype: 'c' })
+    async function rejects(sql: string, code: string, constraint?: string) {
       await db.query('SAVEPOINT invalid_change')
-      await assert.rejects(db.query(sql), (error: unknown) => (error as {code?: string}).code === code)
+      await assert.rejects(db.query(sql), (error: unknown) => {
+        const pgError = error as { code?: string; constraint?: string }
+        return pgError.code === code && (!constraint || pgError.constraint === constraint)
+      })
       await db.query('ROLLBACK TO SAVEPOINT invalid_change')
     }
-    await rejects(`DELETE FROM "User" WHERE id='fixture'`, '23001')
+    // PostgreSQL 18 introduced a distinct RESTRICT SQLSTATE; PostgreSQL 17
+    // reports foreign_key_violation. Both must identify this exact FK.
+    await rejects(`DELETE FROM "User" WHERE id='fixture'`, restrictCode, 'AccountDeletionCleanup_userId_fkey')
     await rejects(`INSERT INTO "AccountDeletionCleanup" (id,"userId","avatarUrl","updatedAt") VALUES ('duplicate','fixture','synthetic-avatar',now())`, '23505')
     await rejects(`UPDATE "AccountDeletionCleanup" SET attempts=9`, '23514')
     await rejects(`UPDATE "AccountDeletionCleanup" SET status='discarded'`, '23514')
