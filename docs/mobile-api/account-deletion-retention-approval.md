@@ -1,8 +1,18 @@
-# Retention approval matrix — draft, 2026-10-25
+# Retention approval matrix — provisional operational policy, 2026-10-25
 
-**NOT APPROVED. No retention/purge rule in this document is deployed or enabled.**
-These are proposed operational limits, not statutory requirements. The existing
-system retains these records without fixed purge deadlines. Legal counsel must
+**PROVISIONALLY ADOPTED by management on 25 October 2026 for internal operational
+policy planning only. Legal/privacy and financial verification remain pending.
+No retention/purge rule in this document is deployed or enabled.**
+
+The nine source rows below are preserved verbatim, including their original
+proposal labels and qualifications. Their periods are now provisional operational
+targets, not verified statutory requirements, public guarantees or authority to
+activate purge rules. Financial-ledger duration remains **TBD by finance/legal**.
+See [management record](./account-deletion-management-approval.md),
+[implementation plan](./account-deletion-retention-implementation-plan.md) and
+[EN/FR review copy](./account-deletion-retention-disclosures-review.md).
+
+The existing system retains these records without fixed purge deadlines. Legal counsel must
 identify Beninfy's operating entity, applicable jurisdictions, tax/accounting,
 transport, claims and provider obligations before approving dates. A legal hold
 requires a recorded reason, owner, scope and review date; it is not a blanket
@@ -20,21 +30,26 @@ exception for all Customer data.
 | Revoked sessions/devices | Prevent reuse, limited security troubleshooting. Minimal revoked identifier/hash and expiry | MobileSession/PushDevice remain stored after revocation; inactive FCM tokens are not needed to send | Proposal: erase raw inactive FCM tokens at anonymization; purge revoked device metadata after 30 days; keep refresh-token revocation evidence until original expiry + 7 days, unless security approves a shorter equivalent | Security + privacy/legal; confirm session/notification FK impacts | Separate expiry/revocation cleanup, schema-compatible token redaction; do not reactivate revoked registrations |
 | Backups/external providers | Recovery and contracted processing; only necessary copies | Actual Supabase/SMTP/storage/payment-provider policies not verified | Proposal: backup recovery horizon no more than 35 days **if approved and supported by vendor plan**; provider deletion request within 7 days of processing and target completion within 30 days, with documented exceptions. Actual provider/ledger periods remain TBD | Infrastructure + vendor owners + legal | Vendor deletion requests, verified snapshot rotation, deletion replay before restoring service from a backup, completion evidence |
 
-The 30-day account-deletion grace is a separate existing eligibility rule. It does
-not approve any retained-data period above, nor imply a processing SLA. The public
+The **approved 30-day account-deletion grace** is a separate existing eligibility
+rule. Provisional adoption of retained-data targets does not change that grace
+or imply a processing SLA. The public
 page must continue describing actual behavior until approved rules are implemented
 and tested. Backup and provider promises require contract/plan verification first.
 
 Each approval must record: decision-maker, purpose/lawful basis, minimum fields,
 start event, maximum period, holds/review interval, purge method, responsible
-operator, monitoring and effective date. All nine rows currently require approval.
+operator, monitoring and effective date. All nine rows still require legal/privacy
+verification, applicable finance review and implementation/activation authorization.
 
 ## Final management decision register — release gate
 
-Every decision below is **PENDING**. Role labels are required approvers, not named
-people who have signed off. No draft duration above is authorized for implementation
-or publication. Management must record a named approver, dated decision and evidence
-for each row; legal conclusions require counsel's review.
+The statuses below are the **remaining release gates**, not a denial of management's
+provisional adoption. The nine targets are adopted for planning; legal conclusions,
+field-level rules and production activation are not approved. No source-code or
+database implementation is authorized by this documentation task. Management must
+record named approvers and evidence for final decisions. The lifecycle/grace is
+approved; public wording still requires review. Operational assignments are recorded
+below, while backup availability, alerts and schedule activation remain pending.
 
 | Decision | Required approval | Evidence needed before release | Status |
 | --- | --- | --- | --- |
@@ -48,8 +63,8 @@ for each row; legal conclusions require counsel's review.
 | Revoked devices/sessions | Security + legal/privacy | Token erasure and FK-safe cleanup design; revocation evidence needed through actual credential expiry | PENDING |
 | Backups and external providers | Infrastructure + vendor owners + legal | Actual Supabase/SMTP/storage/payment contracts and plans, backup lifetime, deletion/recovery procedures and processor confirmation | PENDING |
 | Legal holds | Legal + operations | Authorized hold owner, reason, fields, scope, review interval, release event and audited expiry | PENDING |
-| Public EN/FR disclosure and grace | Management + legal/privacy + product | Explicit approval of current 30-day eligibility rule, immediate access disablement, no self-service restoration, retained-data limitations and honest processing commitments | PENDING |
-| Operational accountability | Management + backend/infrastructure | Named responder and backup, alert destination/coverage, backlog escalation and approved five-minute schedule | PENDING |
+| Public EN/FR disclosure and grace | Management + legal/privacy + product | 30-day eligibility rule, immediate access disablement and privileged-only restoration before anonymization approved; verify retained-data limitations and honest processing commitments | LIFECYCLE APPROVED; PUBLIC COPY REVIEW PENDING |
+| Operational accountability | Management + backend/infrastructure | Primary Idowu James; backup CTO (officeholder/availability unconfirmed); alerts info@crownphix.tech; verify coverage, escalation and schedule | ASSIGNMENTS RECORDED; OPERATIONAL ACTIVATION PENDING |
 
 After approval: implement and test the selected purge/redaction rules, verify vendor
 capabilities and holds, then reconcile EN/FR policy wording against actual behavior.
