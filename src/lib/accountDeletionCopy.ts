@@ -45,7 +45,7 @@ export const accountDeletionCopy = {
     deletedTitle: 'Data removed or anonymized',
     deleted: [
       'Your profile name and email are replaced with a deleted-account identity; your phone number, password, language preference and profile-photo link are cleared.',
-      'Saved places, travel preferences, Ride reviews, verification codes, password-reset records, linked Google/OAuth credentials and website sessions are removed.',
+      'Saved places, saved travellers, travel preferences, Ride reviews, verification codes, password-reset records, linked Google/OAuth credentials and website sessions are removed.',
       'Removal of a Beninfy-stored profile photo is queued after profile processing. Failed storage removal is retried; unresolved failures require support follow-up. Deleting Beninfy does not delete your Google account.',
     ],
     retainedTitle: 'Data retained and retention periods',
@@ -108,7 +108,7 @@ export const accountDeletionCopy = {
     deletedTitle: 'Données supprimées ou anonymisées',
     deleted: [
       'Le nom et l’e-mail du profil sont remplacés par une identité de compte supprimé ; le téléphone, le mot de passe, la langue et le lien vers la photo de profil sont effacés.',
-      'Les lieux enregistrés, préférences de voyage, avis sur les trajets, codes de vérification, réinitialisations de mot de passe, identifiants Google/OAuth liés et sessions web sont supprimés.',
+      'Les lieux enregistrés, voyageurs enregistrés, préférences de voyage, avis sur les trajets, codes de vérification, réinitialisations de mot de passe, identifiants Google/OAuth liés et sessions web sont supprimés.',
       'La suppression de la photo stockée par Beninfy est mise en attente après le traitement du profil. Les échecs sont réessayés ; les échecs non résolus nécessitent un suivi par l’assistance. Votre compte Google n’est pas supprimé.',
     ],
     retainedTitle: 'Données conservées et durées de conservation',

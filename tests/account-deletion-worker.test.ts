@@ -84,6 +84,20 @@ test(
           name: 'Synthetic worker fixture',
           email: `${prefix}-${ids.length}@example.test`,
           phone: '+10000000000',
+          phoneVerified: now,
+          savedTravellers: { create: { fullName: 'Synthetic traveller', phone: '+10000000001' } },
+          customerAuthOtpChallenges: {
+            create: {
+              id: randomUUID(),
+              channel: 'email',
+              identityEmail: `${prefix}-${ids.length}@example.test`,
+              targetNormalized: `${prefix}-${ids.length}@example.test`,
+              targetMasked: 'fixture',
+              codeHash: 'fixture-only',
+              expiresAt: new Date(now.getTime() + 600000),
+              resendAvailableAt: now,
+            },
+          },
           disabledAt: now,
           deletionRequestedAt: new Date(now.getTime() - 30 * 86400000),
           scheduledDeletionAt: new Date(now.getTime() + offset),
@@ -116,6 +130,17 @@ test(
           const deleted = await prisma.user.findUniqueOrThrow({ where: { id: due.id } })
           assert.ok(deleted.anonymizedAt)
           assert.equal(deleted.phone, null)
+          assert.equal(deleted.phoneVerified, null)
+          assert.equal(await prisma.savedTraveller.count({ where: { userId: due.id } }), 0)
+          assert.equal(
+            await prisma.customerAuthOtpChallenge.count({ where: { userId: due.id } }),
+            0
+          )
+          assert.equal(await prisma.savedTraveller.count({ where: { userId: future.id } }), 1)
+          assert.equal(
+            await prisma.customerAuthOtpChallenge.count({ where: { userId: future.id } }),
+            1
+          )
           assert.equal(deleted.email, `deleted+${due.id}@deleted.beninfy.local`)
           assert.equal(await prisma.savedPlace.count({ where: { userId: due.id } }), 0)
           assert.equal(await prisma.savedPlace.count({ where: { userId: future.id } }), 1)
@@ -142,6 +167,11 @@ test(
           assert.equal(restored.deletionRequestedAt, null)
           assert.ok(restored.deletionCancelledAt)
           assert.equal(await prisma.savedPlace.count({ where: { userId: user.id } }), 1)
+          assert.equal(await prisma.savedTraveller.count({ where: { userId: user.id } }), 1)
+          assert.equal(
+            await prisma.customerAuthOtpChallenge.count({ where: { userId: user.id } }),
+            1
+          )
           assert.equal(
             await prisma.mobileSession.count({ where: { userId: user.id, revokedAt: null } }),
             0
@@ -167,6 +197,11 @@ test(
               null
             )
             assert.equal(await prisma.savedPlace.count({ where: { userId: user.id } }), 1)
+            assert.equal(await prisma.savedTraveller.count({ where: { userId: user.id } }), 1)
+            assert.equal(
+              await prisma.customerAuthOtpChallenge.count({ where: { userId: user.id } }),
+              1
+            )
           } finally {
             prisma.$transaction = transaction
           }
@@ -272,6 +307,11 @@ test(
           assert.equal((await restore).ok, true)
           assert.equal((await work).processed, 0)
           assert.equal(await prisma.savedPlace.count({ where: { userId: user.id } }), 1)
+          assert.equal(await prisma.savedTraveller.count({ where: { userId: user.id } }), 1)
+          assert.equal(
+            await prisma.customerAuthOtpChallenge.count({ where: { userId: user.id } }),
+            1
+          )
           assert.equal(await prisma.accountDeletionCleanup.count({ where: { userId: user.id } }), 0)
           assert.equal(
             await prisma.auditLog.count({
@@ -318,6 +358,11 @@ test(
           } as typeof prisma
           assert.equal((await anonymizeDueCustomerAccounts({ now }, db)).failed, 1)
           assert.equal(await prisma.savedPlace.count({ where: { userId: user.id } }), 1)
+          assert.equal(await prisma.savedTraveller.count({ where: { userId: user.id } }), 1)
+          assert.equal(
+            await prisma.customerAuthOtpChallenge.count({ where: { userId: user.id } }),
+            1
+          )
           assert.equal(
             (await prisma.user.findUniqueOrThrow({ where: { id: user.id } })).anonymizedAt,
             null

@@ -39,9 +39,11 @@ export async function anonymizeDueCustomerAccounts(
           const user = await tx.user.findFirst({ where: { id: candidate.id, ...dueUsers(now) } })
           if (!user) return false
           await tx.savedPlace.deleteMany({ where: { userId: user.id } })
+          await tx.savedTraveller.deleteMany({ where: { userId: user.id } })
           await tx.customerTravelPreference.deleteMany({ where: { userId: user.id } })
           await tx.tripReview.deleteMany({ where: { customerId: user.id } })
           await tx.otpChallenge.deleteMany({ where: { userId: user.id } })
+          await tx.customerAuthOtpChallenge.deleteMany({ where: { userId: user.id } })
           await tx.passwordResetToken.deleteMany({ where: { userId: user.id } })
           await tx.account.deleteMany({ where: { userId: user.id } })
           await tx.session.deleteMany({ where: { userId: user.id } })
@@ -64,6 +66,7 @@ export async function anonymizeDueCustomerAccounts(
               name: 'Deleted Beninfy Customer',
               email: `deleted+${user.id}@deleted.beninfy.local`,
               emailVerified: null,
+              phoneVerified: null,
               image: null,
               phone: null,
               hashedPassword: null,
