@@ -1,3 +1,4 @@
+import { buildAccountVerificationEmail } from '@/lib/account-verification-email'
 import { isEmailConfigured, sendEmail } from '@/lib/email'
 import {
   notifyAssignmentPush,
@@ -404,22 +405,9 @@ export async function notifyMobileEmailOtp(input: {
   expiresAt: Date
   locale?: 'en' | 'fr'
 }) {
-  const intro =
-    input.locale === 'fr'
-      ? 'Utilisez ce code pour confirmer votre adresse email Beninfy et terminer la configuration de votre compte mobile.'
-      : 'Use this code to confirm your Beninfy email address and complete your mobile account setup.'
-  const title = input.locale === 'fr' ? 'Confirmez votre email' : 'Confirm Your Email'
-  const items: Array<[string, unknown]> = [
-    ['Verification code', input.code],
-    ['Expires', formatDate(input.expiresAt)],
-    ['Account email', input.email],
-  ]
-
   await safeSendEmail({
     to: input.email,
-    subject: input.locale === 'fr' ? 'Votre code Beninfy' : 'Your Beninfy verification code',
-    html: accountEmailShell(title, intro, items),
-    text: textFromPairs(title, intro, items),
+    ...buildAccountVerificationEmail(input),
   })
 }
 
