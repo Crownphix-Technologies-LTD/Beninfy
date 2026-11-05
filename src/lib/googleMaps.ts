@@ -9,12 +9,23 @@ export type GooglePlaceResult = {
   formatted_address?: string
   name?: string
   place_id?: string
+  address_components?: Array<{
+    long_name: string
+    short_name: string
+    types: string[]
+  }>
   geometry?: {
     location?: {
       lat: () => number
       lng: () => number
     }
   }
+}
+
+export type GooglePlaceLocation = {
+  city: string | null
+  country: string | null
+  countryCode: string | null
 }
 
 export type MapsAutocomplete = {
@@ -91,6 +102,21 @@ export function getPlaceCoordinates(place: GooglePlaceResult): LatLngLiteral | n
   return {
     lat: location.lat(),
     lng: location.lng(),
+  }
+}
+
+export function getPlaceLocation(place: GooglePlaceResult): GooglePlaceLocation {
+  const components = place.address_components ?? []
+  const city = components.find((component) =>
+    component.types.some((type) =>
+      ['locality', 'postal_town', 'administrative_area_level_2', 'administrative_area_level_1'].includes(type)
+    )
+  )
+  const country = components.find((component) => component.types.includes('country'))
+  return {
+    city: city?.long_name ?? null,
+    country: country?.long_name ?? null,
+    countryCode: country?.short_name?.toUpperCase() ?? null,
   }
 }
 

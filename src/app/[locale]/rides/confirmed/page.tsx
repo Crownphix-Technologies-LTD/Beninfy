@@ -4,6 +4,7 @@ import { getPublicVehicles } from '@/lib/vehicleCatalog'
 import { calculateBookingPricing } from '@/lib/bookingPricing'
 import { findPublicRouteByCities } from '@/lib/routeCatalog'
 import ConfirmationHeader from '@/components/booking/ConfirmationHeader'
+import PrintReceiptButton from '@/components/booking/PrintReceiptButton'
 import PulseStatus from '@/components/shared/PulseStatus'
 import { getTranslations, setRequestLocale } from 'next-intl/server'
 import { auth } from '@/lib/auth'
@@ -236,14 +237,7 @@ export default async function BookingConfirmedPage({ params, searchParams }: Pro
                 <span className="material-symbols-outlined text-[20px]">dashboard</span>
                 {t('goDashboard')}
               </Link>
-              <button
-                onClick={() => window.print()}
-                className="w-full md:w-auto px-8 py-4 rounded-xl text-sm font-semibold border-2 hover:opacity-80 transition-all flex items-center justify-center gap-2"
-                style={{ color: '#735c00', borderColor: '#735c00' }}
-              >
-                <span className="material-symbols-outlined text-[20px]">download</span>
-                {t('downloadReceipt')}
-              </button>
+              <PrintReceiptButton label={t('downloadReceipt')} />
               <a
                 href={`https://wa.me/2348000000000?text=My+Beninfy+booking+reference+is+%23${bookingRef}.+I+need+assistance.`}
                 target="_blank"

@@ -126,9 +126,15 @@ function PaymentContent() {
   const pickupAddress = params.get('pickupAddress') ?? ''
   const pickupLatitude = Number(params.get('pickupLatitude'))
   const pickupLongitude = Number(params.get('pickupLongitude'))
+  const pickupCity = params.get('pickupCity')
+  const pickupCountry = params.get('pickupCountry')
+  const pickupCountryCode = params.get('pickupCountryCode')
   const dropoffAddress = params.get('dropoffAddress') ?? ''
   const dropoffLatitude = Number(params.get('dropoffLatitude'))
   const dropoffLongitude = Number(params.get('dropoffLongitude'))
+  const destinationCity = params.get('destinationCity')
+  const destinationCountry = params.get('destinationCountry')
+  const destinationCountryCode = params.get('destinationCountryCode')
   const specialRequirements = params.get('specialRequirements') ?? ''
   const pickupAreaParam = params.get('pickupArea')
   const pickupArea = (pickupAreaParam === 'mainland' || pickupAreaParam === 'island' ? pickupAreaParam : undefined) as LagosPickupArea | undefined
@@ -228,9 +234,15 @@ function PaymentContent() {
           pickupAddress,
           pickupLatitude: Number.isFinite(pickupLatitude) ? pickupLatitude : undefined,
           pickupLongitude: Number.isFinite(pickupLongitude) ? pickupLongitude : undefined,
+          pickupCity,
+          pickupCountry,
+          pickupCountryCode,
           dropoffAddress,
           dropoffLatitude: Number.isFinite(dropoffLatitude) ? dropoffLatitude : undefined,
           dropoffLongitude: Number.isFinite(dropoffLongitude) ? dropoffLongitude : undefined,
+          destinationCity,
+          destinationCountry,
+          destinationCountryCode,
           specialRequirements,
           pickupArea,
           couponCode: couponCode.trim() || undefined,
@@ -367,8 +379,14 @@ function PaymentContent() {
             nationality,
             ...(Number.isFinite(pickupLatitude) ? { pickupLatitude: String(pickupLatitude) } : {}),
             ...(Number.isFinite(pickupLongitude) ? { pickupLongitude: String(pickupLongitude) } : {}),
+            ...(pickupCity ? { pickupCity } : {}),
+            ...(pickupCountry ? { pickupCountry } : {}),
+            ...(pickupCountryCode ? { pickupCountryCode } : {}),
             ...(Number.isFinite(dropoffLatitude) ? { dropoffLatitude: String(dropoffLatitude) } : {}),
             ...(Number.isFinite(dropoffLongitude) ? { dropoffLongitude: String(dropoffLongitude) } : {}),
+            ...(destinationCity ? { destinationCity } : {}),
+            ...(destinationCountry ? { destinationCountry } : {}),
+            ...(destinationCountryCode ? { destinationCountryCode } : {}),
             ...(travelersParam ? { travelers: travelersParam } : {}),
             pickupAddress,
             dropoffAddress,

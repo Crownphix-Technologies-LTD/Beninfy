@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   CalendarDays,
@@ -161,6 +161,7 @@ export default function TourBookingExperience({
   const [quote, setQuote] = useState<Quote | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const draftHydrated = useRef(false)
 
   const selectedTours = useMemo(
     () => tours.filter((tour) => tourIds.includes(tour.id)),
@@ -181,7 +182,10 @@ export default function TourBookingExperience({
 
   useEffect(() => {
     const saved = sessionStorage.getItem('beninfy-tour-draft')
-    if (!saved) return
+    if (!saved) {
+      draftHydrated.current = true
+      return
+    }
     try {
       const draft = JSON.parse(saved) as Partial<{
         tourIds: string[]
@@ -202,14 +206,17 @@ export default function TourBookingExperience({
         if (draft.startDate) setStartDate(draft.startDate)
         if (draft.travellers) setTravellers(draft.travellers)
         if (draft.pickup) setPickup(draft.pickup)
+        draftHydrated.current = true
       }, 0)
       return () => window.clearTimeout(restore)
     } catch {
       sessionStorage.removeItem('beninfy-tour-draft')
+      draftHydrated.current = true
     }
   }, [])
 
   useEffect(() => {
+    if (!draftHydrated.current) return
     sessionStorage.setItem(
       'beninfy-tour-draft',
       JSON.stringify({

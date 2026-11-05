@@ -73,7 +73,7 @@ export default function AddressAutocomplete({
 
         const autocomplete = new Autocomplete(inputRef.current, {
           componentRestrictions: { country: ['ng', 'bj', 'tg', 'gh'] },
-          fields: ['formatted_address', 'geometry.location', 'name', 'place_id'],
+          fields: ['formatted_address', 'geometry.location', 'name', 'place_id', 'address_components'],
         })
 
         listener = autocomplete.addListener('place_changed', () => {

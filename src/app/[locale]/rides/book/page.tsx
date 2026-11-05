@@ -1,6 +1,6 @@
 'use client'
 
-import { Suspense, useState } from 'react'
+import { Suspense, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useLocale, useTranslations } from 'next-intl'
@@ -17,7 +17,13 @@ import JourneyTracker from '@/components/booking/JourneyTracker'
 import RouteMapSVG from '@/components/shared/RouteMapSVG'
 import CountUp from 'react-countup'
 import { getFleetVehicleDisplayLabel } from '@/lib/fleetDisplay'
-import { getPlaceCoordinates, type LatLngLiteral, type GooglePlaceResult } from '@/lib/googleMaps'
+import {
+  getPlaceCoordinates,
+  getPlaceLocation,
+  type GooglePlaceLocation,
+  type LatLngLiteral,
+  type GooglePlaceResult,
+} from '@/lib/googleMaps'
 import type { VehicleId, RouteId } from '@/types'
 
 type TravelerDetails = {
@@ -83,6 +89,13 @@ function parsePositiveInt(value: string | null, fallback = 1) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback
 }
 
+function parseCoordinates(latitude: string | null, longitude: string | null): LatLngLiteral | null {
+  if (!latitude?.trim() || !longitude?.trim()) return null
+  const lat = Number(latitude)
+  const lng = Number(longitude)
+  return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null
+}
+
 function parseInitialTravelers(value: string | null, passengerCount: number): TravelerDetails[] {
   if (!value) return Array.from({ length: Math.max(0, passengerCount - 1) }, emptyTraveler)
   try {
@@ -145,8 +158,22 @@ function PassengerDetailsContent() {
   const [pickupArea, setPickupArea] = useState<LagosPickupArea | ''>(
     initialPickupArea === 'mainland' || initialPickupArea === 'island' ? initialPickupArea : ''
   )
-  const [pickupCoordinates, setPickupCoordinates] = useState<LatLngLiteral | null>(null)
-  const [dropoffCoordinates, setDropoffCoordinates] = useState<LatLngLiteral | null>(null)
+  const [pickupCoordinates, setPickupCoordinates] = useState<LatLngLiteral | null>(() =>
+    parseCoordinates(params.get('pickupLatitude'), params.get('pickupLongitude'))
+  )
+  const [dropoffCoordinates, setDropoffCoordinates] = useState<LatLngLiteral | null>(() =>
+    parseCoordinates(params.get('dropoffLatitude'), params.get('dropoffLongitude'))
+  )
+  const pickupLocation = useRef<GooglePlaceLocation>({
+    city: params.get('pickupCity'),
+    country: params.get('pickupCountry'),
+    countryCode: params.get('pickupCountryCode'),
+  })
+  const dropoffLocation = useRef<GooglePlaceLocation>({
+    city: params.get('destinationCity'),
+    country: params.get('destinationCountry'),
+    countryCode: params.get('destinationCountryCode'),
+  })
   const [pickupAreaError, setPickupAreaError] = useState(false)
 
   const needsPickupArea = matchedRoute
@@ -175,11 +202,13 @@ function PassengerDetailsContent() {
   const updatePickupAddress = (value: string) => {
     updateFormField('pickupAddress', value)
     setPickupCoordinates(null)
+    pickupLocation.current = { city: null, country: null, countryCode: null }
   }
 
   const updateDropoffAddress = (value: string) => {
     updateFormField('dropoffAddress', value)
     setDropoffCoordinates(null)
+    dropoffLocation.current = { city: null, country: null, countryCode: null }
   }
 
   const updatePassengerCount = (nextCount: number) => {
@@ -204,6 +233,7 @@ function PassengerDetailsContent() {
 
   const handlePickupPlaceSelected = (address: string, place: GooglePlaceResult) => {
     setPickupCoordinates(getPlaceCoordinates(place))
+    pickupLocation.current = getPlaceLocation(place)
     if (needsPickupArea) {
       const inferred = inferLagosPickupArea(address)
       if (inferred) {
@@ -215,6 +245,7 @@ function PassengerDetailsContent() {
 
   const handleDropoffPlaceSelected = (_address: string, place: GooglePlaceResult) => {
     setDropoffCoordinates(getPlaceCoordinates(place))
+    dropoffLocation.current = getPlaceLocation(place)
   }
 
   const validate = () => {
@@ -225,7 +256,11 @@ function PassengerDetailsContent() {
     if (!form.passportId.trim()) e.passportId = 'Required for border crossing'
     if (!form.nationality.trim()) e.nationality = 'Nationality is required'
     if (!form.pickupAddress.trim()) e.pickupAddress = 'Pickup address is required'
+    else if (!pickupCoordinates)
+      e.pickupAddress = 'Select a pickup address from the search suggestions'
     if (!form.dropoffAddress.trim()) e.dropoffAddress = 'Drop-off address is required'
+    else if (!dropoffCoordinates)
+      e.dropoffAddress = 'Select a drop-off address from the search suggestions'
     const extraErrors = travelers.map((traveler) => {
       const travelerError: Partial<TravelerDetails> = {}
       if (!traveler.fullName.trim()) travelerError.fullName = 'Full name is required'
@@ -278,12 +313,24 @@ function PassengerDetailsContent() {
             pickupLongitude: String(pickupCoordinates.lng),
           }
         : {}),
+      ...(pickupLocation.current.city ? { pickupCity: pickupLocation.current.city } : {}),
+      ...(pickupLocation.current.country ? { pickupCountry: pickupLocation.current.country } : {}),
+      ...(pickupLocation.current.countryCode
+        ? { pickupCountryCode: pickupLocation.current.countryCode }
+        : {}),
       dropoffAddress: form.dropoffAddress,
       ...(dropoffCoordinates
         ? {
             dropoffLatitude: String(dropoffCoordinates.lat),
             dropoffLongitude: String(dropoffCoordinates.lng),
           }
+        : {}),
+      ...(dropoffLocation.current.city ? { destinationCity: dropoffLocation.current.city } : {}),
+      ...(dropoffLocation.current.country
+        ? { destinationCountry: dropoffLocation.current.country }
+        : {}),
+      ...(dropoffLocation.current.countryCode
+        ? { destinationCountryCode: dropoffLocation.current.countryCode }
         : {}),
       specialRequirements: form.specialRequirements,
     })
@@ -566,8 +613,8 @@ function PassengerDetailsContent() {
                         iconColor="#3e004c"
                         helperText={
                           needsPickupArea
-                            ? 'Google suggestions can help identify Mainland or Island pickup, but you can still choose the fare zone below.'
-                            : 'Search a hotel, landmark, terminal, office, or full street address.'
+                            ? 'Select a search suggestion so the correct Lagos service area and fare zone can be verified.'
+                            : 'Select a hotel, landmark, terminal, office, or street address from the search suggestions.'
                         }
                       />
                       {errors.pickupAddress && (
@@ -596,7 +643,7 @@ function PassengerDetailsContent() {
                         inputClassName={errors.dropoffAddress ? INPUT_ERR : INPUT_OK}
                         icon="location_on"
                         iconColor="#735c00"
-                        helperText="Use the final address if known, or the closest hotel, landmark, airport, or meeting point."
+                        helperText="Select the final address, hotel, landmark, airport, or meeting point from the search suggestions."
                       />
                       {errors.dropoffAddress && (
                         <p className="mt-2 text-xs text-red-500">{errors.dropoffAddress}</p>

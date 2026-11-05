@@ -53,3 +53,12 @@ test('web Tour payments preserve the mobile callback default and supply a web ca
   )
   assert.match(route, /app: 'customer-web'/)
 })
+
+test('web Tour draft restoration completes before persistence can overwrite the saved draft', () => {
+  const experience = readFileSync('src/components/tours/TourBookingExperience.tsx', 'utf8')
+
+  assert.match(experience, /const draftHydrated = useRef\(false\)/)
+  assert.match(experience, /draftHydrated\.current = true/)
+  assert.match(experience, /if \(!draftHydrated\.current\) return\s*sessionStorage\.setItem/)
+  assert.match(experience, /const restore = window\.setTimeout/)
+})

@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
-import { z } from 'zod'
 import { requireAdminPermission } from '@/lib/admin'
 import { refreshStalePayments } from '@/lib/paymentMaintenance'
 import { prisma } from '@/lib/prisma'
@@ -103,12 +102,6 @@ export async function GET(req: Request) {
   return NextResponse.json({ bookings })
 }
 
-const patchSchema = z.object({
-  status: z.enum(['pending', 'confirmed', 'cancelled', 'completed']),
-})
-
 export async function PATCH() {
   return NextResponse.json({ error: 'Use /api/admin/bookings/[id]' }, { status: 405 })
 }
-
-export { patchSchema }
