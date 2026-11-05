@@ -13,6 +13,23 @@ function dayWindow(date: Date) {
   return { startsAt, endsAt }
 }
 
+async function redeemRideCoupon(
+  tx: Prisma.TransactionClient,
+  booking: { id: string; couponId: string | null; couponRedeemedAt: Date | null },
+  paymentAlreadyPaid: boolean
+) {
+  if (!booking.couponId || booking.couponRedeemedAt || paymentAlreadyPaid) return
+  await tx.$queryRaw`SELECT "id" FROM "Coupon" WHERE "id" = ${booking.couponId} FOR UPDATE`
+  await tx.coupon.update({
+    where: { id: booking.couponId },
+    data: { redeemedCount: { increment: 1 } },
+  })
+  await tx.booking.update({
+    where: { id: booking.id },
+    data: { couponRedeemedAt: new Date() },
+  })
+}
+
 export async function markPaymentPaidAndReserveBooking({
   paymentId,
   bookingId,
@@ -59,18 +76,7 @@ export async function markPaymentPaidAndReserveBooking({
           throw new Error('Booking not found during payment settlement')
         }
 
-        const redeemCoupon = async () => {
-          if (!booking.couponId || booking.couponRedeemedAt || payment.status === 'paid') return
-          await tx.$queryRaw`SELECT "id" FROM "Coupon" WHERE "id" = ${booking.couponId} FOR UPDATE`
-          await tx.coupon.update({
-            where: { id: booking.couponId },
-            data: { redeemedCount: { increment: 1 } },
-          })
-          await tx.booking.update({
-            where: { id: bookingId },
-            data: { couponRedeemedAt: new Date() },
-          })
-        }
+        const redeemCoupon = () => redeemRideCoupon(tx, booking, payment.status === 'paid')
 
         // A provider settlement received after an explicit checkout cancellation
         // remains authoritative. Keep released inventory released and move the paid
@@ -220,6 +226,7 @@ export async function markPaymentPaidAndReserveBooking({
         await tx.$queryRaw`SELECT "id" FROM "Booking" WHERE "id" = ${bookingId} FOR UPDATE`
         const booking = await tx.booking.findUniqueOrThrow({ where: { id: bookingId } })
         const payment = await tx.payment.findUniqueOrThrow({ where: { id: paymentId } })
+        await redeemRideCoupon(tx, booking, payment.status === 'paid')
         await tx.payment.update({
           where: { id: paymentId },
           data: { ...paymentData, status: 'paid' },

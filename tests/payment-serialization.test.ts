@@ -86,6 +86,14 @@ test(
     await prisma.vehicle.create({
       data: { id: prefix, name: 'Synthetic payment fixture', capacity: 4 },
     })
+    const coupon = await prisma.coupon.create({
+      data: {
+        code: `RACE-${randomUUID()}`,
+        applicability: 'ride',
+        discountType: 'fixed',
+        amountNGN: 1000,
+      },
+    })
     const bookingIds: string[] = []
     const sql = new Client({ connectionString: url })
     await sql.connect()
@@ -223,12 +231,94 @@ test(
             state === 'confirmed' || state === 'completed' ? state : 'ops_review')
         })
       }
+      await t.test('retry-exhaustion recovery redeems a Ride coupon exactly once', async () => {
+        const booking = await prisma.booking.create({
+          data: {
+            userId: customer.id,
+            vehicleId: prefix,
+            from: 'Fixture A',
+            to: 'Fixture B',
+            date: new Date('2099-01-01'),
+            passengers: 1,
+            priceNGN: 9000,
+            discountNGN: 1000,
+            couponId: coupon.id,
+            couponCode: coupon.code,
+            status: 'pending',
+            legs: {
+              create: {
+                direction: 'outbound',
+                vehicleId: prefix,
+                from: 'Fixture A',
+                to: 'Fixture B',
+                departureDate: new Date('2099-01-01'),
+                status: 'payment_pending',
+              },
+            },
+          },
+        })
+        bookingIds.push(booking.id)
+        const payment = await prisma.payment.create({
+          data: {
+            bookingId: booking.id,
+            reference: randomUUID(),
+            amountNGN: booking.priceNGN,
+            status: 'pending',
+          },
+        })
+        const transaction = prisma.$transaction
+        let attempts = 0
+        prisma.$transaction = ((...args: Parameters<typeof prisma.$transaction>) => {
+          if (args[1]?.isolationLevel === Prisma.TransactionIsolationLevel.Serializable) {
+            attempts++
+            return Promise.reject(error('P2010', '40001'))
+          }
+          return transaction.apply(prisma, args)
+        }) as typeof prisma.$transaction
+        try {
+          const result = await markPaymentPaidAndReserveBooking({
+            paymentId: payment.id,
+            bookingId: booking.id,
+            paymentData: { paidAt: new Date() },
+          })
+          assert.equal(result.ok, false)
+        } finally {
+          prisma.$transaction = transaction
+        }
+        assert.equal(attempts, 3)
+        assert.equal(
+          (await prisma.payment.findUniqueOrThrow({ where: { id: payment.id } })).status,
+          'paid'
+        )
+        assert.ok(
+          (await prisma.booking.findUniqueOrThrow({ where: { id: booking.id } }))
+            .couponRedeemedAt
+        )
+        assert.equal(
+          (await prisma.coupon.findUniqueOrThrow({ where: { id: coupon.id } })).redeemedCount,
+          1
+        )
+        await Promise.all(
+          [1, 2].map(() =>
+            markPaymentPaidAndReserveBooking({
+              paymentId: payment.id,
+              bookingId: booking.id,
+              paymentData: { paidAt: new Date() },
+            })
+          )
+        )
+        assert.equal(
+          (await prisma.coupon.findUniqueOrThrow({ where: { id: coupon.id } })).redeemedCount,
+          1
+        )
+      })
     } finally {
       await sql.end()
       await observer.end()
       await prisma.payment.deleteMany({ where: { bookingId: { in: bookingIds } } })
       await prisma.booking.deleteMany({ where: { id: { in: bookingIds } } })
       await prisma.notification.deleteMany({ where: { userId: customer.id } })
+      await prisma.coupon.delete({ where: { id: coupon.id } })
       await prisma.user.delete({ where: { id: customer.id } })
       await prisma.vehicle.delete({ where: { id: prefix } })
       await prisma.$disconnect()
