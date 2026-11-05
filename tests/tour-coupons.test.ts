@@ -118,3 +118,14 @@ test('coupon eligibility checks dates, spend, active state, held global capacity
     false
   )
 })
+
+test('a prospective guest may preview a per-customer Ride coupon before authoritative booking revalidation', async () => {
+  const result = await validateCouponCode(
+    'SAVE',
+    100000,
+    client({ applicability: 'ride', maxPerCustomer: 1 }),
+    { product: 'ride', allowProspectiveCustomer: true }
+  )
+  assert.equal(result.ok, true)
+  if (result.ok) assert.equal(result.finalAmountNGN, 90000)
+})

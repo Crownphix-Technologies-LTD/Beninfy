@@ -2775,6 +2775,7 @@ test('mobile coupon quote keeps Cotonou Lagos pricing authoritative', async () =
 test('coupon validation normalizes integer-like money values before discount arithmetic', async () => {
   const client = {
     tourCouponUse: { count: async () => 0 },
+    booking: { count: async () => 0 },
     coupon: {
       findUnique: async () => ({
         id: 'coupon',

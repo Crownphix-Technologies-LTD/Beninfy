@@ -288,6 +288,7 @@ model Booking {
   discountNGN         Int                 @default(0)
   couponId            String?
   couponCode          String?
+  couponRedeemedAt    DateTime?
   coupon              Coupon?             @relation(fields: [couponId], references: [id], onDelete: SetNull)
   status              String              @default("pending")
   paymentId           String?

@@ -37,9 +37,7 @@ async function installGooglePlacesFixture(context: BrowserContext) {
           }
         };
         window.__selectBeninfyPlace = (index, address, name, latitude, longitude, city, country, countryCode) => {
-          const visibleInstances = instances.filter((candidate) =>
-            candidate.input.isConnected && candidate.input.offsetParent !== null
-          );
+          const visibleInstances = instances.filter((candidate) => candidate.input.isConnected);
           const instance = visibleInstances[index];
           if (!instance) throw new Error('Missing autocomplete fixture ' + index);
           instance.place = {
@@ -163,6 +161,22 @@ test(
         },
       })
     }
+    await prisma.borderFee.upsert({
+      where: { id: 'browser-nigeria-benin' },
+      update: { feePerPersonNGN: 5000, feeRoundTripNGN: 10000 },
+      create: {
+        id: 'browser-nigeria-benin',
+        country: 'Nigeria - Benin',
+        border: 'Seme - Krake',
+        countries: ['Nigeria', 'Benin'],
+        feePerPersonNGN: 5000,
+        feeRoundTripNGN: 10000,
+      },
+    })
+    await prisma.route.update({
+      where: { id: 'lagos-cotonou' },
+      data: { borderFeeIds: ['browser-nigeria-benin'] },
+    })
     await prisma.tour.update({ where: { id: 'cotonou-city-tour' }, data: { active: true } })
     const itineraryDay = await prisma.tourItineraryDay.upsert({
       where: { tourId_dayNumber: { tourId: 'cotonou-city-tour', dayNumber: 1 } },
@@ -189,6 +203,14 @@ test(
         address: 'Boulevard de la Marina, Cotonou, Benin',
         latitude: 6.3539,
         longitude: 2.4018,
+      },
+    })
+    const coupon = await prisma.coupon.create({
+      data: {
+        code: `BROWSER-${randomUUID()}`.toUpperCase(),
+        applicability: 'both',
+        discountType: 'fixed',
+        amountNGN: 10000,
       },
     })
 
@@ -241,6 +263,16 @@ test(
         assert.equal(restoredPaymentUrl.searchParams.get('destinationCity'), 'Cotonou')
         assert.equal(restoredPaymentUrl.searchParams.get('destinationCountryCode'), 'BJ')
 
+        await page.getByPlaceholder('Enter code').fill(coupon.code)
+        const couponResponse = page.waitForResponse(
+          (response) =>
+            response.url().endsWith('/api/coupons/validate') &&
+            response.request().method() === 'POST'
+        )
+        await page.getByRole('button', { name: 'Apply' }).click()
+        assert.equal((await couponResponse).status(), 200)
+        await page.getByText(`${coupon.code} applied`).waitFor()
+
         await page.route('**/api/payments/initiate', async (route) => {
           const body = route.request().postDataJSON() as { bookingId?: string }
           assert.ok(body.bookingId)
@@ -264,6 +296,11 @@ test(
         await page.getByRole('button', { name: /Pay Securely/ }).click()
         const createdBooking = await bookingResponse
         assert.equal(createdBooking.status(), 201, await createdBooking.text())
+        const bookingPayload = (await createdBooking.json()) as {
+          booking: { couponCode: string | null; discountNGN: number; priceNGN: number }
+        }
+        assert.equal(bookingPayload.booking.couponCode, coupon.code)
+        assert.equal(bookingPayload.booking.discountNGN, 10000)
         assert.equal((await paymentResponse).status(), 200)
         await page.waitForURL('**/en/rides/confirmed?**')
         await page.getByRole('heading', { name: 'Booking Confirmed!' }).waitFor()
@@ -330,6 +367,18 @@ test(
         await page.getByRole('button', { name: 'Confirm booking' }).click()
         assert.ok([200, 201].includes((await createResponse).status()))
         await page.waitForURL('**/en/tours/bookings/**')
+
+        const tourCouponInput = page.locator('aside input').first()
+        await tourCouponInput.fill(coupon.code)
+        const tourCouponResponse = page.waitForResponse(
+          (response) =>
+            response.url().includes('/api/tour-bookings/') &&
+            response.url().endsWith('/coupon') &&
+            response.request().method() === 'POST'
+        )
+        await page.locator('aside').getByRole('button', { name: 'Apply' }).click()
+        assert.equal((await tourCouponResponse).status(), 200)
+        await page.getByText('Discount').waitFor()
 
         let paymentInitialized = false
         await page.route('**/api/tour-bookings/*/payment', async (route) => {

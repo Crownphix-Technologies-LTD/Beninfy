@@ -28,7 +28,12 @@ export async function validateCouponCode(
   rawCode: string,
   amountNGN: number,
   client: PrismaClientLike = prisma,
-  context: { product?: 'ride' | 'tour'; userId?: string; excludeTourBookingId?: string } = {}
+  context: {
+    product?: 'ride' | 'tour'
+    userId?: string
+    excludeTourBookingId?: string
+    allowProspectiveCustomer?: boolean
+  } = {}
 ): Promise<CouponValidationResult> {
   const code = normalizeCouponCode(rawCode)
   if (!code) return { ok: false, error: 'Enter a coupon code' }
@@ -64,14 +69,37 @@ export async function validateCouponCode(
       : {}),
     OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
   }
-  const held = maxRedemptions ? await client.tourCouponUse.count({ where: heldWhere }) : 0
+  const tourHolds = maxRedemptions ? await client.tourCouponUse.count({ where: heldWhere }) : 0
+  const rideHolds = maxRedemptions
+    ? await client.booking.count({
+        where: {
+          couponId: coupon.id,
+          couponRedeemedAt: null,
+          status: { not: 'cancelled' },
+        },
+      })
+    : 0
+  const held = tourHolds + rideHolds
   if (maxRedemptions && redeemedCount + held >= maxRedemptions) {
     return { ok: false, error: 'Coupon code has reached its usage limit' }
   }
   if (coupon.maxPerCustomer) {
-    if (!context.userId) return { ok: false, error: 'Sign in to check customer coupon eligibility' }
+    if (!context.userId && !context.allowProspectiveCustomer)
+      return { ok: false, error: 'Sign in to check customer coupon eligibility' }
+    if (!context.userId) {
+      // Booking creation resolves the Customer and repeats this eligibility check
+      // authoritatively inside its serializable transaction.
+      return couponDiscount(coupon, eligibleAmountNGN)
+    }
     const rides = await client.booking.count({
-      where: { couponId: coupon.id, userId: context.userId },
+      where: {
+        couponId: coupon.id,
+        userId: context.userId,
+        OR: [
+          { status: { not: 'cancelled' } },
+          { couponRedeemedAt: { not: null } },
+        ],
+      },
     })
     const tours = await client.tourCouponUse.count({
       where: {
@@ -87,6 +115,21 @@ export async function validateCouponCode(
       return { ok: false, error: 'Customer coupon usage limit reached' }
   }
 
+  return couponDiscount(coupon, eligibleAmountNGN)
+}
+
+function couponDiscount(
+  coupon: {
+    id: string
+    code: string
+    description: string | null
+    discountType: string
+    amountNGN: number | null
+    percent: number | null
+    maxDiscountNGN: number | null
+  },
+  eligibleAmountNGN: number
+): CouponValidationResult {
   const percent = normalizeIntegerMoney(coupon.percent) ?? 0
   const fixedAmountNGN = normalizeIntegerMoney(coupon.amountNGN) ?? 0
   const rawDiscount =

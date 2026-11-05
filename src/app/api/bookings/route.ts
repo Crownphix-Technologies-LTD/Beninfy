@@ -325,13 +325,6 @@ export async function POST(req: Request) {
         const discountNGN = appliedCoupon?.discountNGN ?? 0
         const priceNGN = Math.max(0, subtotalNGN - discountNGN)
 
-        if (appliedCoupon) {
-          await tx.coupon.update({
-            where: { id: appliedCoupon.coupon.id },
-            data: { redeemedCount: { increment: 1 } },
-          })
-        }
-
         return tx.booking.create({
           data: {
             userId: bookingUser.id,

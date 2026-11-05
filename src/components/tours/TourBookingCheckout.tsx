@@ -145,7 +145,7 @@ export default function TourBookingCheckout({
       searchParams.get('providerReference') || searchParams.get('transactionReference')
     const settle = async () => {
       if (reference || providerReference) {
-        await fetch(`/api/tour-bookings/${bookingId}/payment/verify`, {
+        const verifyResponse = await fetch(`/api/tour-bookings/${bookingId}/payment/verify`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -153,6 +153,8 @@ export default function TourBookingCheckout({
             providerReference: providerReference || undefined,
           }),
         })
+        const verifyPayload = await verifyResponse.json().catch(() => null)
+        if (!verifyResponse.ok) throw new Error(apiError(verifyPayload))
       }
       await load()
     }
@@ -215,16 +217,30 @@ export default function TourBookingCheckout({
       window.OnUsCheckout.checkout({
         ...payment.checkoutConfig,
         onSuccess: async (result) => {
-          await fetch(`/api/tour-bookings/${bookingId}/payment/verify`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              reference: payment.paymentReference,
-              providerReference: result.onusReference || result.reference,
-            }),
-          })
-          await load()
-          setAction(null)
+          try {
+            const verifyResponse = await fetch(
+              `/api/tour-bookings/${bookingId}/payment/verify`,
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  reference: payment.paymentReference,
+                  providerReference: result.onusReference || result.reference,
+                }),
+              }
+            )
+            const verifyPayload = await verifyResponse.json().catch(() => null)
+            if (!verifyResponse.ok) throw new Error(apiError(verifyPayload))
+            await load()
+          } catch (verifyError) {
+            setError(
+              verifyError instanceof Error
+                ? verifyError.message
+                : 'Payment verification is pending.'
+            )
+          } finally {
+            setAction(null)
+          }
         },
         onError: (checkoutError) => {
           setError(checkoutError.error || 'Payment could not be completed.')

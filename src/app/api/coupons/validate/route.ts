@@ -2,10 +2,12 @@ import { NextResponse } from 'next/server'
 import { z } from 'zod'
 import { validateCouponCode } from '@/lib/coupons'
 import { checkRateLimit, requestIp } from '@/lib/rateLimit'
+import { prisma } from '@/lib/prisma'
 
 const schema = z.object({
   code: z.string().trim().min(1).max(60),
   amountNGN: z.number().int().nonnegative(),
+  customerEmail: z.string().trim().email().optional(),
 })
 
 export async function POST(req: Request) {
@@ -28,7 +30,17 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Invalid input', issues: parsed.error.flatten() }, { status: 400 })
   }
 
-  const result = await validateCouponCode(parsed.data.code, parsed.data.amountNGN)
+  const customer = parsed.data.customerEmail
+    ? await prisma.user.findUnique({
+        where: { email: parsed.data.customerEmail.toLowerCase() },
+        select: { id: true },
+      })
+    : null
+  const result = await validateCouponCode(parsed.data.code, parsed.data.amountNGN, prisma, {
+    product: 'ride',
+    userId: customer?.id,
+    allowProspectiveCustomer: Boolean(parsed.data.customerEmail && !customer),
+  })
   if (!result.ok) return NextResponse.json({ error: result.error }, { status: 400 })
 
   return NextResponse.json({ coupon: result.coupon, discountNGN: result.discountNGN, finalAmountNGN: result.finalAmountNGN })

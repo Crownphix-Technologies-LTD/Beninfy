@@ -186,7 +186,11 @@ function PaymentContent() {
       const res = await fetch('/api/coupons/validate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: couponCode, amountNGN: total }),
+        body: JSON.stringify({
+          code: couponCode,
+          amountNGN: total,
+          customerEmail: passengerEmail || undefined,
+        }),
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(data.error ?? 'Coupon could not be applied')
@@ -257,7 +261,23 @@ function PaymentContent() {
         const data = await bookingRes.json().catch(() => ({}))
         throw new Error(data.error ?? 'Could not create booking')
       }
-      const { booking } = (await bookingRes.json()) as { booking: { id: string } }
+      const { booking } = (await bookingRes.json()) as {
+        booking: {
+          id: string
+          priceNGN: number
+          discountNGN: number
+          couponCode: string | null
+        }
+      }
+      if (
+        booking.priceNGN !== finalTotal ||
+        booking.discountNGN !== discountNGN ||
+        (activeCoupon && booking.couponCode !== activeCoupon.code)
+      ) {
+        throw new Error(
+          `Your authoritative booking total is ${formatNGN(booking.priceNGN)}, which differs from the reviewed total. No payment was started. Please return to booking and review the latest fare.`
+        )
+      }
 
       const payRes = await fetch('/api/payments/initiate', {
         method: 'POST',

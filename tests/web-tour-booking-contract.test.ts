@@ -54,6 +54,12 @@ test('web Tour payments preserve the mobile callback default and supply a web ca
   assert.match(route, /app: 'customer-web'/)
 })
 
+test('web Tour checkout surfaces callback and PayOnUs verification failures', () => {
+  const checkout = readFileSync('src/components/tours/TourBookingCheckout.tsx', 'utf8')
+  assert.match(checkout, /if \(!verifyResponse\.ok\) throw new Error\(apiError\(verifyPayload\)\)/)
+  assert.match(checkout, /Payment verification is pending\./)
+})
+
 test('web Tour draft restoration completes before persistence can overwrite the saved draft', () => {
   const experience = readFileSync('src/components/tours/TourBookingExperience.tsx', 'utf8')
 

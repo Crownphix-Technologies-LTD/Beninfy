@@ -40,6 +40,8 @@ export async function markPaymentPaidAndReserveBooking({
             id: true,
             status: true,
             paymentId: true,
+            couponId: true,
+            couponRedeemedAt: true,
             legs: {
               where: { status: 'payment_pending' },
               select: {
@@ -57,10 +59,24 @@ export async function markPaymentPaidAndReserveBooking({
           throw new Error('Booking not found during payment settlement')
         }
 
+        const redeemCoupon = async () => {
+          if (!booking.couponId || booking.couponRedeemedAt || payment.status === 'paid') return
+          await tx.$queryRaw`SELECT "id" FROM "Coupon" WHERE "id" = ${booking.couponId} FOR UPDATE`
+          await tx.coupon.update({
+            where: { id: booking.couponId },
+            data: { redeemedCount: { increment: 1 } },
+          })
+          await tx.booking.update({
+            where: { id: bookingId },
+            data: { couponRedeemedAt: new Date() },
+          })
+        }
+
         // A provider settlement received after an explicit checkout cancellation
         // remains authoritative. Keep released inventory released and move the paid
         // booking to operations review rather than leaving a paid booking cancelled.
         if (booking.status === 'cancelled') {
+          await redeemCoupon()
           await tx.payment.update({
             where: { id: paymentId },
             data: { ...paymentData, status: 'paid' },
@@ -77,6 +93,7 @@ export async function markPaymentPaidAndReserveBooking({
         }
 
         if (booking.status === 'ops_review') {
+          await redeemCoupon()
           await tx.payment.update({
             where: { id: paymentId },
             data: {
@@ -95,6 +112,7 @@ export async function markPaymentPaidAndReserveBooking({
           booking.legs.length === 0 &&
           (booking.status === 'confirmed' || booking.status === 'completed')
         ) {
+          await redeemCoupon()
           await tx.payment.update({
             where: { id: paymentId },
             data: {
@@ -133,6 +151,7 @@ export async function markPaymentPaidAndReserveBooking({
           })
 
           if (conflictingLeg || blocked) {
+            await redeemCoupon()
             await tx.payment.update({
               where: { id: paymentId },
               data: {
@@ -157,6 +176,7 @@ export async function markPaymentPaidAndReserveBooking({
           }
         }
 
+        await redeemCoupon()
         await tx.payment.update({
           where: { id: paymentId },
           data: {
@@ -186,7 +206,8 @@ export async function markPaymentPaidAndReserveBooking({
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
     ))
-    if (settlement.ok) await notifyPaymentConfirmedPush(bookingId, paymentId).catch(() => null)
+    if (settlement.ok && !settlement.alreadySettled)
+      await notifyPaymentConfirmedPush(bookingId, paymentId).catch(() => null)
     return settlement
   } catch (error) {
     if (
@@ -225,7 +246,8 @@ export async function markPaymentPaidAndReserveBooking({
             'Fleet availability changed while confirming payment. Operations will review this booking.',
         }
       }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted })
-      if (settlement.ok) await notifyPaymentConfirmedPush(bookingId, paymentId).catch(() => null)
+      if (settlement.ok && !settlement.alreadySettled)
+        await notifyPaymentConfirmedPush(bookingId, paymentId).catch(() => null)
       return settlement
     }
     throw error
