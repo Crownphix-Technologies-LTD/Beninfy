@@ -22,6 +22,7 @@ import { normalizeCouponCode, validateCouponCode, lockCouponCodes } from '@/lib/
 import { notifyAutoAccountCreated, notifyBookingCreatedPending } from '@/lib/notifications'
 import { refreshStalePayments } from '@/lib/paymentMaintenance'
 import { checkRateLimit, requestIp } from '@/lib/rateLimit'
+import { rideCouponBookingFrozen } from '@/lib/releaseControls'
 
 const createSchema = z.object({
   from: z.string().min(1),
@@ -104,6 +105,15 @@ export async function POST(req: Request) {
     )
   }
   const data = parsed.data
+  if (data.couponCode?.trim() && rideCouponBookingFrozen()) {
+    return NextResponse.json(
+      {
+        error: 'Coupon bookings are temporarily paused. Remove the coupon or try again shortly.',
+        code: 'COUPON_BOOKING_MAINTENANCE',
+      },
+      { status: 503, headers: { 'Retry-After': '300' } }
+    )
+  }
   const leadPassengerEmail = (data.passengerEmail || session?.user?.email || '')
     .trim()
     .toLowerCase()
