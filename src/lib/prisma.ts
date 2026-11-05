@@ -1,14 +1,28 @@
 import { PrismaClient } from '@prisma/client'
 import { PrismaPg } from '@prisma/adapter-pg'
+import { Pool } from 'pg'
+import { databasePoolConfig } from '@/lib/databasePool'
 
-const globalForPrisma = globalThis as unknown as { prisma: PrismaClient | undefined }
-
-function createPrisma() {
-  const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL })
-  return new PrismaClient({ adapter })
+const globalForPrisma = globalThis as unknown as {
+  prisma: PrismaClient | undefined
+  prismaPool: Pool | undefined
 }
 
-export const prisma = globalForPrisma.prisma ?? createPrisma()
+function createPrisma() {
+  const pool = new Pool(databasePoolConfig())
+  pool.on('error', (error: NodeJS.ErrnoException) => {
+    console.error('PostgreSQL pool error', { code: error.code ?? 'UNKNOWN' })
+  })
+  const adapter = new PrismaPg(pool)
+  return { client: new PrismaClient({ adapter }), pool }
+}
 
-if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma
+const instance = globalForPrisma.prisma
+  ? { client: globalForPrisma.prisma, pool: globalForPrisma.prismaPool }
+  : createPrisma()
+
+export const prisma = instance.client
+
+globalForPrisma.prisma = prisma
+globalForPrisma.prismaPool = instance.pool
 
