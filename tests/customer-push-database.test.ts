@@ -483,12 +483,26 @@ test(
               ok: false,
               classification: 'configuration',
               errorCode: 'missing',
+              diagnostic: {
+                stage: 'fcm_response',
+                httpStatus: 403,
+                providerErrorCode: 'SENDER_ID_MISMATCH',
+                correlationId: 'fixture-request-1',
+              },
             }),
           })
           assert.equal(
             (await prisma.notification.findUniqueOrThrow({ where: { id: item.id } })).deliveryState,
             'blocked'
           )
+          const diagnostic = logs.find(
+            (entry) =>
+              entry.includes('push.provider_failure') && entry.includes(item.id)
+          )
+          assert.ok(diagnostic)
+          assert.match(diagnostic, /fcm_response/)
+          assert.match(diagnostic, /SENDER_ID_MISMATCH/)
+          assert.match(diagnostic, /fixture-request-1/)
           await prisma.notificationDelivery.updateMany({
             where: { notificationId: item.id },
             data: { nextAttemptAt: new Date(0) },

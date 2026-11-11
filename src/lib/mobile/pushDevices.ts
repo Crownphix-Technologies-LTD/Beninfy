@@ -49,6 +49,11 @@ export function pushLog(
     status?: string
     category?: string
     count?: number
+    attemptedAt?: string
+    failureStage?: string
+    httpStatus?: number
+    providerErrorCode?: string
+    correlationId?: string
   }
 ) {
   console.info('push.' + event, fields)
