@@ -174,6 +174,7 @@ test('FCM HTTP v1 uses server OAuth and Android/APNs payloads; provider errors a
     ok: false,
     classification: 'transient',
     errorCode: 'FCM_TRANSPORT_FAILED',
+    diagnostic: { stage: 'network', providerErrorCode: 'NETWORK_ERROR' },
   })
 })
 

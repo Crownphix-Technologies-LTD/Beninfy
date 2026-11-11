@@ -63,17 +63,92 @@ type ProviderSendInput = {
   data: Record<string, string>
 }
 
+export type ProviderFailureDiagnostic = {
+  stage: 'configuration' | 'oauth' | 'fcm_http' | 'fcm_response' | 'network'
+  httpStatus?: number
+  providerErrorCode?: string
+  correlationId?: string
+}
+
 type ProviderSendResult =
   | { ok: true; providerMessageId?: string }
   | {
       ok: false
       classification: 'transient' | 'invalid_token' | 'configuration'
       errorCode: string
+      diagnostic?: ProviderFailureDiagnostic
     }
 
 export type PushNotificationProvider = {
   name: string
   send(input: ProviderSendInput): Promise<ProviderSendResult>
+}
+
+const SAFE_DIAGNOSTIC_STAGES = new Set<ProviderFailureDiagnostic['stage']>([
+  'configuration',
+  'oauth',
+  'fcm_http',
+  'fcm_response',
+  'network',
+])
+const SAFE_DIAGNOSTIC_CODES = new Set([
+  'FCM_NOT_CONFIGURED',
+  'FCM_RESPONSE_INVALID',
+  'INVALID_ARGUMENT',
+  'UNREGISTERED',
+  'SENDER_ID_MISMATCH',
+  'THIRD_PARTY_AUTH_ERROR',
+  'QUOTA_EXCEEDED',
+  'UNAVAILABLE',
+  'INTERNAL',
+  'invalid_client',
+  'invalid_grant',
+  'unauthorized_client',
+  'access_denied',
+  'temporarily_unavailable',
+  'OAUTH_ERROR',
+  'NETWORK_TIMEOUT',
+  'NETWORK_ERROR',
+  'UNKNOWN',
+])
+
+export function logProviderFailureDiagnostic(input: {
+  notificationId: string
+  attemptedAt: Date
+  classification: 'transient' | 'invalid_token' | 'configuration'
+  diagnostic?: ProviderFailureDiagnostic
+}) {
+  if (!input.diagnostic) return
+  try {
+    const stage = SAFE_DIAGNOSTIC_STAGES.has(input.diagnostic.stage)
+      ? input.diagnostic.stage
+      : 'network'
+    const httpStatus =
+      Number.isInteger(input.diagnostic.httpStatus) &&
+      Number(input.diagnostic.httpStatus) >= 100 &&
+      Number(input.diagnostic.httpStatus) <= 599
+        ? input.diagnostic.httpStatus
+        : undefined
+    const providerErrorCode = SAFE_DIAGNOSTIC_CODES.has(
+      input.diagnostic.providerErrorCode ?? ''
+    )
+      ? input.diagnostic.providerErrorCode
+      : 'UNKNOWN'
+    const correlationId = /^[A-Za-z0-9._:-]{1,128}$/.test(input.diagnostic.correlationId ?? '')
+      ? input.diagnostic.correlationId
+      : undefined
+    pushLog('provider_failure', {
+      notificationId: input.notificationId,
+      attemptedAt: input.attemptedAt.toISOString(),
+      failureStage: stage,
+      httpStatus,
+      providerErrorCode,
+      correlationId,
+      category: input.classification,
+    })
+  } catch {
+    // Diagnostics must never interrupt durable notification processing.
+  }
 }
 
 const MAX_RETRY_ATTEMPTS = 3
@@ -736,6 +811,7 @@ export async function deliverNotification(
             type: notification.type,
           })
           let result: ProviderSendResult
+          const attemptedAt = new Date()
           try {
             result = await provider.send({
               token: device.token,
@@ -746,6 +822,13 @@ export async function deliverNotification(
           } catch {
             result = { ok: false, classification: 'transient', errorCode: 'PUSH_SEND_FAILED' }
           }
+          if (!result.ok)
+            logProviderFailureDiagnostic({
+              notificationId,
+              attemptedAt,
+              classification: result.classification,
+              diagnostic: result.diagnostic,
+            })
           const now = new Date()
           const status = result.ok
             ? 'sent'
