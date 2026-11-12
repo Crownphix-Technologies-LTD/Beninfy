@@ -70,46 +70,40 @@ async function selectPlace(
   country = address.includes('Nigeria') ? 'Nigeria' : 'Benin',
   countryCode = address.includes('Nigeria') ? 'NG' : 'BJ'
 ) {
-  await page.waitForFunction((expected) => {
-    const fixtureWindow = window as typeof window & { __selectBeninfyPlace?: unknown }
-    return expected >= 0 && typeof fixtureWindow.__selectBeninfyPlace === 'function'
-  }, index)
-  await page.evaluate(
-    ([
-      fixtureIndex,
-      fixtureAddress,
-      fixtureName,
-      fixtureLatitude,
-      fixtureLongitude,
-      fixtureCity,
-      fixtureCountry,
-      fixtureCountryCode,
-    ]) => {
-      const fixtureWindow = window as typeof window & {
-        __selectBeninfyPlace?: (
-          index: number,
-          address: string,
-          name: string,
-          latitude: number,
-          longitude: number,
-          city: string,
-          country: string,
-          countryCode: string
-        ) => void
-      }
-      fixtureWindow.__selectBeninfyPlace?.(
-        fixtureIndex as number,
-        fixtureAddress as string,
-        fixtureName as string,
-        fixtureLatitude as number,
-        fixtureLongitude as number,
-        fixtureCity as string,
-        fixtureCountry as string,
-        fixtureCountryCode as string
-      )
-    },
-    [index, address, name, latitude, longitude, city, country, countryCode] as const
-  )
+  const placeId = `fixture-${index}-${Date.now()}`
+  await page.route('**/api/mobile/v1/guest/places/autocomplete?**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        places: [{ placeId, displayName: name, formattedAddress: address }],
+        attribution: { provider: 'google_places' },
+      }),
+    })
+  })
+  await page.route(`**/api/mobile/v1/guest/places/${placeId}?**`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        place: {
+          placeId,
+          displayName: name,
+          formattedAddress: address,
+          latitude,
+          longitude,
+          city,
+          country,
+          countryCode,
+        },
+        attribution: { provider: 'google_places' },
+      }),
+    })
+  })
+
+  const input = page.locator('input[autocomplete="off"]:visible').nth(index)
+  await input.fill(name)
+  await page.getByRole('option', { name: new RegExp(name) }).click()
   await page.waitForTimeout(50)
 }
 
