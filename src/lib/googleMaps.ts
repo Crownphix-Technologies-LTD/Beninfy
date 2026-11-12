@@ -34,6 +34,7 @@ export type MapsAutocomplete = {
 }
 
 export type GoogleMapsWindow = Window & {
+  __beninfyGoogleMapsReady?: () => void
   gm_authFailure?: () => void
   google?: {
     maps?: {
@@ -154,7 +155,6 @@ export function loadGoogleMaps(apiKey: string) {
   if (googleMapsLoader) return googleMapsLoader
 
   googleMapsLoader = new Promise<void>((resolve, reject) => {
-    const callbackWindow = window as GoogleMapsWindow & Record<string, unknown>
     const finish = () => {
       if (googleMapsAuthFailed || !googleWindow.google?.maps?.Map) {
         googleMapsLoader = null
@@ -163,7 +163,7 @@ export function loadGoogleMaps(apiKey: string) {
       }
       resolve()
     }
-    callbackWindow[GOOGLE_MAPS_CALLBACK_NAME] = finish
+    googleWindow.__beninfyGoogleMapsReady = finish
 
     const existing = document.getElementById(GOOGLE_MAPS_SCRIPT_ID) as HTMLScriptElement | null
 
