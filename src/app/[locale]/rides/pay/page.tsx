@@ -15,7 +15,7 @@ import { useRoutesCatalogue } from '@/hooks/useRoutesCatalogue'
 import JourneyTracker from '@/components/booking/JourneyTracker'
 import CountUp from 'react-countup'
 import { getFleetVehicleDisplayLabel } from '@/lib/fleetDisplay'
-import { routeForCityPair } from '@/lib/webRouteSelection'
+import { isRouteEndpointCompatible, routeForSelection } from '@/lib/webRouteSelection'
 import type { VehicleId, RouteId } from '@/types'
 
 type PaymentProvider = 'paystack' | 'payonus'
@@ -115,8 +115,8 @@ function PaymentContent() {
   const vehicleId = (params.get('vehicle') ?? 'saloon') as VehicleId
   const routeId = params.get('routeId') ?? ''
   const fleetVehicleId = params.get('fleetVehicle') || ''
-  const from = params.get('from') ?? 'Lagos'
-  const to = params.get('to') ?? 'Cotonou'
+  const submittedFrom = params.get('from') ?? 'Lagos'
+  const submittedTo = params.get('to') ?? 'Cotonou'
   const date = params.get('date') ?? ''
   const returnDate = params.get('returnDate') ?? ''
   const tripType = params.get('tripType') === 'round-trip' ? 'round-trip' : 'one-way'
@@ -125,18 +125,6 @@ function PaymentContent() {
   const passengerPhone = params.get('phone') ?? ''
   const passportId = params.get('passportId') ?? ''
   const nationality = params.get('nationality') ?? ''
-  const pickupAddress = params.get('pickupAddress') ?? ''
-  const pickupLatitude = Number(params.get('pickupLatitude'))
-  const pickupLongitude = Number(params.get('pickupLongitude'))
-  const pickupCity = params.get('pickupCity')
-  const pickupCountry = params.get('pickupCountry')
-  const pickupCountryCode = params.get('pickupCountryCode')
-  const dropoffAddress = params.get('dropoffAddress') ?? ''
-  const dropoffLatitude = Number(params.get('dropoffLatitude'))
-  const dropoffLongitude = Number(params.get('dropoffLongitude'))
-  const destinationCity = params.get('destinationCity')
-  const destinationCountry = params.get('destinationCountry')
-  const destinationCountryCode = params.get('destinationCountryCode')
   const specialRequirements = params.get('specialRequirements') ?? ''
   const pickupAreaParam = params.get('pickupArea')
   const pickupArea = (pickupAreaParam === 'mainland' || pickupAreaParam === 'island' ? pickupAreaParam : undefined) as LagosPickupArea | undefined
@@ -150,10 +138,23 @@ function PaymentContent() {
   const vehicleCapacity = vehicle?.capacity ?? passengers
   const overCapacity = passengers > vehicleCapacity
   const { routes, loading: routesLoading, error: routesError } = useRoutesCatalogue()
-  const pairRoute = routeForCityPair(routes, from, to)
-  const matchedRoute = routeId
-    ? routes.find((route) => route.id === routeId && route.id === pairRoute?.id)
-    : pairRoute
+  const matchedRoute = routeForSelection(routes, routeId, submittedFrom, submittedTo)
+  const from = matchedRoute?.origin.city ?? submittedFrom
+  const to = matchedRoute?.destination.city ?? submittedTo
+  const pickupCompatible = !matchedRoute || isRouteEndpointCompatible(submittedFrom, from)
+  const dropoffCompatible = !matchedRoute || isRouteEndpointCompatible(submittedTo, to)
+  const pickupAddress = pickupCompatible ? (params.get('pickupAddress') ?? '') : ''
+  const pickupLatitude = pickupCompatible ? Number(params.get('pickupLatitude')) : Number.NaN
+  const pickupLongitude = pickupCompatible ? Number(params.get('pickupLongitude')) : Number.NaN
+  const pickupCity = pickupCompatible ? params.get('pickupCity') : null
+  const pickupCountry = pickupCompatible ? params.get('pickupCountry') : null
+  const pickupCountryCode = pickupCompatible ? params.get('pickupCountryCode') : null
+  const dropoffAddress = dropoffCompatible ? (params.get('dropoffAddress') ?? '') : ''
+  const dropoffLatitude = dropoffCompatible ? Number(params.get('dropoffLatitude')) : Number.NaN
+  const dropoffLongitude = dropoffCompatible ? Number(params.get('dropoffLongitude')) : Number.NaN
+  const destinationCity = dropoffCompatible ? params.get('destinationCity') : null
+  const destinationCountry = dropoffCompatible ? params.get('destinationCountry') : null
+  const destinationCountryCode = dropoffCompatible ? params.get('destinationCountryCode') : null
   const pricingRouteId = matchedRoute?.pricingRouteId
   const { overrides } = useRoutePriceOverrides(pricingRouteId)
   const dropoffFare = matchedRoute
@@ -220,7 +221,7 @@ function PaymentContent() {
       if (overCapacity) {
         throw new Error(`${vehicleDisplayName ?? 'This vehicle'} can only carry ${vehicleCapacity} passengers`)
       }
-      if (routesLoading || routesError || !matchedRoute || (routeId && matchedRoute.id !== routeId)) {
+      if (routesLoading || routesError || !matchedRoute) {
         throw new Error('The selected route is no longer available. Return to Rides and review it again.')
       }
       const bookingRes = await fetch('/api/bookings', {

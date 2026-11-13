@@ -1,6 +1,6 @@
 'use client'
 
-import { Suspense, useRef, useState } from 'react'
+import { Suspense, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useLocale, useTranslations } from 'next-intl'
@@ -17,7 +17,7 @@ import JourneyTracker from '@/components/booking/JourneyTracker'
 import RouteMapSVG from '@/components/shared/RouteMapSVG'
 import CountUp from 'react-countup'
 import { getFleetVehicleDisplayLabel } from '@/lib/fleetDisplay'
-import { routeForCityPair } from '@/lib/webRouteSelection'
+import { isRouteEndpointCompatible, routeForSelection } from '@/lib/webRouteSelection'
 import {
   getPlaceCoordinates,
   getPlaceLocation,
@@ -127,8 +127,8 @@ function PassengerDetailsContent() {
   const vehicleId = (params.get('vehicle') ?? 'saloon') as VehicleId
   const routeId = params.get('routeId') ?? ''
   const fleetVehicleId = params.get('fleetVehicle') || ''
-  const from = params.get('from') ?? 'Lagos'
-  const to = params.get('to') ?? 'Cotonou'
+  const submittedFrom = params.get('from') ?? 'Lagos'
+  const submittedTo = params.get('to') ?? 'Cotonou'
   const date = params.get('date') ?? ''
   const returnDate = params.get('returnDate') ?? ''
   const tripType = params.get('tripType') === 'round-trip' ? 'round-trip' : 'one-way'
@@ -140,10 +140,9 @@ function PassengerDetailsContent() {
   const vehicleDisplayName = fleetVehicle ? getFleetVehicleDisplayLabel(fleetVehicle.label) : vehicle?.name
   const vehicleCapacity = vehicle?.capacity ?? Math.max(initialPassengerCount, 1)
   const { routes, loading: routesLoading, error: routesError } = useRoutesCatalogue()
-  const pairRoute = routeForCityPair(routes, from, to)
-  const matchedRoute = routeId
-    ? routes.find((route) => route.id === routeId && route.id === pairRoute?.id)
-    : pairRoute
+  const matchedRoute = routeForSelection(routes, routeId, submittedFrom, submittedTo)
+  const from = matchedRoute?.origin.city ?? submittedFrom
+  const to = matchedRoute?.destination.city ?? submittedTo
   const pricingRouteId = matchedRoute?.pricingRouteId
   const routeReady = !routesLoading && !routesError && Boolean(matchedRoute)
 
@@ -183,6 +182,36 @@ function PassengerDetailsContent() {
     countryCode: params.get('destinationCountryCode'),
   })
   const [pickupAreaError, setPickupAreaError] = useState(false)
+
+  useEffect(() => {
+    if (!matchedRoute) return
+    const pickupCompatible = isRouteEndpointCompatible(submittedFrom, matchedRoute.origin.city)
+    const dropoffCompatible = isRouteEndpointCompatible(submittedTo, matchedRoute.destination.city)
+    if (pickupCompatible && dropoffCompatible) return
+
+    const timeout = window.setTimeout(() => {
+      setForm((current) => ({
+        ...current,
+        ...(pickupCompatible ? {} : { pickupAddress: '' }),
+        ...(dropoffCompatible ? {} : { dropoffAddress: '' }),
+      }))
+      if (!pickupCompatible) {
+        setPickupCoordinates(null)
+        pickupLocation.current = { city: null, country: null, countryCode: null }
+        setPickupArea('')
+      }
+      if (!dropoffCompatible) {
+        setDropoffCoordinates(null)
+        dropoffLocation.current = { city: null, country: null, countryCode: null }
+      }
+      setErrors((current) => ({
+        ...current,
+        ...(pickupCompatible ? {} : { pickupAddress: undefined }),
+        ...(dropoffCompatible ? {} : { dropoffAddress: undefined }),
+      }))
+    }, 0)
+    return () => window.clearTimeout(timeout)
+  }, [matchedRoute, submittedFrom, submittedTo])
 
   const needsPickupArea = matchedRoute
     ? requiresLagosPickupArea(pricingRouteId as RouteId, vehicleId, vehicle?.name)

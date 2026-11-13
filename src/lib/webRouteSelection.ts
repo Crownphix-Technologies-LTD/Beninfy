@@ -48,3 +48,19 @@ export function routeForCityPair(routes: WebRouteDto[], origin: string, destinat
       normalizedCity(route.destination.city) === normalizedDestination
   )
 }
+
+export function routeForSelection(
+  routes: WebRouteDto[],
+  routeId: string,
+  origin: string,
+  destination: string
+) {
+  if (routeId) {
+    return routes.find((route) => route.available && route.id === routeId)
+  }
+  return routeForCityPair(routes, origin, destination)
+}
+
+export function isRouteEndpointCompatible(submittedCity: string, routeCity: string) {
+  return normalizedCity(submittedCity) === normalizedCity(routeCity)
+}
