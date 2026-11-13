@@ -4,27 +4,48 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useLocale, useTranslations } from 'next-intl'
 import { useVehicles } from '@/hooks/useVehicles'
-import { useRoutes } from '@/hooks/useRoutes'
+import { useRoutesCatalogue } from '@/hooks/useRoutesCatalogue'
+import {
+  routeDestinations,
+  routeForCityPair,
+  routeForOriginChange,
+  routeOrigins,
+} from '@/lib/webRouteSelection'
 
 export default function BookingWidget() {
   const locale = useLocale()
   const t = useTranslations('booking')
   const router = useRouter()
   const { vehicles } = useVehicles()
-  const { locations } = useRoutes()
+  const { routes, loading: routesLoading } = useRoutesCatalogue()
 
-  const [from, setFrom] = useState('')
-  const [to, setTo] = useState('')
+  const [selectedRouteId, setSelectedRouteId] = useState('')
   const [date, setDate] = useState('')
   const [returnDate, setReturnDate] = useState('')
   const [vehicle, setVehicle] = useState('saloon')
   const [tripType, setTripType] = useState<'one-way' | 'round-trip'>('one-way')
 
   const today = new Date().toISOString().split('T')[0]
+  const selectedRoute =
+    routes.find((route) => route.available && route.id === selectedRouteId) ??
+    routes.find((route) => route.available && route.id === 'lagos-cotonou') ??
+    routes.find((route) => route.available)
+  const from = selectedRoute?.origin.city ?? ''
+  const to = selectedRoute?.destination.city ?? ''
+  const origins = routeOrigins(routes)
+  const destinations = routeDestinations(routes, from)
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault()
-    const params = new URLSearchParams({ from, to, date, vehicle, tripType })
+    if (!selectedRoute) return
+    const params = new URLSearchParams({
+      routeId: selectedRoute.id,
+      from: selectedRoute.origin.city,
+      to: selectedRoute.destination.city,
+      date,
+      vehicle,
+      tripType,
+    })
     if (tripType === 'round-trip') params.set('returnDate', returnDate)
     router.push(`/${locale}/rides?${params.toString()}`)
   }
@@ -58,16 +79,22 @@ export default function BookingWidget() {
                 <span className="material-symbols-outlined text-primary text-[20px]">location_on</span>
                 <select
                   value={from}
-                  onChange={(e) => setFrom(e.target.value)}
+                  onChange={(e) => {
+                    const nextRoute = routeForOriginChange(routes, selectedRoute, e.target.value)
+                    if (nextRoute) setSelectedRouteId(nextRoute.id)
+                  }}
                   className="bg-transparent border-none p-0 focus:ring-0 w-full text-body-md outline-none"
                   required
                 >
                   <option value="">{t('selectCity')}</option>
-                  {locations.map((c) => (
-                    <option key={`${c.city}:${c.country}`} value={c.city}>
-                      {c.city}, {c.country}
-                    </option>
-                  ))}
+                  {origins.map((city) => {
+                    const endpoint = routes.find((route) => route.origin.city === city)?.origin
+                    return (
+                      <option key={city} value={city}>
+                        {city}{endpoint?.country ? `, ${endpoint.country}` : ''}
+                      </option>
+                    )
+                  })}
                 </select>
               </div>
             </div>
@@ -79,16 +106,22 @@ export default function BookingWidget() {
                 <span className="material-symbols-outlined text-primary text-[20px]">near_me</span>
                 <select
                   value={to}
-                  onChange={(e) => setTo(e.target.value)}
+                  onChange={(e) => {
+                    const nextRoute = routeForCityPair(routes, from, e.target.value)
+                    if (nextRoute) setSelectedRouteId(nextRoute.id)
+                  }}
                   className="bg-transparent border-none p-0 focus:ring-0 w-full text-body-md outline-none"
                   required
                 >
                   <option value="">{t('selectCity')}</option>
-                  {locations.map((c) => (
-                    <option key={`${c.city}:${c.country}`} value={c.city}>
-                      {c.city}, {c.country}
-                    </option>
-                  ))}
+                  {destinations.map((city) => {
+                    const endpoint = routeForCityPair(routes, from, city)?.destination
+                    return (
+                      <option key={city} value={city}>
+                        {city}{endpoint?.country ? `, ${endpoint.country}` : ''}
+                      </option>
+                    )
+                  })}
                 </select>
               </div>
             </div>
@@ -167,7 +200,8 @@ export default function BookingWidget() {
             </div>
             <button
               type="submit"
-              className="w-full md:w-auto bg-primary text-on-primary px-12 py-4 rounded-xl text-headline-sm shadow-lg hover:shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all duration-150"
+              disabled={routesLoading || !selectedRoute}
+              className="w-full md:w-auto bg-primary text-on-primary px-12 py-4 rounded-xl text-headline-sm shadow-lg hover:shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all duration-150 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:scale-100"
             >
               {t('search')}
             </button>

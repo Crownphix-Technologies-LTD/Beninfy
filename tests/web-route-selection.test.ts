@@ -5,6 +5,7 @@ import {
   isRouteEndpointCompatible,
   routeDestinations,
   routeForCityPair,
+  routeForOriginChange,
   routeForSelection,
   routeOrigins,
   type WebRouteDto,
@@ -75,6 +76,33 @@ test('normal and reverse selections remain stable through repeated swaps', () =>
     ['Lagos', 'Cotonou', 'Cotonou', 'Lagos']
   )
   assert.equal(forward?.pricingRouteId, reverse?.pricingRouteId)
+})
+
+test('homepage origin changes atomically select the matching directional route', () => {
+  const forward = routeForCityPair(routes, 'Lagos', 'Cotonou')
+  const reverse = routeForOriginChange(routes, forward, 'Cotonou')
+  const forwardAgain = routeForOriginChange(routes, reverse, 'Lagos')
+
+  assert.deepEqual(
+    [reverse?.id, reverse?.origin.city, reverse?.destination.city],
+    ['lagos-cotonou__reverse', 'Cotonou', 'Lagos']
+  )
+  assert.deepEqual(
+    [forwardAgain?.id, forwardAgain?.origin.city, forwardAgain?.destination.city],
+    ['lagos-cotonou', 'Lagos', 'Cotonou']
+  )
+  assert.equal(forwardAgain?.pricingRouteId, reverse?.pricingRouteId)
+})
+
+test('homepage booking widget derives both cities and navigation from one route id', () => {
+  const homepageWidget = fs.readFileSync('src/components/booking/BookingWidget.tsx', 'utf8')
+
+  assert.match(homepageWidget, /const \[selectedRouteId, setSelectedRouteId\] = useState\(''\)/)
+  assert.doesNotMatch(homepageWidget, /const \[from, setFrom\]/)
+  assert.doesNotMatch(homepageWidget, /const \[to, setTo\]/)
+  assert.match(homepageWidget, /routeId: selectedRoute\.id/)
+  assert.match(homepageWidget, /from: selectedRoute\.origin\.city/)
+  assert.match(homepageWidget, /to: selectedRoute\.destination\.city/)
 })
 
 test('web booking preserves directional identity and rejects a stale direction', () => {

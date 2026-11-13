@@ -49,6 +49,26 @@ export function routeForCityPair(routes: WebRouteDto[], origin: string, destinat
   )
 }
 
+export function routeForOriginChange(
+  routes: WebRouteDto[],
+  currentRoute: WebRouteDto | undefined,
+  origin: string
+) {
+  if (currentRoute) {
+    const reversedCurrentRoute = routeForCityPair(
+      routes,
+      origin,
+      currentRoute.origin.city
+    )
+    if (reversedCurrentRoute) return reversedCurrentRoute
+  }
+
+  const normalizedOrigin = normalizedCity(origin)
+  return routes.find(
+    (route) => route.available && normalizedCity(route.origin.city) === normalizedOrigin
+  )
+}
+
 export function routeForSelection(
   routes: WebRouteDto[],
   routeId: string,
