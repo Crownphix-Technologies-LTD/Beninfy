@@ -10,6 +10,10 @@ export type MobileErrorCode =
   | 'GOOGLE_AUTH_UNAVAILABLE'
   | 'GOOGLE_AUTH_INVALID'
   | 'GOOGLE_LINK_REQUIRED'
+  | 'GOOGLE_LINK_CHALLENGE_INVALID'
+  | 'GOOGLE_LINK_CHALLENGE_EXPIRED'
+  | 'GOOGLE_LINK_PROOF_INVALID'
+  | 'GOOGLE_LINK_ATTEMPTS_EXCEEDED'
   | 'GOOGLE_ACCOUNT_CONFLICT'
   | 'DRIVER_NOT_LINKED'
   | 'DRIVER_INACTIVE'
@@ -188,6 +192,14 @@ export function mobileErrorFromCode(code: MobileErrorCode, message?: string) {
           },
         }
       )
+    case 'GOOGLE_LINK_CHALLENGE_INVALID':
+      return mobileError(code, message ?? 'Google account-linking request is no longer valid', 409)
+    case 'GOOGLE_LINK_CHALLENGE_EXPIRED':
+      return mobileError(code, message ?? 'Google account-linking request has expired', 410)
+    case 'GOOGLE_LINK_PROOF_INVALID':
+      return mobileError(code, message ?? 'Account verification failed', 401)
+    case 'GOOGLE_LINK_ATTEMPTS_EXCEEDED':
+      return mobileError(code, message ?? 'Google account-linking attempt limit reached', 429)
     case 'GOOGLE_ACCOUNT_CONFLICT':
       return mobileError(code, message ?? 'Google account cannot be linked to this customer', 409)
     case 'DRIVER_NOT_LINKED':

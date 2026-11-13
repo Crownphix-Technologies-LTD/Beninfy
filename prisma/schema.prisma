@@ -44,6 +44,7 @@ model User {
   mobileSessions      MobileSession[]
   otpChallenges       OtpChallenge[]
   customerAuthOtpChallenges CustomerAuthOtpChallenge[]
+  customerIdentityLinkChallenges CustomerIdentityLinkChallenge[]
   passwordResetTokens PasswordResetToken[]
   pushDevices         PushDevice[]
   notifications       Notification[]
@@ -151,6 +152,26 @@ model CustomerAuthOtpChallenge {
   @@index([identityEmail, purpose, createdAt])
   @@index([targetNormalized, channel, purpose, createdAt])
   @@index([userId, purpose, consumedAt, invalidatedAt, expiresAt])
+  @@index([expiresAt])
+}
+
+model CustomerIdentityLinkChallenge {
+  id                String    @id @default(cuid())
+  tokenHash         String    @unique
+  userId            String
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider          String
+  providerAccountId String
+  expiresAt         DateTime
+  consumedAt        DateTime?
+  failedAttempts    Int       @default(0)
+  maxAttempts       Int       @default(5)
+  installationId    String?
+  platform          String?
+  createdAt         DateTime  @default(now())
+
+  @@index([userId, provider, consumedAt, expiresAt])
+  @@index([provider, providerAccountId, consumedAt, expiresAt])
   @@index([expiresAt])
 }
 

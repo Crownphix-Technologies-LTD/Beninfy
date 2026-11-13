@@ -41,7 +41,31 @@ export async function POST(req: Request) {
     principalType: parsed.data.principalType,
     device: parsed.data.device ?? {},
   })
-  if (!result.ok) return mobileErrorFromCode(result.code)
+  if (!result.ok) {
+    if (result.code === 'GOOGLE_LINK_REQUIRED' && 'linkingChallenge' in result) {
+      return mobileError(
+        result.code,
+        'Sign in to your existing customer account to link Google',
+        409,
+        {
+          linking: {
+            required: true,
+            method: 'authenticated_customer',
+            proof: 'current_password',
+            endpoint: '/api/mobile/v1/customer/auth-methods/google',
+            challenge: {
+              token: result.linkingChallenge.token,
+              expiresAt: result.linkingChallenge.expiresAt.toISOString(),
+              expiresIn: result.linkingChallenge.expiresIn,
+              proofMethods: ['current_password'],
+              endpoint: '/api/mobile/v1/auth/google/link',
+            },
+          },
+        }
+      )
+    }
+    return mobileErrorFromCode(result.code)
+  }
 
   const profile = toCustomerProfileDto(result.user)
   return Response.json({

@@ -28,6 +28,7 @@ Refresh token:
 | `POST /api/mobile/v1/auth/register`            | IMPLEMENTED | PUBLIC customer registration                |
 | `POST /api/mobile/v1/auth/login`               | IMPLEMENTED | PUBLIC customer or driver login             |
 | `POST /api/mobile/v1/auth/google`              | IMPLEMENTED | PUBLIC customer Google Sign-In              |
+| `POST /api/mobile/v1/auth/google/link`         | IMPLEMENTED | PUBLIC single-use Google link completion     |
 | `POST /api/mobile/v1/auth/otp/start`           | IMPLEMENTED | PUBLIC unified email/SMS OTP start          |
 | `POST /api/mobile/v1/auth/otp/resend`          | IMPLEMENTED | PUBLIC same-channel OTP rotation            |
 | `POST /api/mobile/v1/auth/otp/verify`          | IMPLEMENTED | PUBLIC OTP verification/session resolution  |
@@ -113,14 +114,67 @@ Response shape matches password login:
 Google linking rules:
 
 - Existing Google account by provider/sub signs in the linked Customer.
-- A verified Google email matching an existing Customer does not auto-link from a signed-out request. The endpoint returns `409 GOOGLE_LINK_REQUIRED` with a safe linking handoff.
-- The Customer signs in using the existing password, then calls `POST /api/mobile/v1/customer/auth-methods/google` with the Google ID token and current password.
+- A verified Google email matching an existing Customer does not auto-link from a signed-out request. The endpoint returns `409 GOOGLE_LINK_REQUIRED` with a five-minute, server-issued, single-use challenge.
+- New mobile builds complete the challenge through `POST /api/mobile/v1/auth/google/link`. The backend verifies the existing password, atomically links the already-verified Google subject, consumes the challenge, and only then issues a normal Customer session.
+- Released mobile builds remain compatible: they may sign in using the existing password and call `POST /api/mobile/v1/customer/auth-methods/google` with the Google ID token and current password.
 - Successful linking creates an `Account(provider = "google", providerAccountId = Google sub)` relation without changing the Customer ID, password, bookings, Saved Travellers, notifications, or ownership records.
 - New verified Customer email creates a Customer account.
 - Driver/Admin accounts, disabled accounts, deletion-pending accounts, and anonymized accounts are rejected.
 - Flutter must never send `userId`, Google account ownership IDs other than the provider-issued ID token, OAuth secrets, or authoritative verification state.
 
 ### Link Google to an existing Customer
+
+Challenge handoff from `POST /api/mobile/v1/auth/google`:
+
+```json
+{
+  "error": {
+    "code": "GOOGLE_LINK_REQUIRED",
+    "message": "Sign in to your existing customer account to link Google",
+    "details": {
+      "linking": {
+        "required": true,
+        "method": "authenticated_customer",
+        "proof": "current_password",
+        "endpoint": "/api/mobile/v1/customer/auth-methods/google",
+        "challenge": {
+          "token": "opaque-single-use-token",
+          "expiresAt": "2026-11-13T16:05:00.000Z",
+          "expiresIn": 300,
+          "proofMethods": ["current_password"],
+          "endpoint": "/api/mobile/v1/auth/google/link"
+        }
+      }
+    }
+  }
+}
+```
+
+The legacy fields remain present for released builds. The challenge token is a bearer secret: Flutter must hold it only in memory and must never log or persist it.
+
+```http
+POST /api/mobile/v1/auth/google/link
+Content-Type: application/json
+```
+
+```json
+{
+  "challengeToken": "opaque-single-use-token",
+  "currentPassword": "existing-customer-password",
+  "device": {
+    "deviceId": "installation-id",
+    "platform": "ios",
+    "deviceName": "iPhone",
+    "appVersion": "1.0.0"
+  }
+}
+```
+
+Success returns the standard Customer authentication envelope plus `linked`, `alreadyLinked`, and `provider`. Invalid/replayed challenges return `GOOGLE_LINK_CHALLENGE_INVALID`; expired challenges return `GOOGLE_LINK_CHALLENGE_EXPIRED`; a wrong password returns `GOOGLE_LINK_PROOF_INVALID`. Five failed proofs within 15 minutes across all Google-link challenges for the same Customer exhaust the account-wide proof budget, consume the active challenge, and return `GOOGLE_LINK_ATTEMPTS_EXCEEDED`.
+
+Challenge issuance is limited both by the Google login endpoint's IP bucket and by a server-side Customer budget of five challenges per 15 minutes. The challenge row stores only a hash of the opaque token, Customer ID, provider, verified Google subject, expiry/consumption state, bounded failed-attempt count, creation time, and optional installation metadata. It stores no Google ID token, password, email address, OAuth token, or client verification claim.
+
+### Legacy authenticated link endpoint
 
 ```http
 POST /api/mobile/v1/customer/auth-methods/google

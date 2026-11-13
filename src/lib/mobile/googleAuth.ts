@@ -1,4 +1,5 @@
 import bcrypt from 'bcryptjs'
+import { createHash, randomBytes } from 'crypto'
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { isAdminRole } from '@/lib/roles'
@@ -18,6 +19,80 @@ type GoogleTokenInfo = {
   email_verified?: string | boolean
   name?: string
   picture?: string
+}
+
+const GOOGLE_LINK_CHALLENGE_TTL_SECONDS = 5 * 60
+const GOOGLE_LINK_CHALLENGE_MAX_ATTEMPTS = 5
+const GOOGLE_LINK_ISSUANCE_WINDOW_MS = 15 * 60 * 1000
+const GOOGLE_LINK_ISSUANCE_LIMIT = 5
+const GOOGLE_LINK_PROOF_WINDOW_MS = 15 * 60 * 1000
+
+function googleLinkChallengeHash(token: string) {
+  return createHash('sha256').update(token).digest('hex')
+}
+
+function isGoogleLinkSerializationFailure(error: unknown) {
+  if (!error || typeof error !== 'object') return false
+  const candidate = error as {
+    code?: unknown
+    meta?: {
+      code?: unknown
+      driverAdapterError?: { cause?: { originalCode?: unknown } }
+    }
+  }
+  return (
+    candidate.code === 'P2034' ||
+    candidate.code === '40001' ||
+    candidate.meta?.code === '40001' ||
+    candidate.meta?.driverAdapterError?.cause?.originalCode === '40001'
+  )
+}
+
+export function googleLinkChallengePolicy() {
+  return {
+    expiresIn: GOOGLE_LINK_CHALLENGE_TTL_SECONDS,
+    maxAttempts: GOOGLE_LINK_CHALLENGE_MAX_ATTEMPTS,
+  }
+}
+
+async function issueGoogleLinkChallenge(input: {
+  userId: string
+  providerAccountId: string
+  device: MobileDeviceInput
+}) {
+  const token = randomBytes(32).toString('base64url')
+  const policy = googleLinkChallengePolicy()
+  const expiresAt = new Date(Date.now() + policy.expiresIn * 1000)
+
+  const issued = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${input.userId} FOR UPDATE`
+    const recentChallenges = await tx.customerIdentityLinkChallenge.count({
+      where: {
+        userId: input.userId,
+        provider: 'google',
+        createdAt: { gte: new Date(Date.now() - GOOGLE_LINK_ISSUANCE_WINDOW_MS) },
+      },
+    })
+    if (recentChallenges >= GOOGLE_LINK_ISSUANCE_LIMIT) return false
+
+    await tx.customerIdentityLinkChallenge.create({
+      data: {
+        tokenHash: googleLinkChallengeHash(token),
+        userId: input.userId,
+        provider: 'google',
+        providerAccountId: input.providerAccountId,
+        expiresAt,
+        maxAttempts: policy.maxAttempts,
+        installationId: input.device.deviceId?.slice(0, 120) || null,
+        platform: input.device.platform?.slice(0, 40) || null,
+      },
+    })
+    return true
+  })
+
+  return issued
+    ? { ok: true as const, token, expiresAt, expiresIn: policy.expiresIn }
+    : { ok: false as const, code: 'RATE_LIMITED' as const }
 }
 
 function configuredGoogleMobileClientIds() {
@@ -123,12 +198,19 @@ async function findOrCreateGoogleCustomer(input: {
 
       const existingUser = await tx.user.findFirst({
         where: { email: { equals: input.email, mode: 'insensitive' } },
-        include: { driver: true },
+        include: { driver: true, accounts: { where: { provider: 'google' }, select: { id: true } } },
       })
       if (existingUser) {
         const blocked = customerGoogleAccountBlock(existingUser)
         if (blocked) return { ok: false as const, code: blocked }
-        return { ok: false as const, code: 'GOOGLE_LINK_REQUIRED' as const }
+        if (!existingUser.hashedPassword || existingUser.accounts.length > 0) {
+          return { ok: false as const, code: 'GOOGLE_ACCOUNT_CONFLICT' as const }
+        }
+        return {
+          ok: false as const,
+          code: 'GOOGLE_LINK_REQUIRED' as const,
+          linkTarget: { userId: existingUser.id, providerAccountId: input.sub },
+        }
       }
 
       const user = await tx.user.create({
@@ -164,7 +246,19 @@ export async function authenticateMobileGoogle(input: {
 
   try {
     const customer = await findOrCreateGoogleCustomer(verified.profile)
-    if (!customer.ok) return customer
+    if (!customer.ok) {
+      if (customer.code !== 'GOOGLE_LINK_REQUIRED') return customer
+      const challenge = await issueGoogleLinkChallenge({
+        ...customer.linkTarget,
+        device: input.device,
+      })
+      if (!challenge.ok) return challenge
+      return {
+        ok: false as const,
+        code: customer.code,
+        linkingChallenge: challenge,
+      }
+    }
     return {
       ok: true as const,
       principalType: 'CUSTOMER' as const,
@@ -200,6 +294,171 @@ export async function authenticateMobileGoogle(input: {
       }
     }
     throw error
+  }
+}
+
+export async function completeGoogleLinkChallenge(input: {
+  challengeToken: string
+  currentPassword: string
+  device: MobileDeviceInput
+  issueTokens?: typeof issueMobileTokens
+}) {
+  const tokenHash = googleLinkChallengeHash(input.challengeToken)
+  const issueTokens = input.issueTokens ?? issueMobileTokens
+
+  const runTransaction = () => prisma.$transaction(
+    async (tx) => {
+      const locked = await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT id
+        FROM "CustomerIdentityLinkChallenge"
+        WHERE "tokenHash" = ${tokenHash}
+        FOR UPDATE
+      `
+      const challengeId = locked[0]?.id
+      if (!challengeId) {
+        return { ok: false as const, code: 'GOOGLE_LINK_CHALLENGE_INVALID' as const }
+      }
+
+      const challenge = await tx.customerIdentityLinkChallenge.findUniqueOrThrow({
+        where: { id: challengeId },
+      })
+      if (challenge.consumedAt) {
+        return { ok: false as const, code: 'GOOGLE_LINK_CHALLENGE_INVALID' as const }
+      }
+      if (challenge.expiresAt <= new Date()) {
+        await tx.customerIdentityLinkChallenge.update({
+          where: { id: challenge.id },
+          data: { consumedAt: new Date() },
+        })
+        return { ok: false as const, code: 'GOOGLE_LINK_CHALLENGE_EXPIRED' as const }
+      }
+      if (challenge.failedAttempts >= challenge.maxAttempts) {
+        await tx.customerIdentityLinkChallenge.update({
+          where: { id: challenge.id },
+          data: { consumedAt: new Date() },
+        })
+        return { ok: false as const, code: 'GOOGLE_LINK_ATTEMPTS_EXCEEDED' as const }
+      }
+
+      await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${challenge.userId} FOR UPDATE`
+      const customer = await tx.user.findUnique({
+        where: { id: challenge.userId },
+        include: { driver: true },
+      })
+      if (!customer) {
+        return { ok: false as const, code: 'GOOGLE_LINK_CHALLENGE_INVALID' as const }
+      }
+      const blocked = customerGoogleAccountBlock(customer)
+      if (blocked) return { ok: false as const, code: blocked }
+      if (!customer.hashedPassword) {
+        return { ok: false as const, code: 'ACCOUNT_REAUTH_REQUIRED' as const }
+      }
+
+      const recentProofFailures = await tx.customerIdentityLinkChallenge.aggregate({
+        where: {
+          userId: customer.id,
+          provider: challenge.provider,
+          createdAt: { gte: new Date(Date.now() - GOOGLE_LINK_PROOF_WINDOW_MS) },
+        },
+        _sum: { failedAttempts: true },
+      })
+      const customerFailedAttempts = recentProofFailures._sum.failedAttempts ?? 0
+      if (customerFailedAttempts >= challenge.maxAttempts) {
+        await tx.customerIdentityLinkChallenge.update({
+          where: { id: challenge.id },
+          data: { consumedAt: new Date() },
+        })
+        return { ok: false as const, code: 'GOOGLE_LINK_ATTEMPTS_EXCEEDED' as const }
+      }
+
+      const passwordValid = await bcrypt.compare(input.currentPassword, customer.hashedPassword)
+      if (!passwordValid) {
+        const failedAttempts = challenge.failedAttempts + 1
+        const exhausted =
+          failedAttempts >= challenge.maxAttempts ||
+          customerFailedAttempts + 1 >= challenge.maxAttempts
+        await tx.customerIdentityLinkChallenge.update({
+          where: { id: challenge.id },
+          data: {
+            failedAttempts,
+            ...(exhausted ? { consumedAt: new Date() } : {}),
+          },
+        })
+        return {
+          ok: false as const,
+          code: exhausted
+            ? ('GOOGLE_LINK_ATTEMPTS_EXCEEDED' as const)
+            : ('GOOGLE_LINK_PROOF_INVALID' as const),
+        }
+      }
+
+      const accountForIdentity = await tx.account.findUnique({
+        where: {
+          provider_providerAccountId: {
+            provider: challenge.provider,
+            providerAccountId: challenge.providerAccountId,
+          },
+        },
+      })
+      const existingGoogle = await tx.account.findFirst({
+        where: { userId: customer.id, provider: challenge.provider },
+        select: { id: true },
+      })
+      const relationship = googleLinkRelationship({
+        targetUserId: customer.id,
+        identityOwnerUserId: accountForIdentity?.userId ?? null,
+        targetHasGoogleIdentity: Boolean(existingGoogle),
+      })
+      if (relationship === 'conflict') {
+        await tx.customerIdentityLinkChallenge.update({
+          where: { id: challenge.id },
+          data: { consumedAt: new Date() },
+        })
+        return { ok: false as const, code: 'GOOGLE_ACCOUNT_CONFLICT' as const }
+      }
+      if (relationship === 'create') {
+        await tx.account.create({
+          data: {
+            userId: customer.id,
+            type: 'oauth',
+            provider: challenge.provider,
+            providerAccountId: challenge.providerAccountId,
+          },
+        })
+      }
+      await tx.customerIdentityLinkChallenge.update({
+        where: { id: challenge.id },
+        data: { consumedAt: new Date() },
+      })
+      return {
+        ok: true as const,
+        alreadyLinked: relationship === 'already_linked',
+        user: customer,
+      }
+    },
+    { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+  )
+
+  let linked: Awaited<ReturnType<typeof runTransaction>> | undefined
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      linked = await runTransaction()
+      break
+    } catch (error) {
+      if (!isGoogleLinkSerializationFailure(error) || attempt === 2) throw error
+    }
+  }
+  if (!linked) throw new Error('Google link transaction did not complete')
+
+  if (!linked.ok) return linked
+  return {
+    ...linked,
+    principalType: 'CUSTOMER' as const,
+    ...(await issueTokens({
+      user: linked.user,
+      principalType: 'CUSTOMER',
+      device: input.device,
+    })),
   }
 }
 
