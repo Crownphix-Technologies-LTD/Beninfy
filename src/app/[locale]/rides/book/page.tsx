@@ -704,6 +704,8 @@ function PassengerDetailsContent() {
                   <AddressMapPreview
                     pickup={pickupCoordinates}
                     dropoff={dropoffCoordinates}
+                    pickupAddress={form.pickupAddress}
+                    dropoffAddress={form.dropoffAddress}
                     from={from}
                     to={to}
                   />

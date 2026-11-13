@@ -89,11 +89,29 @@ export type GoogleMapsWindow = Window & {
 }
 
 export const GOOGLE_MAPS_AUTH_FAILURE_EVENT = 'beninfy:google-maps-auth-failure'
+export const GOOGLE_MAPS_DIAGNOSTIC_EVENT = 'beninfy:google-maps-diagnostic'
 export const GOOGLE_MAPS_SCRIPT_ID = 'google-maps-sdk'
 export const GOOGLE_MAPS_CALLBACK_NAME = '__beninfyGoogleMapsReady'
+export const GOOGLE_MAPS_LOAD_TIMEOUT_MS = 10000
+
+export type GoogleMapsFailureCode =
+  | 'configuration'
+  | 'authorization'
+  | 'sdk_load'
+  | 'timeout'
+  | 'initialization'
+
+export class GoogleMapsLoadError extends Error {
+  constructor(public readonly code: GoogleMapsFailureCode) {
+    super(`Google Maps loader failed: ${code}`)
+    this.name = 'GoogleMapsLoadError'
+  }
+}
 
 let googleMapsLoader: Promise<void> | null = null
 let googleMapsAuthFailed = false
+let googleMapsTerminalError: GoogleMapsLoadError | null = null
+const googleMapsAuthFailureListeners = new Set<() => void>()
 
 export function getGoogleMaps() {
   return (window as GoogleMapsWindow).google?.maps
@@ -138,31 +156,55 @@ export function googleMapsScriptUrl(apiKey: string) {
 
 function installGoogleMapsAuthFailureHandler() {
   const googleWindow = window as GoogleMapsWindow
-  if (googleWindow.gm_authFailure) return
+  const previousHandler = googleWindow.gm_authFailure
+  if (previousHandler?.name === 'beninfyGoogleMapsAuthFailure') return
 
-  googleWindow.gm_authFailure = () => {
+  googleWindow.gm_authFailure = function beninfyGoogleMapsAuthFailure() {
     googleMapsAuthFailed = true
-    googleMapsLoader = null
+    googleMapsTerminalError = new GoogleMapsLoadError('authorization')
     window.dispatchEvent(new CustomEvent(GOOGLE_MAPS_AUTH_FAILURE_EVENT))
+    googleMapsAuthFailureListeners.forEach((listener) => listener())
+    previousHandler?.()
   }
 }
 
-export function loadGoogleMaps(apiKey: string) {
+export function loadGoogleMaps(
+  apiKey: string,
+  options: { timeoutMs?: number } = {}
+) {
   const googleWindow = window as GoogleMapsWindow
   installGoogleMapsAuthFailureHandler()
-  if (googleMapsAuthFailed) return Promise.reject(new Error('Google Maps API key was rejected'))
   if (googleWindow.google?.maps?.Map) return Promise.resolve()
+  if (googleMapsAuthFailed) return Promise.reject(new GoogleMapsLoadError('authorization'))
+  if (googleMapsTerminalError) return Promise.reject(googleMapsTerminalError)
   if (googleMapsLoader) return googleMapsLoader
 
   googleMapsLoader = new Promise<void>((resolve, reject) => {
-    const finish = () => {
-      if (googleMapsAuthFailed || !googleWindow.google?.maps?.Map) {
-        googleMapsLoader = null
-        reject(new Error('Google Maps failed to initialize'))
-        return
+    let settled = false
+    const timeoutMs = options.timeoutMs ?? GOOGLE_MAPS_LOAD_TIMEOUT_MS
+    const settle = (error?: GoogleMapsLoadError) => {
+      if (settled) return
+      settled = true
+      window.clearTimeout(timeout)
+      googleMapsAuthFailureListeners.delete(handleAuthorizationFailure)
+      if (error) {
+        googleMapsTerminalError = error
+        reject(error)
+      } else {
+        resolve()
       }
-      resolve()
     }
+    const handleAuthorizationFailure = () => settle(new GoogleMapsLoadError('authorization'))
+    const finish = () => {
+      if (googleMapsAuthFailed) return settle(new GoogleMapsLoadError('authorization'))
+      if (!googleWindow.google?.maps?.Map) return
+      settle()
+    }
+    const timeout = window.setTimeout(
+      () => settle(new GoogleMapsLoadError('timeout')),
+      timeoutMs
+    )
+    googleMapsAuthFailureListeners.add(handleAuthorizationFailure)
     googleWindow.__beninfyGoogleMapsReady = finish
 
     const existing = document.getElementById(GOOGLE_MAPS_SCRIPT_ID) as HTMLScriptElement | null
@@ -175,10 +217,7 @@ export function loadGoogleMaps(apiKey: string) {
       existing.addEventListener('load', finish, { once: true })
       existing.addEventListener(
         'error',
-        () => {
-          googleMapsLoader = null
-          reject(new Error('Google Maps failed to load'))
-        },
+        () => settle(new GoogleMapsLoadError('sdk_load')),
         { once: true }
       )
       return
@@ -192,10 +231,7 @@ export function loadGoogleMaps(apiKey: string) {
     script.addEventListener('load', finish, { once: true })
     script.addEventListener(
       'error',
-      () => {
-        googleMapsLoader = null
-        reject(new Error('Google Maps failed to load'))
-      },
+      () => settle(new GoogleMapsLoadError('sdk_load')),
       { once: true }
     )
     document.head.appendChild(script)
