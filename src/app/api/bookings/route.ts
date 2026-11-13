@@ -24,6 +24,7 @@ import { refreshStalePayments } from '@/lib/paymentMaintenance'
 import { checkRateLimit, requestIp } from '@/lib/rateLimit'
 
 const createSchema = z.object({
+  routeId: z.string().trim().min(1).max(180).optional(),
   from: z.string().min(1),
   to: z.string().min(1),
   date: z.string().refine((s) => !Number.isNaN(Date.parse(s)), 'Invalid date'),
@@ -185,7 +186,19 @@ export async function POST(req: Request) {
 
   const matchedRoute = await findPublicRouteByCities(data.from, data.to)
   if (!matchedRoute) {
-    return NextResponse.json({ error: 'This route is not available for booking' }, { status: 400 })
+    return NextResponse.json(
+      { error: 'This route is not available for booking', code: 'ROUTE_NOT_FOUND' },
+      { status: 400 }
+    )
+  }
+  if (data.routeId && data.routeId !== matchedRoute.id) {
+    return NextResponse.json(
+      {
+        error: 'The selected route direction has changed. Please review the route and fare again.',
+        code: 'ROUTE_DIRECTION_MISMATCH',
+      },
+      { status: 409 }
+    )
   }
   const boundary = validateRouteLocationBoundaries({
     route: matchedRoute,

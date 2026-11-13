@@ -4,12 +4,13 @@ import { useState, Suspense } from 'react'
 import Link from 'next/link'
 import { useLocale, useTranslations } from 'next-intl'
 import { useSearchParams } from 'next/navigation'
-import { bookingCities, findRoute } from '@/data/routes'
 import { formatPriceRange, getRoutePrice } from '@/data/pricing'
 import { useVehicles } from '@/hooks/useVehicles'
 import { useFleetVehicles } from '@/hooks/useFleetVehicles'
 import { useRoutePriceOverrides } from '@/hooks/useRoutePriceOverrides'
+import { useRoutesCatalogue } from '@/hooks/useRoutesCatalogue'
 import { getFleetVehicleDisplayLabel } from '@/lib/fleetDisplay'
+import { routeDestinations, routeForCityPair, routeOrigins } from '@/lib/webRouteSelection'
 import type { VehicleId, RouteId } from '@/types'
 import CatalogImage from '@/components/shared/CatalogImage'
 
@@ -52,6 +53,7 @@ function RidesContent() {
   const t = useTranslations('ridesPage')
   const searchParams = useSearchParams()
   const { vehicles } = useVehicles()
+  const { routes, loading: routesLoading, error: routesError, retry: retryRoutes } = useRoutesCatalogue()
   const [from, setFrom] = useState(searchParams.get('from') ?? 'Lagos')
   const [to, setTo] = useState(searchParams.get('to') ?? 'Cotonou')
   const [date, setDate] = useState(searchParams.get('date') ?? '')
@@ -69,8 +71,11 @@ function RidesContent() {
 
   const today = new Date().toISOString().split('T')[0]
 
-  const matchedRoute = findRoute(from, to)
-  const { overrides } = useRoutePriceOverrides(matchedRoute?.id)
+  const matchedRoute = routeForCityPair(routes, from, to)
+  const reverseRoute = routeForCityPair(routes, to, from)
+  const origins = routeOrigins(routes)
+  const destinations = routeDestinations(routes, from)
+  const { overrides } = useRoutePriceOverrides(matchedRoute?.pricingRouteId)
   const canCheckFleetAvailability = Boolean(
     matchedRoute && date && (tripType === 'one-way' || returnDate)
   )
@@ -142,7 +147,7 @@ function RidesContent() {
   const getPriceForVehicle = (priceTargetId: VehicleId, categoryId: VehicleId, vehicleName?: string) => {
     if (!matchedRoute) return null
     const category = vehicles.find((v) => v.id === categoryId)
-    const price = getRoutePrice(matchedRoute.id as RouteId, priceTargetId, vehicleName ?? category?.name, overrides)
+    const price = getRoutePrice(matchedRoute.pricingRouteId as RouteId, priceTargetId, vehicleName ?? category?.name, overrides)
     if (!price) return null
     return formatPriceRange(price)
   }
@@ -213,15 +218,34 @@ function RidesContent() {
                     <span className="material-symbols-outlined text-primary text-[18px]">location_on</span>
                     <select
                       value={from}
-                      onChange={(e) => setFrom(e.target.value)}
+                      onChange={(e) => {
+                        const nextOrigin = e.target.value
+                        setFrom(nextOrigin)
+                        if (!routeForCityPair(routes, nextOrigin, to)) setTo('')
+                      }}
                       className="bg-transparent border-none p-0 focus:ring-0 w-full text-body-sm outline-none"
                     >
-                      {bookingCities.map((c) => (
-                        <option key={c.code} value={c.city}>{c.city}</option>
+                      <option value="">{t('chooseOrigin')}</option>
+                      {origins.map((city) => (
+                        <option key={city} value={city}>{city}</option>
                       ))}
                     </select>
                   </div>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!reverseRoute) return
+                    setFrom(reverseRoute.origin.city)
+                    setTo(reverseRoute.destination.city)
+                  }}
+                  disabled={!reverseRoute}
+                  title={reverseRoute ? t('swapRoute') : t('reverseUnavailable')}
+                  aria-label={reverseRoute ? t('swapRoute') : t('reverseUnavailable')}
+                  className="mx-auto flex h-10 w-10 items-center justify-center rounded-full border border-outline-variant bg-surface-container-lowest text-primary transition-colors hover:bg-primary-container focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <span className="material-symbols-outlined text-[20px]">swap_vert</span>
+                </button>
                 <div>
                   <label className="text-label-sm text-on-surface-variant mb-1 block">{t('labelTo')}</label>
                   <div className="flex items-center gap-2 border border-outline-variant rounded-lg p-2.5 focus-within:border-primary bg-surface-container-lowest transition-colors">
@@ -231,12 +255,16 @@ function RidesContent() {
                       onChange={(e) => setTo(e.target.value)}
                       className="bg-transparent border-none p-0 focus:ring-0 w-full text-body-sm outline-none"
                     >
-                      {bookingCities.map((c) => (
-                        <option key={c.code} value={c.city}>{c.city}</option>
+                      <option value="">{t('chooseDestination')}</option>
+                      {destinations.map((city) => (
+                        <option key={city} value={city}>{city}</option>
                       ))}
                     </select>
                   </div>
                 </div>
+                {from && to && !reverseRoute && matchedRoute && (
+                  <p className="text-xs leading-relaxed text-on-surface-variant">{t('reverseUnavailable')}</p>
+                )}
                 <div>
                   <label className="text-label-sm text-on-surface-variant mb-1 block">{t('labelDate')}</label>
                   <div className="flex items-center gap-2 border border-outline-variant rounded-lg p-2.5 focus-within:border-primary bg-surface-container-lowest transition-colors">
@@ -320,7 +348,22 @@ function RidesContent() {
 
           {/* Results */}
           <div className="lg:col-span-9 space-y-6">
-            {!matchedRoute && (
+            {routesLoading && (
+              <div className="bg-surface-container-low rounded-2xl p-8 text-center" role="status">
+                <span className="material-symbols-outlined animate-spin text-primary text-[40px]">progress_activity</span>
+                <p className="mt-3 text-on-surface-variant text-body-md">{t('loadingRoutes')}</p>
+              </div>
+            )}
+
+            {routesError && (
+              <div className="bg-surface-container-low rounded-2xl p-8 text-center" role="alert">
+                <span className="material-symbols-outlined text-error text-[48px] mb-4 block">cloud_off</span>
+                <h3 className="text-headline-sm mb-2">{t('routesUnavailable')}</h3>
+                <button type="button" onClick={retryRoutes} className="mt-3 rounded-xl bg-primary px-5 py-3 text-label-md text-white">{t('retry')}</button>
+              </div>
+            )}
+
+            {!routesLoading && !routesError && !matchedRoute && (
               <div className="bg-surface-container-low rounded-2xl p-8 text-center">
                 <span className="material-symbols-outlined text-primary text-[48px] mb-4 block">route</span>
                 <h3 className="text-headline-sm mb-2">{t('selectRoute')}</h3>
@@ -347,7 +390,7 @@ function RidesContent() {
 
             {displayVehicles.map((vehicle) => {
               const price = getPriceForVehicle(vehicle.priceTargetId, vehicle.categoryId, vehicle.pricingLabel)
-              if (matchedRoute && !price) return null
+              if (!matchedRoute || !price) return null
               const badge = VEHICLE_BADGES[vehicle.categoryId]
               const overCapacity = passengers > vehicle.capacity
 
@@ -429,7 +472,7 @@ function RidesContent() {
                         </button>
                       ) : (
                         <Link
-                          href={`/${locale}/rides/book?vehicle=${vehicle.categoryId}&fleetVehicle=${vehicle.fleetVehicleId ?? ''}&from=${from}&to=${to}&date=${date}&returnDate=${returnDate}&tripType=${tripType}&passengers=${passengers}`}
+                          href={`/${locale}/rides/book?routeId=${encodeURIComponent(matchedRoute.id)}&vehicle=${vehicle.categoryId}&fleetVehicle=${vehicle.fleetVehicleId ?? ''}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&date=${date}&returnDate=${returnDate}&tripType=${tripType}&passengers=${passengers}`}
                           className="flex-1 bg-primary text-on-primary py-3 rounded-xl text-label-md text-center hover:opacity-95 active:scale-[0.98] transition-all"
                         >
                           {t('bookNow')}

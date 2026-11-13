@@ -5,18 +5,19 @@ import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useLocale, useTranslations } from 'next-intl'
 import { motion } from 'framer-motion'
-import { findRoute } from '@/data/routes'
 import { getRouteDropoffPrice, requiresLagosPickupArea, type LagosPickupArea } from '@/data/pricing'
 import { getRouteBorderFee } from '@/data/borderFees'
 import { useVehicles } from '@/hooks/useVehicles'
 import { useFleetVehicles } from '@/hooks/useFleetVehicles'
 import { useRoutePriceOverrides } from '@/hooks/useRoutePriceOverrides'
+import { useRoutesCatalogue } from '@/hooks/useRoutesCatalogue'
 import AddressAutocomplete from '@/components/booking/AddressAutocomplete'
 import AddressMapPreview from '@/components/booking/AddressMapPreview'
 import JourneyTracker from '@/components/booking/JourneyTracker'
 import RouteMapSVG from '@/components/shared/RouteMapSVG'
 import CountUp from 'react-countup'
 import { getFleetVehicleDisplayLabel } from '@/lib/fleetDisplay'
+import { routeForCityPair } from '@/lib/webRouteSelection'
 import {
   getPlaceCoordinates,
   getPlaceLocation,
@@ -124,6 +125,7 @@ function PassengerDetailsContent() {
   const { fleetVehicles } = useFleetVehicles()
 
   const vehicleId = (params.get('vehicle') ?? 'saloon') as VehicleId
+  const routeId = params.get('routeId') ?? ''
   const fleetVehicleId = params.get('fleetVehicle') || ''
   const from = params.get('from') ?? 'Lagos'
   const to = params.get('to') ?? 'Cotonou'
@@ -137,7 +139,13 @@ function PassengerDetailsContent() {
   const fleetVehicle = fleetVehicles.find((unit) => unit.id === fleetVehicleId && unit.vehicleId === vehicleId)
   const vehicleDisplayName = fleetVehicle ? getFleetVehicleDisplayLabel(fleetVehicle.label) : vehicle?.name
   const vehicleCapacity = vehicle?.capacity ?? Math.max(initialPassengerCount, 1)
-  const matchedRoute = findRoute(from, to)
+  const { routes, loading: routesLoading, error: routesError } = useRoutesCatalogue()
+  const pairRoute = routeForCityPair(routes, from, to)
+  const matchedRoute = routeId
+    ? routes.find((route) => route.id === routeId && route.id === pairRoute?.id)
+    : pairRoute
+  const pricingRouteId = matchedRoute?.pricingRouteId
+  const routeReady = !routesLoading && !routesError && Boolean(matchedRoute)
 
   const [form, setForm] = useState({
     fullName: params.get('name') ?? '',
@@ -177,12 +185,12 @@ function PassengerDetailsContent() {
   const [pickupAreaError, setPickupAreaError] = useState(false)
 
   const needsPickupArea = matchedRoute
-    ? requiresLagosPickupArea(matchedRoute.id as RouteId, vehicleId, vehicle?.name)
+    ? requiresLagosPickupArea(pricingRouteId as RouteId, vehicleId, vehicle?.name)
     : false
-  const { overrides } = useRoutePriceOverrides(matchedRoute?.id)
+  const { overrides } = useRoutePriceOverrides(pricingRouteId)
   const dropoffFare = matchedRoute
     ? getRouteDropoffPrice(
-        matchedRoute.id as RouteId,
+        pricingRouteId as RouteId,
         (fleetVehicle?.id ?? vehicleId) as VehicleId,
         fleetVehicle?.label ?? vehicle?.name,
         pickupArea || undefined,
@@ -282,6 +290,7 @@ function PassengerDetailsContent() {
 
   const handleContinue = (e: React.FormEvent) => {
     e.preventDefault()
+    if (!routeReady) return
     if (!validate()) return
     if (tripType === 'round-trip' && !returnDate) return
     const travelerManifest = [
@@ -300,6 +309,7 @@ function PassengerDetailsContent() {
       })),
     ]
     const search = new URLSearchParams({
+      routeId: matchedRoute?.id ?? routeId,
       vehicle: vehicleId, from, to, date, returnDate, tripType, passengers: String(passengerCount),
       price: String(total),
       name: form.fullName, email: form.email, phone: form.phone,
@@ -341,7 +351,7 @@ function PassengerDetailsContent() {
 
   const legCount = tripType === 'round-trip' ? 2 : 1
   const rideFare = (dropoffFare ?? 0) * legCount
-  const borderFee = matchedRoute ? getRouteBorderFee(matchedRoute.id as RouteId, tripType) : 0
+  const borderFee = pricingRouteId ? getRouteBorderFee(pricingRouteId as RouteId, tripType) : 0
   const total = rideFare + borderFee
   const nationalityOptions = [
     t('nationalityNigerian'),
@@ -364,7 +374,7 @@ function PassengerDetailsContent() {
 
         {/* Back */}
         <Link
-          href={`/${locale}/rides`}
+          href={`/${locale}/rides?${new URLSearchParams({ from, to, date, returnDate, tripType, passengers: String(passengerCount) })}`}
           className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-primary mb-4 md:mb-6 group transition-colors"
         >
           <span className="material-symbols-outlined text-[18px] group-hover:-translate-x-0.5 transition-transform">arrow_back</span>
@@ -745,9 +755,17 @@ function PassengerDetailsContent() {
               </div>
 
               {/* Mobile submit */}
+              {!routesLoading && !routeReady && (
+                <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-600" role="alert">
+                  {locale === 'fr'
+                    ? "Impossible de confirmer cet itinéraire. Revenez aux trajets et sélectionnez-le à nouveau."
+                    : 'This route cannot be confirmed. Return to Rides and select it again.'}
+                </p>
+              )}
               <button
                 type="submit"
-                className="lg:hidden w-full py-4 rounded-xl text-sm font-semibold text-white flex items-center justify-center gap-2 hover:opacity-90 active:scale-[0.98] transition-all shadow-lg"
+                disabled={!routeReady}
+                className="lg:hidden w-full py-4 rounded-xl text-sm font-semibold text-white flex items-center justify-center gap-2 hover:opacity-90 active:scale-[0.98] transition-all shadow-lg disabled:cursor-not-allowed disabled:opacity-60"
                 style={{ background: '#3e004c' }}
               >
                 <span className="material-symbols-outlined" style={{ fontSize: 20 }}>arrow_forward</span>
@@ -841,7 +859,8 @@ function PassengerDetailsContent() {
                     {/* Desktop CTA */}
                     <button
                       type="submit"
-                      className="hidden lg:flex w-full py-4 rounded-xl text-sm font-semibold text-white items-center justify-center gap-2 hover:opacity-90 active:scale-[0.98] transition-all shadow-md"
+                      disabled={!routeReady}
+                      className="hidden lg:flex w-full py-4 rounded-xl text-sm font-semibold text-white items-center justify-center gap-2 hover:opacity-90 active:scale-[0.98] transition-all shadow-md disabled:cursor-not-allowed disabled:opacity-60"
                       style={{ background: '#3e004c' }}
                     >
                       <span className="material-symbols-outlined" style={{ fontSize: 20 }}>arrow_forward</span>

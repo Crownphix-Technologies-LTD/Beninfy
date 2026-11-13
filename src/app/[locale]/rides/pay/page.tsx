@@ -5,16 +5,17 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useLocale, useTranslations } from 'next-intl'
-import { findRoute } from '@/data/routes'
 import { getRouteDropoffPrice, type LagosPickupArea } from '@/data/pricing'
 import { getRouteBorderFee } from '@/data/borderFees'
 import { formatNGN } from '@/lib/utils'
 import { useVehicles } from '@/hooks/useVehicles'
 import { useFleetVehicles } from '@/hooks/useFleetVehicles'
 import { useRoutePriceOverrides } from '@/hooks/useRoutePriceOverrides'
+import { useRoutesCatalogue } from '@/hooks/useRoutesCatalogue'
 import JourneyTracker from '@/components/booking/JourneyTracker'
 import CountUp from 'react-countup'
 import { getFleetVehicleDisplayLabel } from '@/lib/fleetDisplay'
+import { routeForCityPair } from '@/lib/webRouteSelection'
 import type { VehicleId, RouteId } from '@/types'
 
 type PaymentProvider = 'paystack' | 'payonus'
@@ -112,6 +113,7 @@ function PaymentContent() {
   const { fleetVehicles } = useFleetVehicles()
 
   const vehicleId = (params.get('vehicle') ?? 'saloon') as VehicleId
+  const routeId = params.get('routeId') ?? ''
   const fleetVehicleId = params.get('fleetVehicle') || ''
   const from = params.get('from') ?? 'Lagos'
   const to = params.get('to') ?? 'Cotonou'
@@ -147,21 +149,27 @@ function PaymentContent() {
   const vehicleDisplayName = fleetVehicle ? getFleetVehicleDisplayLabel(fleetVehicle.label) : vehicle?.name
   const vehicleCapacity = vehicle?.capacity ?? passengers
   const overCapacity = passengers > vehicleCapacity
-  const matchedRoute = findRoute(from, to)
-  const { overrides } = useRoutePriceOverrides(matchedRoute?.id)
+  const { routes, loading: routesLoading, error: routesError } = useRoutesCatalogue()
+  const pairRoute = routeForCityPair(routes, from, to)
+  const matchedRoute = routeId
+    ? routes.find((route) => route.id === routeId && route.id === pairRoute?.id)
+    : pairRoute
+  const pricingRouteId = matchedRoute?.pricingRouteId
+  const { overrides } = useRoutePriceOverrides(pricingRouteId)
   const dropoffFare = matchedRoute
     ? getRouteDropoffPrice(
-        matchedRoute.id as RouteId,
+        pricingRouteId as RouteId,
         (fleetVehicle?.id ?? vehicleId) as VehicleId,
         fleetVehicle?.label ?? vehicle?.name,
         pickupArea,
         overrides
       )
-    : (vehicle?.basePriceNGN ?? 120000)
+    : 0
+  const routeReady = !routesLoading && !routesError && Boolean(matchedRoute)
 
   const legCount = tripType === 'round-trip' ? 2 : 1
   const rideFare = (dropoffFare ?? 0) * legCount
-  const borderFee = matchedRoute ? getRouteBorderFee(matchedRoute.id as RouteId, tripType) : 0
+  const borderFee = pricingRouteId ? getRouteBorderFee(pricingRouteId as RouteId, tripType) : 0
   const total = rideFare + borderFee
 
   const [provider, setProvider] = useState<PaymentProvider>('paystack')
@@ -212,10 +220,14 @@ function PaymentContent() {
       if (overCapacity) {
         throw new Error(`${vehicleDisplayName ?? 'This vehicle'} can only carry ${vehicleCapacity} passengers`)
       }
+      if (routesLoading || routesError || !matchedRoute || (routeId && matchedRoute.id !== routeId)) {
+        throw new Error('The selected route is no longer available. Return to Rides and review it again.')
+      }
       const bookingRes = await fetch('/api/bookings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          routeId: matchedRoute.id,
           from,
           to,
           date: date ? new Date(date).toISOString() : new Date().toISOString(),
@@ -309,6 +321,7 @@ function PaymentContent() {
                 providerRef: providerReference,
                 name: passengerName,
                 currencyCode: 'NGN',
+                routeId: matchedRoute.id,
               })
               router.push(`/${locale}/rides/confirmed?${search.toString()}`)
             } catch (err) {
@@ -332,6 +345,7 @@ function PaymentContent() {
         id: booking.id,
         ref: payData.reference,
         name: passengerName,
+        routeId: matchedRoute.id,
       })
       router.push(`/${locale}/rides/confirmed?${search.toString()}`)
     } catch (err) {
@@ -364,6 +378,7 @@ function PaymentContent() {
         {/* Back link */}
         <Link
           href={`/${locale}/rides/book?${new URLSearchParams({
+            routeId,
             vehicle: vehicleId,
             fleetVehicle: fleetVehicle?.id ?? '',
             from,
@@ -574,9 +589,21 @@ function PaymentContent() {
                     </div>
                   )}
 
+                  {!routeReady && (
+                    <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-600" role="alert">
+                      {routesLoading
+                        ? locale === 'fr'
+                          ? "Confirmation de l'itinéraire et du tarif en cours..."
+                          : 'Confirming the selected route and current fare...'
+                        : locale === 'fr'
+                          ? "Cet itinéraire ne peut plus être confirmé. Revenez aux trajets et sélectionnez-le à nouveau."
+                          : 'This route can no longer be confirmed. Return to Rides and select it again.'}
+                    </div>
+                  )}
+
                   <button
                     type="submit"
-                    disabled={processing || overCapacity}
+                    disabled={processing || overCapacity || !routeReady}
                     className="w-full py-4 rounded-xl text-sm font-semibold text-white flex items-center justify-center gap-2 hover:opacity-90 active:scale-[0.98] transition-all shadow-md disabled:opacity-60 disabled:cursor-wait"
                     style={{ background: '#3e004c' }}
                   >
